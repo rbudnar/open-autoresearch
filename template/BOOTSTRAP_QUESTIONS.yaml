@@ -1,0 +1,384 @@
+# BOOTSTRAP_QUESTIONS.yaml — the bootstrap questionnaire for an integrating agent.
+#
+# Driven by PROTOCOL.md §6 (initialization), §6.1 (cost tier), §6.3.1 (split
+# freeze), §3.1 + §3.1.1 (enforcement), §13.2.1 (metrics), §17.1.1 (behavioral
+# equivalence), §17.6 (val exposure budget), §17.7 (budgets).
+#
+# Walk these questions with the human in the order they appear. Record every
+# answer in <host>/autoresearch/bootstrap-answers.yaml using the schema in
+# `answer_template` below. Don't skip a question because it "feels optional" —
+# if it's listed here, the protocol needs it to make its guarantees.
+#
+# Questions are grouped. Within a group it's fine to ask several at once if
+# the human is technical and wants to fill them in batch. Across groups, prefer
+# one group at a time so the human can think about the topic before moving on.
+
+protocol_version: "0.4"
+
+# ---------------------------------------------------------------------------
+# Schema for the answer file the agent fills in on the host repo:
+# ---------------------------------------------------------------------------
+answer_template: |
+  # autoresearch/bootstrap-answers.yaml
+  protocol_version: "0.4"
+  bootstrapped_at: "<ISO-8601 timestamp>"
+  bootstrapped_by: "<integrating-agent name and version, e.g. claude-code-4.7>"
+  answers:
+    <question_id>: <answer>
+    ...
+
+# ---------------------------------------------------------------------------
+groups:
+
+  - group: "1. Project basics"
+    questions:
+
+      - id: host_repo_root_path
+        ask: |
+          What is the absolute path on disk to the host repo I'm integrating
+          this protocol into?
+        why: |
+          Everything else writes into <this path>/autoresearch/. Without it I
+          can't proceed.
+        maps_to: "<n/a — operational, not a config key>"
+        required: true
+        example: "/home/me/projects/my-ml-project"
+
+      - id: maturity_level_target
+        ask: |
+          What maturity level are you targeting for the first campaign?
+          Almost everyone starts at Level 1 and graduates. See
+          docs/adoption-levels.md for the trade-offs.
+          Options: 1 | 2 | 3 | 4 | 5
+        why: |
+          The protocol caps achievable labels per level (§13.3) and gates
+          §18 promotion criteria accordingly. Setting this too high produces
+          packets the verifier will reject.
+        maps_to: "config/metrics.yaml :: maturity_level"
+        required: true
+        example: 1
+        default_if_unanswered: 1
+
+  - group: "2. Cost & seeds"
+    questions:
+
+      - id: cost_tier
+        ask: |
+          Time one full baseline training+evaluation run. Which row matches?
+            micro    ≤30 min     min_seeds: 5 / 5
+            small    30 min–4 hr min_seeds: 3 / 5
+            medium   4–24 hr     min_seeds: 2 / 3   (default for solo research)
+            large    24–72 hr    min_seeds: 2 / 3 + bootstrap CI
+            xlarge   >72 hr      min_seeds: 1 / 2   (evidence_level: low)
+        why: |
+          Cost tier sets minimum seed counts for statistical reliability
+          (§6.1). Picking a smaller tier than reality means too few seeds and
+          underpowered conclusions; picking a larger tier wastes compute.
+        maps_to: "config/metrics.yaml :: cost_tier"
+        required: true
+        example: "medium"
+
+      - id: max_gpu_hours_per_candidate
+        ask: |
+          Hard cap on GPU-hours per candidate run. The verifier rejects
+          packets whose candidate exceeded this.
+        why: |
+          Prevents one runaway candidate from consuming the entire campaign
+          budget. Set to ~1.5× your typical baseline.
+        maps_to: "config/metrics.yaml :: max_gpu_hours_per_candidate"
+        required: true
+        example: 6
+
+  - group: "3. Primary metric"
+    questions:
+
+      - id: primary_metric_name
+        ask: |
+          What single metric will determine if a change is a win? Use the
+          exact name your evaluation code emits.
+        why: |
+          The protocol optimizes one primary metric, with guardrails for
+          everything else (§13.2.1). A vague answer here cascades into
+          unscoreable iterations.
+        maps_to: "config/metrics.yaml :: primary_metric.name"
+        required: true
+        example: "val_nll"
+
+      - id: primary_metric_direction
+        ask: |
+          Is your primary metric better when it goes UP or DOWN?
+          Options: maximize | minimize
+        why: |
+          Direction is the single most common bug source in metric configs.
+          §13.2.1 makes it explicit and direction-aware throughout.
+        maps_to: "config/metrics.yaml :: primary_metric.direction"
+        required: true
+        example: "minimize"
+
+      - id: primary_metric_aggregation
+        ask: |
+          How is the metric aggregated across the validation set?
+          Options: mean | sum | count | ratio
+        why: |
+          §17.1.1's tolerance check is aggregation-aware. A `sum` metric
+          with default `rtol: 1e-4` would false-positive on any val-set
+          size change; `mean` would not.
+        maps_to: "config/metrics.yaml :: primary_metric.aggregation"
+        required: true
+        example: "mean"
+
+      - id: primary_metric_eval_dtype
+        ask: |
+          What numeric dtype is the evaluator running in?
+          Options: fp32 | bf16 | fp16 | int
+        why: |
+          Determines the behavioral-equivalence tolerance band (§17.1.1).
+          fp32 gets rtol=1e-4; bf16 gets rtol=1e-2. Lying here means either
+          spurious failures or missed drift.
+        maps_to: "config/metrics.yaml :: primary_metric.eval_dtype"
+        required: true
+        example: "fp32"
+
+      - id: primary_metric_minimum_meaningful_delta
+        ask: |
+          What's the smallest improvement in this metric that would actually
+          matter to you, in the metric's native units? An improvement
+          smaller than this is below the noise floor.
+        why: |
+          §18 promotion criteria require the observed delta to exceed this
+          AND statistical significance. Without it, the loop chases noise.
+        maps_to: "config/metrics.yaml :: primary_metric.minimum_meaningful_delta"
+        required: true
+        example: 0.005
+
+  - group: "4. Guardrails"
+    questions:
+
+      - id: guardrails
+        ask: |
+          List metrics that should NOT regress meaningfully even if the
+          primary metric improves. For each, give: name, direction
+          (better-is-up or better-is-down), aggregation, eval_dtype, and
+          either max_regression_relative (e.g. 0.05 for 5%) or
+          max_absolute (in metric units). At minimum, list one — usually
+          a calibration metric, a latency metric, or a subgroup-fairness
+          metric.
+        why: |
+          Guardrails are how the protocol prevents Goodhart-style optimization
+          where the primary metric improves at the cost of something else
+          the team cares about (§13.2.1).
+        maps_to: "config/metrics.yaml :: guardrails"
+        required: true
+        example: |
+          - name: expected_calibration_error
+            direction: minimize
+            aggregation: mean
+            eval_dtype: fp32
+            max_regression_relative: 0.05
+
+      - id: secondary_metrics
+        ask: |
+          Any other metrics you want recorded for every candidate but don't
+          want to gate promotion on? (Optional. Recommended at L1+.)
+        why: |
+          Recording these in the ledger lets you spot trends you didn't
+          predict at bootstrap time, without committing to them as gates.
+        maps_to: "config/metrics.yaml :: secondary_metrics"
+        required: false
+        example: |
+          - {name: val_brier, direction: minimize, aggregation: mean, eval_dtype: fp32}
+
+  - group: "5. Budgets (§17.6, §17.7)"
+    questions:
+
+      - id: val_set_exposure_budget
+        ask: |
+          How many total queries against the validation set are allowed
+          before val-set exhaustion kicks in? Suggested defaults:
+          100 (L1) | 300 (L2-3) | 1000 (L4+). Scale with √(val_size).
+        why: |
+          Without an exposure budget, repeated evaluation on the same
+          val set leaks information and inflates measured wins. §17.6
+          requires this; the verifier checks it.
+        maps_to: "config/metrics.yaml :: val_set_exposure_budget"
+        required: true
+        example: 100
+
+      - id: llm_dollar_budget
+        ask: |
+          Total dollar budget across the campaign for LLM API calls?
+          Soft warning at 70%; hard stop at 100%.
+        why: |
+          Campaigns can quietly grow expensive. Setting this honestly is
+          how the loop knows when to stop.
+        maps_to: "config/metrics.yaml :: budgets.llm.max_dollars_total"
+        required: true
+        example: 100
+
+      - id: compute_gpu_hours_budget
+        ask: |
+          Total GPU-hours across the entire campaign (sum of all candidates,
+          ablations, seed reruns).
+        why: |
+          §17.7 budget accounting. Without it, "we ran out of compute" is
+          a postmortem instead of an early signal.
+        maps_to: "config/metrics.yaml :: budgets.compute.max_gpu_hours"
+        required: true
+        example: 200
+
+  - group: "6. Enforcement (§3.1.1)"
+    questions:
+
+      - id: enforcement_mechanism
+        ask: |
+          How will the boundary "the agent must not modify the evaluator"
+          be enforced out-of-band? Options:
+            ci_enforced   — main-branch protection + CODEOWNERS, agent has
+                            no admin token. Highest trust if you have CI.
+            pre_receive   — remote git pre-receive hook the agent has no
+                            shell on. Highest trust if you control the remote.
+            oop_verifier  — a Makefile/script run by a human or CI runner.
+                            Medium trust.
+            container_ro  — read-only bind-mount of evaluator/ in a container
+                            the agent can't rebuild. High trust if the build
+                            pipeline is itself protected.
+            none          — honor system. Acceptable for solo Level-1
+                            exploration, but caps results at
+                            low_evidence_promoted + enforcement: in-band-only
+                            + not_deployable: true.
+        why: |
+          §3.1.1 mandates this be out-of-band. Without a real mechanism
+          here, every other anti-cheating control in §17.1 is advisory.
+          Choosing `none` honestly is far better than claiming a mechanism
+          you haven't actually wired up.
+        maps_to: "config/enforcement.yaml :: mechanism"
+        required: true
+        example: "ci_enforced"
+
+      - id: enforcement_params
+        ask: |
+          Fill in the parameters for the mechanism you chose. If
+          ci_enforced: confirm base_branch (default `main`) and the
+          reviewer_identity that approves protected-path changes (MUST NOT
+          be the agent). If pre_receive: remote_host + hook_script_path. If
+          oop_verifier: verifier_script + verifier_runner. If container_ro:
+          container_image_digest. If none: skip — the trust_level is forced
+          to `advisory`.
+        why: |
+          Mechanism parameters are how the verifier knows what to check
+          against. Generic answers like "we have CI" aren't enough.
+        maps_to: "config/enforcement.yaml :: <mechanism>.*"
+        required: true
+        example: |
+          ci_enforced:
+            base_branch: main
+            branch_protection: required
+            codeowners_required: true
+            reviewer_identity: human
+
+      - id: trust_level
+        ask: |
+          Declared trust level: high | medium | advisory.
+          Must be `advisory` if mechanism is `none`.
+        why: |
+          The verifier (§10.5) uses this to compute the packet's
+          `enforcement` field and `not_deployable` flag.
+        maps_to: "config/enforcement.yaml :: trust_level"
+        required: true
+        example: "high"
+
+  - group: "7. Paths"
+    questions:
+
+      - id: host_specific_editable_paths
+        ask: |
+          The template includes a default editable-paths list (models/**,
+          training/**, losses/**, features/**, configs/experiments/**, ...).
+          Are there host-specific paths the agent ALSO needs to edit during
+          a campaign that aren't in that default? List them as glob patterns.
+        why: |
+          Anything not editable and not protected is implicitly editable, so
+          this is a "make sure" question more than a "must enumerate"
+          question. But missing a critical path here means the agent will
+          hit "permission denied" mid-iteration.
+        maps_to: "config/editable_paths.yaml :: editable_paths (additions)"
+        required: false
+        example: |
+          - src/data_augmentation/**
+          - configs/optimizers/**
+
+      - id: host_specific_protected_paths
+        ask: |
+          The template's default protected-paths list covers data/splits,
+          evaluation/, metrics/, evaluator scripts, signed manifests, and
+          the campaign's own config. Are there host-specific paths the
+          agent must NOT edit that aren't already covered? List them.
+        why: |
+          The protected_paths list is what enforcement.yaml's mechanism
+          actually enforces. A missing entry here is a real cheating vector.
+        maps_to: "config/protected_paths.yaml :: protected_paths (additions)"
+        required: false
+        example: |
+          - configs/production/**
+          - serving/**
+
+  - group: "8. Data splits (§6.3.1)"
+    questions:
+
+      - id: train_split_path
+        ask: "Path (relative to host repo root) to the training-set file(s)."
+        why: |
+          Each split file gets a SHA-256 hash pinned in
+          data/splits/MANIFEST.json. If the file changes, the verifier
+          rejects all packets until MANIFEST is regenerated under
+          out-of-band approval.
+        maps_to: "data/splits/MANIFEST.json :: train (computed)"
+        required: true
+        example: "data/splits/train.parquet"
+
+      - id: val_split_path
+        ask: "Path to the validation-set file(s)."
+        why: |
+          Same as train; also drives val_set_exposure_budget accounting.
+        maps_to: "data/splits/MANIFEST.json :: val (computed)"
+        required: true
+        example: "data/splits/val.parquet"
+
+      - id: test_split_path
+        ask: |
+          Path to the test-set file(s). MUST be different from val and
+          ideally locked behind a tag the loop-driving agent can't read.
+        why: |
+          §18 promotion requires a single locked test-set evaluation at
+          the end. If the agent can read it during the campaign, the test
+          result is no longer locked.
+        maps_to: "data/splits/MANIFEST.json :: test (computed)"
+        required: true
+        example: "data/splits/test.parquet"
+
+  - group: "9. Behavioral-equivalence fixtures (§17.1.1)"
+    questions:
+
+      - id: be_fixtures
+        ask: |
+          Give me 1–5 representative inputs to the host's evaluation
+          function (or to the model the evaluator wraps). The first run
+          will record golden outputs; future runs compare. One simple input
+          is enough to start; the human can add more after the first
+          campaign.
+
+          For each fixture, provide:
+            - A short id (e.g. "fx-001")
+            - The input payload, exactly as the evaluator expects it
+            - A one-line description of what makes this input representative
+        why: |
+          Without behavioral-equivalence fixtures, silent evaluator drift
+          (numerical, library-version, hardware) goes undetected and
+          contaminates all measured results. One fixture is enough to
+          start; the protocol just needs the loop installed.
+        maps_to: "<host>/autoresearch/state/be_fixtures.json"
+        required: true
+        example: |
+          - id: fx-001
+            description: "median-length sample from val set"
+            input: { ... }

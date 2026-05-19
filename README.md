@@ -2,6 +2,8 @@
 
 A disciplined protocol for autonomous ML model improvement, plus the scaffolding to drop it into your project.
 
+> **AI agent reading this?** Start with [`AGENTS.md`](./AGENTS.md). It speaks to you directly and tells you exactly what to do, in what order, with which questions to ask the human.
+
 **Centerpiece:** [`PROTOCOL.md`](./PROTOCOL.md) — AutoResearch++ v0.4, a 1700-line specification for autonomous research loops with honest separation between in-band-advisory and out-of-band-enforced controls.
 
 **Protocol version shipped:** `0.4` (final pre-1.0 candidate).
