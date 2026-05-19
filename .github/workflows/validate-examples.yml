@@ -12,6 +12,7 @@ on:
       - 'PROTOCOL.md'
       - 'template/scripts/**'
       - 'examples/**'
+      - '.github/workflows/validate-examples.yml'
 
 permissions:
   contents: read
