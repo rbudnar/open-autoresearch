@@ -15,12 +15,13 @@
 
 protocol_version: "0.4"
 
-# Known gap (tracked for v1.1): there is no automated drift check between
-# this questionnaire's `maps_to` fields and the actual key paths in
-# `template/config/*.yaml.example`. If you change a key in one of those
-# `.example` files, update the matching question here. A small CI script
-# that parses both and asserts coverage is planned — see follow-up issue
-# tagged `drift-check` in the open-autoresearch repo.
+# Drift between this questionnaire's `maps_to` fields and the actual key paths
+# in `template/config/*.yaml.example` is caught by
+# `template/scripts/check_questionnaire_drift.py`, run in CI on every PR that
+# touches either side. The parser recognizes config keys after `::` (inline)
+# or `→` at the start of a line (list-of-keys form). If you add a question
+# whose `maps_to` doesn't fit either pattern, the checker will report a
+# REVERSE drift error pointing at the unclaimed `<FILL_ME>`.
 
 # ---------------------------------------------------------------------------
 # Schema for the answer file the agent fills in on the host repo:
@@ -341,21 +342,23 @@ groups:
           file is always complete and re-bootstraps don't ambiguously infer
           "was this skipped or was it none?"
         maps_to: |
-          config/enforcement.yaml (write only the block matching the chosen
+          config/enforcement.yaml — write only the block matching the chosen
           mechanism; delete the other mechanism-named blocks from the
-          materialized yaml so unused fields don't read as `<FILL_ME>`):
-            ci_enforced  → ci_enforced.base_branch (default "main")
-                           ci_enforced.branch_protection ("required")
-                           ci_enforced.codeowners_required (true)
-                           ci_enforced.reviewer_identity (non-agent human/group)
-            pre_receive  → pre_receive.remote_host
-                           pre_receive.hook_script_path
-            oop_verifier → oop_verifier.verifier_script
-                           oop_verifier.verifier_runner
-            container_ro → container_ro.container_image_digest (sha256:...)
-                           container_ro.evaluator_mount_point
-                                          (default "/workspace/evaluator")
-            none         → no block written; trust_level forced to "advisory"
+          materialized yaml so unused fields don't read as <FILL_ME>.
+          Per-mechanism keys to fill (one per arrow so the drift checker
+          can parse each):
+            → ci_enforced.base_branch          (default "main")
+            → ci_enforced.branch_protection    ("required")
+            → ci_enforced.codeowners_required  (true)
+            → ci_enforced.reviewer_identity    (non-agent human/group)
+            → pre_receive.remote_host
+            → pre_receive.hook_script_path
+            → oop_verifier.verifier_script
+            → oop_verifier.verifier_runner
+            → container_ro.container_image_digest      (sha256:...)
+            → container_ro.evaluator_mount_point       (default "/workspace/evaluator")
+          For mechanism `none`: no enforcement.yaml block is written and the
+          trust_level question below is the only key to fill.
         required: true
         example: |
           ci_enforced:
