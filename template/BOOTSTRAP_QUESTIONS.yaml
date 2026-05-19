@@ -15,6 +15,13 @@
 
 protocol_version: "0.4"
 
+# Known gap (tracked for v1.1): there is no automated drift check between
+# this questionnaire's `maps_to` fields and the actual key paths in
+# `template/config/*.yaml.example`. If you change a key in one of those
+# `.example` files, update the matching question here. A small CI script
+# that parses both and asserts coverage is planned — see follow-up issue
+# tagged `drift-check` in the open-autoresearch repo.
+
 # ---------------------------------------------------------------------------
 # Schema for the answer file the agent fills in on the host repo:
 # ---------------------------------------------------------------------------
@@ -57,7 +64,6 @@ groups:
         maps_to: "config/metrics.yaml :: maturity_level"
         required: true
         example: 1
-        default_if_unanswered: 1
 
   - group: "2. Cost & seeds"
     questions:
@@ -65,11 +71,18 @@ groups:
       - id: cost_tier
         ask: |
           Time one full baseline training+evaluation run. Which row matches?
+          Seed counts are written as `candidate / promotion`.
             micro    ≤30 min     min_seeds: 5 / 5
             small    30 min–4 hr min_seeds: 3 / 5
             medium   4–24 hr     min_seeds: 2 / 3   (default for solo research)
-            large    24–72 hr    min_seeds: 2 / 3 + bootstrap CI
-            xlarge   >72 hr      min_seeds: 1 / 2   (evidence_level: low)
+            large    24–72 hr    min_seeds: 2 / 3   + bootstrap CI on val
+            xlarge   >72 hr      min_seeds: 1 / 2   + bootstrap CI on val
+                                                    + paired-examples comparison
+                                                    + written cost-justification
+                                                    override approved by the
+                                                    `reviewer_identity` from
+                                                    enforcement.yaml
+                                                    (evidence_level capped at low)
         why: |
           Cost tier sets minimum seed counts for statistical reliability
           (§6.1). Picking a smaller tier than reality means too few seeds and
@@ -179,14 +192,22 @@ groups:
       - id: secondary_metrics
         ask: |
           Any other metrics you want recorded for every candidate but don't
-          want to gate promotion on? (Optional. Recommended at L1+.)
+          want to gate promotion on? Recommended at L1+. If the human has
+          none, that's a real answer ("none") — the agent must then
+          materialize `secondary_metrics: []` in metrics.yaml. Don't leave
+          the `<FILL_ME>` line.
         why: |
           Recording these in the ledger lets you spot trends you didn't
           predict at bootstrap time, without committing to them as gates.
-        maps_to: "config/metrics.yaml :: secondary_metrics"
-        required: false
+          The "no `<FILL_ME>` left" success criterion in AGENTS.md applies
+          here too — an empty list IS the answer for "no secondary metrics."
+        maps_to: "config/metrics.yaml :: secondary_metrics (write as [] if the human says none)"
+        required: true
         example: |
+          # If the human lists secondaries:
           - {name: val_brier, direction: minimize, aggregation: mean, eval_dtype: fp32}
+          # If the human has none:
+          []
 
   - group: "5. Budgets (§17.6, §17.7)"
     questions:
@@ -280,10 +301,15 @@ groups:
             container_ro  — read-only bind-mount of evaluator/ in a container
                             the agent can't rebuild. High trust if the build
                             pipeline is itself protected.
-            none          — honor system. Acceptable for solo Level-1
-                            exploration, but caps results at
-                            low_evidence_promoted + enforcement: in-band-only
-                            + not_deployable: true.
+            none          — honor system. Acceptable for solo Level-1 or
+                            Level-2 exploration, but caps any resulting label
+                            at the level-conditional non-deployable form
+                            (`level1_branch_winner` / `level2_branch_winner`)
+                            with `enforcement: in-band-only` +
+                            `not_deployable: true`. Level-3+ campaigns that
+                            attempt promotion under `none` get capped at
+                            `low_evidence_promoted` (also in-band-only +
+                            not-deployable).
         why: |
           §3.1.1 mandates this be out-of-band. Without a real mechanism
           here, every other anti-cheating control in §17.1 is advisory.
@@ -314,7 +340,22 @@ groups:
           Recording `{}` for `none` is deliberately explicit so the answer
           file is always complete and re-bootstraps don't ambiguously infer
           "was this skipped or was it none?"
-        maps_to: "config/enforcement.yaml :: <mechanism>.*"
+        maps_to: |
+          config/enforcement.yaml (write only the block matching the chosen
+          mechanism; delete the other mechanism-named blocks from the
+          materialized yaml so unused fields don't read as `<FILL_ME>`):
+            ci_enforced  → ci_enforced.base_branch (default "main")
+                           ci_enforced.branch_protection ("required")
+                           ci_enforced.codeowners_required (true)
+                           ci_enforced.reviewer_identity (non-agent human/group)
+            pre_receive  → pre_receive.remote_host
+                           pre_receive.hook_script_path
+            oop_verifier → oop_verifier.verifier_script
+                           oop_verifier.verifier_runner
+            container_ro → container_ro.container_image_digest (sha256:...)
+                           container_ro.evaluator_mount_point
+                                          (default "/workspace/evaluator")
+            none         → no block written; trust_level forced to "advisory"
         required: true
         example: |
           ci_enforced:
@@ -379,7 +420,7 @@ groups:
           data/splits/MANIFEST.json. If the file changes, the verifier
           rejects all packets until MANIFEST is regenerated under
           out-of-band approval.
-        maps_to: "data/splits/MANIFEST.json :: train (computed)"
+        maps_to: "data/splits/MANIFEST.json :: train.path"
         required: true
         example: "data/splits/train.parquet"
 
@@ -387,7 +428,7 @@ groups:
         ask: "Path to the validation-set file(s)."
         why: |
           Same as train; also drives val_set_exposure_budget accounting.
-        maps_to: "data/splits/MANIFEST.json :: val (computed)"
+        maps_to: "data/splits/MANIFEST.json :: val.path"
         required: true
         example: "data/splits/val.parquet"
 
@@ -399,19 +440,65 @@ groups:
           §18 promotion requires a single locked test-set evaluation at
           the end. If the agent can read it during the campaign, the test
           result is no longer locked.
-        maps_to: "data/splits/MANIFEST.json :: test (computed)"
+        maps_to: "data/splits/MANIFEST.json :: test.path"
         required: true
         example: "data/splits/test.parquet"
+
+      - id: dataset_snapshot_id
+        ask: |
+          A stable identifier for the dataset *version* (not the files —
+          the dataset). Examples: a tag from your data-platform's
+          versioning system, a date-stamped name, a DVC/LakeFS commit
+          hash. If you don't have one, "initial-<YYYYMMDD>" is a fine
+          starting point — but commit to it as the canonical ID for this
+          campaign.
+        why: |
+          PROTOCOL.md §6.3.1 requires a dataset snapshot ID in the
+          MANIFEST so that "we re-ran the same dataset" is verifiable
+          beyond per-file hashing (hashes alone don't tell you which
+          dataset *generation* the files came from).
+        maps_to: "data/splits/MANIFEST.json :: snapshot_id"
+        required: true
+        example: "initial-20260518"
+
+      - id: val_set_version
+        ask: |
+          Version label for the validation set specifically (separate from
+          the dataset snapshot because val sets get re-locked on schedule
+          while the broader dataset may evolve). Default "1" for the first
+          campaign on a new project.
+        why: |
+          §17.6's val-exposure budget is keyed on `val_set_version`. When
+          the val set is intentionally swapped (e.g. after exhausting the
+          old one), bumping this resets the exposure ledger. Without an
+          explicit version, exposure accounting silently leaks across
+          val-set rotations.
+        maps_to: "data/splits/MANIFEST.json :: val_set_version"
+        required: true
+        example: "1"
+
+# The remaining MANIFEST fields PROTOCOL.md §6.3.1 requires are agent-derived,
+# not human-asked:
+#   - sha256, size_bytes, row_count per split → agent reads the file
+#   - frozen_at  → agent uses current UTC ISO-8601 timestamp at bootstrap
+#   - frozen_by  → agent fills in its own `bootstrapped_by` identity
+# Don't add questions for these; just fill them in when writing MANIFEST.json.
 
   - group: "9. Behavioral-equivalence fixtures (§17.1.1)"
     questions:
 
       - id: be_fixtures
         ask: |
-          Give me 1–5 representative inputs to the host's evaluation
-          function (or to the model the evaluator wraps). One simple input
-          is enough to start; the human can add more after the first
-          campaign.
+          Give me **3–5 representative inputs** to the host's evaluation
+          function (or to the model the evaluator wraps). The §1.5
+          Level-1 checklist calls for at minimum 3, ideally spanning the
+          shape of real production traffic (median case + at least one
+          edge case + one near-failure case).
+
+          If the human can only provide 1–2, that's a partial bootstrap —
+          the agent records `partial: true` in bootstrap-answers.yaml and
+          flags it for the human to close before the first promotion
+          attempt. Don't silently accept a 1-fixture install as complete.
 
           For each fixture, the agent needs three things from the human:
             - A short id (e.g. "fx-001")

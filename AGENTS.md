@@ -44,33 +44,56 @@ enough for bootstrap.
 
 ## Your bootstrap workflow
 
-Do these in order. Each step is atomic; commit at the end of each.
+Do these in order. Steps that change state in the host repo end with an
+explicit `Commit:` line — make exactly that commit before moving on.
+Steps that only collect information (ask questions, print summaries) don't
+need a commit of their own.
 
-**1. Confirm host repo state.**
-Run `git status` in the host repo. If there are uncommitted changes, ask the
-human whether to stash, commit on an existing branch, or abort. Don't proceed
-on a dirty tree.
+**1. Ask for the host repo path, then confirm its state.**
+Ask the human the first questionnaire question (`host_repo_root_path`) so
+you know which directory to operate in. `cd` into it. Then run
+`git status`. If there are uncommitted changes, ask the human whether to
+stash, commit on an existing branch, or abort. Don't proceed on a dirty
+tree. No commit yet (no state changed).
 
 **2. Create the integration branch.**
 `git checkout -b feature/autoresearch-bootstrap` (or whatever convention the
-host repo uses for feature branches).
+host repo uses for feature branches). No commit yet (branch creation
+doesn't need one).
 
-**3. Copy `template/`.**
-Copy this repo's `template/` directory into the host repo as `autoresearch/`.
-Don't rename `autoresearch/` — downstream paths in `protected_paths.yaml`
-and example workflows assume that exact name. Commit:
-`chore(autoresearch): scaffold template at autoresearch/`.
+**3. Copy `template/` — but first, check whether `autoresearch/` already
+exists in the host repo.** If it does, the host is in one of three states:
+  - **Empty or partial bootstrap** (some files copied, no real campaign
+    yet): ask the human whether to clean-slate or resume. If resume,
+    diff their `autoresearch/` against the canonical `template/` and ask
+    per-file before overwriting.
+  - **Mid-campaign state** (`state/experiment_ledger.jsonl` has entries,
+    OR `bootstrap-answers.yaml` exists): **stop immediately.** This is
+    not a bootstrap — it's a re-bootstrap, which is a separate workflow
+    (see `docs/adoption-levels.md` for the migration path). Don't
+    overwrite live campaign state.
+  - **Fresh** (no `autoresearch/` directory): proceed.
+Once you've confirmed it's safe to write, copy this repo's `template/`
+directory into the host repo as `autoresearch/`. Don't rename
+`autoresearch/` — downstream paths in `protected_paths.yaml` and example
+workflows assume that exact name.
+Commit: `chore(autoresearch): scaffold template at autoresearch/`.
 
 **4. Walk the bootstrap questionnaire.**
 Open `template/BOOTSTRAP_QUESTIONS.yaml` in this repo (not the host's copy).
-Ask the human each question verbatim, in the order they appear. Record
-answers in `<host>/autoresearch/bootstrap-answers.yaml` (a fresh file you
-create — there's no `.example` for it). The questionnaire's frontmatter
-shows the schema.
+Ask the human each remaining question (you already asked
+`host_repo_root_path` in step 1) verbatim, in the order they appear.
+Record answers in `<host>/autoresearch/bootstrap-answers.yaml` (a fresh
+file you create — there's no `.example` for it). The questionnaire's
+frontmatter shows the schema.
 
 If the human doesn't know an answer, **stop** and report. Don't fabricate.
 The questionnaire is the protocol's "informed consent" surface; faking it
-defeats the point.
+defeats the point. The questionnaire's `default_if_unanswered` fields (if
+any) are explicit-acceptance defaults — only use one when the human says
+"use the default," never as a silent fallback.
+
+Commit: `chore(autoresearch): record bootstrap answers`.
 
 **5. Materialize configs from answers.**
 For each `<host>/autoresearch/config/*.yaml.example`:
@@ -92,9 +115,13 @@ if it isn't already (the template default includes it).
 Commit: `chore(autoresearch): freeze data splits per §6.3.1`.
 
 **7. Seed behavioral-equivalence fixtures.**
-Per `PROTOCOL.md` §17.1.1, the loop relies on a small set of golden inputs
-to detect silent evaluator drift. Ask the human for 1–5 representative
-inputs to the host's evaluation function. Then, for each fixture:
+Per `PROTOCOL.md` §1.5 + §17.1.1, the loop relies on a small set of golden
+inputs to detect silent evaluator drift. Ask the human for **3–5
+representative inputs** to the host's evaluation function (the §1.5
+Level-1 checklist calls for 3–5, not "one is enough"; if fewer than 3 are
+available, record the bootstrap as `partial` in `bootstrap-answers.yaml`
+and flag the gap for the human to close before the first promotion
+attempt). Then, for each fixture:
 
   - Run the host's evaluator on the input **once** and capture the output
     dict `{metric_name: value, ...}`. The agent doing the bootstrap MUST
@@ -137,12 +164,19 @@ Commit: `chore(autoresearch): seed behavioral-equivalence fixtures`.
 Print a summary:
   - Files created.
   - Configs materialized.
-  - Maturity level the host is starting at (almost always Level 1).
-  - Highest label achievable at this level (`level1_branch_winner`, per §13.3).
+  - Maturity level the host is starting at (read from `maturity_level_target`
+    in the answer file — usually 1).
+  - Highest label achievable at this level (per `PROTOCOL.md` §13.3 + §24):
+      - Level 1 → `level1_branch_winner`
+      - Level 2 → `level2_branch_winner`
+      - Level 3+ → `branch_winner` (and `promoted`/`low_evidence_promoted`
+        gated by `enforcement.mechanism` and §18 criteria)
+    Do not hardcode `level1_branch_winner`; derive from the answer.
   - What the human needs to do before the first proposal (review the
     materialized configs; satisfy themselves about the choice of enforcement
     mechanism).
-Open the PR for review. Exit.
+Open the PR for review. Exit. No final commit needed (the summary is a
+printout, not a file change).
 
 ---
 
@@ -191,11 +225,14 @@ A successful bootstrap leaves the host repo with:
 - All `autoresearch/config/*.yaml` files materialized (no `<FILL_ME>` left).
 - `autoresearch/bootstrap-answers.yaml` recording every answer (for
   reproducibility and future re-bootstraps).
-- `data/splits/MANIFEST.json` with SHA-256 content hashes.
-- `evaluation/fixtures/*.json` with at least one fixture file, and the
+- `data/splits/MANIFEST.json` populated with every field PROTOCOL.md §6.3.1
+  requires (snapshot ID, content hashes, sizes, val_set_version, freeze
+  timestamp, freezer identity).
+- `evaluation/fixtures/*.json` with 3–5 fixture files (or a recorded
+  `partial` flag in `bootstrap-answers.yaml` if fewer), and the
   behavioral-equivalence script exits 0 against them.
 - A clean commit history on the integration branch with one commit per
-  workflow step.
+  state-changing workflow step (steps 3, 4, 5, 6, 7 — usually 5 commits).
 - An open PR titled `chore(autoresearch): bootstrap integration` with this
   AGENTS.md linked in the body for the human reviewer.
 
