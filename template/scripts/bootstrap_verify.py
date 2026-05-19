@@ -157,8 +157,26 @@ def check_bootstrap_answers(host_root: Path) -> tuple[bool, str]:
     return report(True, "bootstrap-answers.yaml exists with required frontmatter")
 
 
+def _is_populated(value: object) -> bool:
+    """Truthy + length>0 for strings/collections; >=0 for ints; otherwise not None."""
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return len(value.strip()) > 0
+    if isinstance(value, (list, dict)):
+        return len(value) > 0
+    # Numbers (size_bytes etc.): require non-negative AND not False.
+    if isinstance(value, bool):
+        return bool(value)
+    if isinstance(value, (int, float)):
+        return value >= 0
+    return True
+
+
 def check_manifest(host_root: Path) -> list[tuple[bool, str]]:
-    """Check #5: data/splits/MANIFEST.json exists with §6.3.1 fields."""
+    """Check #5: data/splits/MANIFEST.json exists, has every §6.3.1 field, and
+    every required field is populated (not empty string, not null, not 0-size).
+    """
     results: list[tuple[bool, str]] = []
     p = host_root / "data" / "splits" / "MANIFEST.json"
     if not p.is_file():
@@ -179,13 +197,30 @@ def check_manifest(host_root: Path) -> list[tuple[bool, str]]:
         )
         return results
     results.append(report(True, "MANIFEST.json exists and parses"))
+
     missing = [k for k in REQUIRED_MANIFEST_TOP_KEYS if k not in data]
     if missing:
         results.append(
             report(False, "MANIFEST.json top-level fields", f"missing: {missing}")
         )
     else:
-        results.append(report(True, "MANIFEST.json top-level fields"))
+        # All required top-level keys present — now check the non-split ones
+        # are populated. Split sub-checks below cover train/val/test.
+        scalar_keys = [
+            k for k in REQUIRED_MANIFEST_TOP_KEYS if k not in ("train", "val", "test")
+        ]
+        unpopulated = [k for k in scalar_keys if not _is_populated(data[k])]
+        if unpopulated:
+            results.append(
+                report(
+                    False,
+                    "MANIFEST.json top-level populated",
+                    f"empty or null values: {unpopulated}",
+                )
+            )
+        else:
+            results.append(report(True, "MANIFEST.json top-level fields"))
+
     for split in ("train", "val", "test"):
         split_data = data.get(split)
         if not isinstance(split_data, dict):
@@ -206,8 +241,34 @@ def check_manifest(host_root: Path) -> list[tuple[bool, str]]:
                     f"missing required keys: {missing}",
                 )
             )
-        else:
-            results.append(report(True, f"MANIFEST.json {split} schema"))
+            continue
+        # Schema present — verify values are populated. sha256 + path must
+        # be non-empty strings; size_bytes must be a positive integer.
+        unpopulated = [
+            k for k in REQUIRED_MANIFEST_SPLIT_KEYS if not _is_populated(split_data[k])
+        ]
+        if unpopulated:
+            results.append(
+                report(
+                    False,
+                    f"MANIFEST.json {split} populated",
+                    f"empty/null/zero values: {unpopulated}",
+                )
+            )
+            continue
+        # Extra: size_bytes must be strictly positive (a 0-byte split is a bug,
+        # not a valid bootstrap state).
+        size = split_data["size_bytes"]
+        if not isinstance(size, int) or size <= 0:
+            results.append(
+                report(
+                    False,
+                    f"MANIFEST.json {split}.size_bytes positive int",
+                    f"got {size!r} ({type(size).__name__})",
+                )
+            )
+            continue
+        results.append(report(True, f"MANIFEST.json {split} schema + populated"))
     return results
 
 
@@ -271,17 +332,22 @@ def check_fixtures(host_root: Path, allow_partial: bool) -> list[tuple[bool, str
 
 
 def check_protocol_version(host_root: Path) -> list[tuple[bool, str]]:
-    """Check #8: protocol_version is "0.4" everywhere it appears."""
+    """Check #8: protocol_version is "0.4" everywhere it appears.
+
+    Covers the four yaml configs, ``bootstrap-answers.yaml``, AND the bare
+    ``PROTOCOL_VERSION`` text file that the template ships (the host's copy
+    after step 3 should match the open-autoresearch repo's pinned version).
+    """
     results: list[tuple[bool, str]] = []
     config_dir = host_root / "autoresearch" / "config"
-    candidates = [
+    yaml_candidates = [
         config_dir / "metrics.yaml",
         config_dir / "enforcement.yaml",
         config_dir / "protected_paths.yaml",
         config_dir / "editable_paths.yaml",
         host_root / "autoresearch" / "bootstrap-answers.yaml",
     ]
-    for p in candidates:
+    for p in yaml_candidates:
         if not p.is_file():
             continue
         try:
@@ -306,6 +372,21 @@ def check_protocol_version(host_root: Path) -> list[tuple[bool, str]]:
                     f"found {version!r}",
                 )
             )
+
+    # PROTOCOL_VERSION is a bare text file copied from template/PROTOCOL_VERSION.
+    pv_file = host_root / "autoresearch" / "PROTOCOL_VERSION"
+    if pv_file.is_file():
+        content = pv_file.read_text().strip()
+        rel = pv_file.relative_to(host_root)
+        if content == EXPECTED_PROTOCOL_VERSION:
+            results.append(report(True, f"protocol_version=0.4 in {rel}"))
+        else:
+            results.append(
+                report(False, f"protocol_version=0.4 in {rel}", f"found {content!r}")
+            )
+    # If pv_file is missing, that's already a structural problem caught by
+    # check_autoresearch_dir / config-files checks higher up — no need to
+    # double-report.
     return results
 
 

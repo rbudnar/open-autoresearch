@@ -63,14 +63,19 @@ KEY_PATTERN = re.compile(
 # handled: the parser tracks the most-recent anchor as it scans.
 CONFIG_FILE_PATTERN = re.compile(r"config/([a-z_]+)\.yaml(?:\.example)?")
 
-# Questions whose maps_to describes list-shaped or per-mechanism aggregates.
-# These match by head-of-key prefix rather than exact dotted path.
+# True list-shaped keys: the .example config has these as YAML lists, and
+# questions cover the list head rather than indexing into elements. For these,
+# the forward-drift check verifies the head exists at top level; sub-path
+# validation doesn't make sense.
+#
+# `primary_metric` and `budgets` are NOT here — they are nested mappings in
+# the config, and questions claim specific sub-paths (`primary_metric.name`,
+# `budgets.llm.max_tokens_total`). Those resolve through the normal dotted
+# walk, so the forward-drift check catches sub-key renames.
 LIST_SHAPED_KEYS: set[str] = {
     "guardrails",
     "secondary_metrics",
     "subgroups",
-    "primary_metric",  # primary_metric.name / .direction / .aggregation / etc.
-    "budgets",         # budgets.llm.* / budgets.tool_calls.* / budgets.compute.*
 }
 
 
@@ -109,21 +114,24 @@ def extract_claimed_keys(
         if not isinstance(maps_to, str):
             continue
 
+        # Run the two module-level patterns separately, then interleave
+        # matches by start position so a key reference inherits the most-
+        # recent config-file anchor that precedes it. This keeps the regex
+        # definitions in one place (the module constants) without smuggling
+        # nested capture groups through a combined alternation.
+        anchors: list[tuple[int, str, str]] = []
+        for m in CONFIG_FILE_PATTERN.finditer(maps_to):
+            anchors.append((m.start(), "file", m.group(1)))
+        for m in KEY_PATTERN.finditer(maps_to):
+            anchors.append((m.start(), "key", m.group(1)))
+        anchors.sort(key=lambda x: x[0])
+
         current_file: str | None = None
-        # Scan token-by-token; CONFIG_FILE_PATTERN matches reset the anchor,
-        # KEY_PATTERN matches contribute keys under the current anchor. See
-        # KEY_PATTERN for the rules around marker recognition.
-        for match in re.finditer(
-            r"config/([a-z_]+)\.yaml(?:\.example)?|"
-            r"(?:::|^\s*→)\s*([A-Za-z_][\w.]{2,})",
-            maps_to,
-            re.MULTILINE,
-        ):
-            file_group, key_group = match.group(1), match.group(2)
-            if file_group is not None:
-                current_file = file_group
-            elif key_group is not None and current_file is not None:
-                claimed.setdefault(current_file, set()).add(key_group)
+        for _, kind, value in anchors:
+            if kind == "file":
+                current_file = value
+            elif kind == "key" and current_file is not None:
+                claimed.setdefault(current_file, set()).add(value)
     return claimed
 
 
@@ -166,6 +174,16 @@ def enumerate_fill_me_paths(example_path: Path) -> list[str]:
     data = load_example_config(example_path)
     paths: list[str] = []
 
+    def contains_fill_me(value: Any) -> bool:
+        """True if ``<FILL_ME>`` appears anywhere in ``value`` or its descendants."""
+        if isinstance(value, str):
+            return "<FILL_ME>" in value
+        if isinstance(value, dict):
+            return any(contains_fill_me(v) for v in value.values())
+        if isinstance(value, list):
+            return any(contains_fill_me(item) for item in value)
+        return False
+
     def walk(value: Any, prefix: str) -> None:
         if isinstance(value, str) and "<FILL_ME>" in value:
             paths.append(prefix)
@@ -173,17 +191,10 @@ def enumerate_fill_me_paths(example_path: Path) -> list[str]:
             for k, v in value.items():
                 walk(v, f"{prefix}.{k}" if prefix else k)
         elif isinstance(value, list):
-            # Report the list-level path once if any item contains FILL_ME.
-            if any(
-                isinstance(item, dict)
-                and any(
-                    isinstance(v, str) and "<FILL_ME>" in v
-                    for v in item.values()
-                )
-                or isinstance(item, str)
-                and "<FILL_ME>" in item
-                for item in value
-            ):
+            # Report the list-level path once if any descendant contains
+            # `<FILL_ME>`. The recursive `contains_fill_me` covers nested
+            # dicts and lists inside elements (not just immediate dict values).
+            if any(contains_fill_me(item) for item in value):
                 paths.append(prefix)
 
     walk(data, "")
