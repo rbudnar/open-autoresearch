@@ -48,10 +48,14 @@ jobs:
         run: pip install pyyaml
       - name: Run verifier against the rejected promotion request
         id: verify
-        continue-on-error: true
         run: |
           cd examples/level3-counter-example
           mkdir -p /tmp/oar-ci-out
+          # The verifier is *expected* to exit 1 here (the request is the
+          # counter-example and must be rejected). Under `bash -e`, that exit
+          # would abort the step before we can record the code, so capture
+          # it inline with `||` and let the next step do the assertion.
+          verify_exit=0
           python ../../template/scripts/verifier/verify_request.py \
             --request proposals/iter08-promotion-request.json \
             --ledger state/experiment_ledger.jsonl \
@@ -59,8 +63,8 @@ jobs:
             --enforcement config/enforcement.yaml \
             --out-dir /tmp/oar-ci-out \
             --verifier-identity "ci-validate-examples" \
-            --unsigned
-          echo "verify_exit=$?" >> "$GITHUB_OUTPUT"
+            --unsigned || verify_exit=$?
+          echo "verify_exit=$verify_exit" >> "$GITHUB_OUTPUT"
       - name: Assert verifier returned 1 (rejected)
         run: |
           if [ "${{ steps.verify.outputs.verify_exit }}" != "1" ]; then
