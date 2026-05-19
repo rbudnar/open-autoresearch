@@ -1,0 +1,35 @@
+# check-drift.yml — fail if BOOTSTRAP_QUESTIONS.yaml and template/config/*.yaml.example
+# have drifted apart (a question claims to fill a key that doesn't exist, or a
+# <FILL_ME> in an .example file has no question covering it).
+#
+# Closes the v1.1 gap documented in the BOOTSTRAP_QUESTIONS.yaml frontmatter
+# during the agent-onboarding-surface PR. See template/scripts/check_questionnaire_drift.py
+# for the parser rules and how to add a new question without breaking the check.
+
+name: check-drift
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'template/BOOTSTRAP_QUESTIONS.yaml'
+      - 'template/config/**'
+      - 'template/scripts/check_questionnaire_drift.py'
+      - '.github/workflows/check-drift.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  questionnaire-vs-config-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install minimal deps
+        run: pip install pyyaml
+      - name: Run drift check
+        run: python template/scripts/check_questionnaire_drift.py

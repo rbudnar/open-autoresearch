@@ -160,8 +160,22 @@ The template's `protected_paths.yaml.example` already lists
 here.
 Commit: `chore(autoresearch): seed behavioral-equivalence fixtures`.
 
-**8. Hand off to the human.**
-Print a summary:
+**8. Verify and hand off.**
+First, run the bootstrap smoke test:
+```
+python template/scripts/bootstrap_verify.py <host-repo-root>
+```
+Exit 0 = every required file/key is present and well-formed. Exit 1 = read
+the printed `[FAIL]` lines, fix what's missing, re-run. Don't proceed to
+hand-off with any FAIL lines.
+
+The smoke test deliberately does NOT round-trip the host evaluator against
+the BE fixtures (that requires importing host code, which this script
+won't do). For the round-trip check, run `behavioral_equivalence.py`
+directly with `--evaluator <module.path>:<fn>` after bootstrap_verify
+passes — or document the call as a follow-up the human runs themselves.
+
+Then print a summary to the human:
   - Files created.
   - Configs materialized.
   - Maturity level the host is starting at (read from `maturity_level_target`
@@ -174,7 +188,7 @@ Print a summary:
     Do not hardcode `level1_branch_winner`; derive from the answer.
   - What the human needs to do before the first proposal (review the
     materialized configs; satisfy themselves about the choice of enforcement
-    mechanism).
+    mechanism; run the BE evaluator round-trip if you skipped it).
 Open the PR for review. Exit. No final commit needed (the summary is a
 printout, not a file change).
 
@@ -231,6 +245,9 @@ A successful bootstrap leaves the host repo with:
 - `evaluation/fixtures/*.json` with 3–5 fixture files (or a recorded
   `partial` flag in `bootstrap-answers.yaml` if fewer), and the
   behavioral-equivalence script exits 0 against them.
+- `template/scripts/bootstrap_verify.py <host-repo-root>` exits 0 (all
+  required files present, no `<FILL_ME>` placeholders left, all schemas
+  match).
 - A clean commit history on the integration branch with one commit per
   state-changing workflow step (steps 3, 4, 5, 6, 7 — usually 5 commits).
 - An open PR titled `chore(autoresearch): bootstrap integration` with this
