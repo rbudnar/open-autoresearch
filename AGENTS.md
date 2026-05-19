@@ -73,10 +73,13 @@ The questionnaire is the protocol's "informed consent" surface; faking it
 defeats the point.
 
 **5. Materialize configs from answers.**
-For each `<host>/autoresearch/config/*.example.yaml`:
-  - Rename to `*.yaml` (drop the `.example` infix).
-  - Substitute `<FILL_ME>` placeholders using the questionnaire answers.
-    Each question's `maps_to` field names the config key.
+For each `<host>/autoresearch/config/*.yaml.example`:
+  - Copy to the same path without the `.example` suffix (e.g.
+    `metrics.yaml.example` → `metrics.yaml`). Keep the `.example` file in
+    place; it documents the schema for future reference.
+  - In the new `.yaml` file, substitute every `<FILL_ME>` placeholder using
+    the questionnaire answers. Each question's `maps_to` field names the
+    config key.
   - Keep `protocol_version: "0.4"` exactly as written. Don't bump it.
 Commit: `chore(autoresearch): materialize config from bootstrap answers`.
 
@@ -90,14 +93,45 @@ Commit: `chore(autoresearch): freeze data splits per §6.3.1`.
 
 **7. Seed behavioral-equivalence fixtures.**
 Per `PROTOCOL.md` §17.1.1, the loop relies on a small set of golden inputs
-to detect silent evaluator drift. Ask the human for 3–5 representative
-inputs to the host's evaluation function (one or two is enough to start —
-the human can add more after the first campaign). Write them to
-`<host>/autoresearch/state/be_fixtures.json`. The schema is documented in
-`template/scripts/behavioral_equivalence.py --help`.
-Run `python autoresearch/scripts/behavioral_equivalence.py --record` once
-to record golden outputs. Commit:
-`chore(autoresearch): seed behavioral-equivalence fixtures`.
+to detect silent evaluator drift. Ask the human for 1–5 representative
+inputs to the host's evaluation function. Then, for each fixture:
+
+  - Run the host's evaluator on the input **once** and capture the output
+    dict `{metric_name: value, ...}`. The agent doing the bootstrap MUST
+    NOT skip this step — these values become the "ground truth" the loop
+    later compares against. The protocol intentionally has no
+    auto-record CLI; that would let the loop self-attest its own
+    baselines, which is the exact failure mode §17.1.1 exists to prevent.
+  - Write one JSON file per fixture at
+    `<host>/evaluation/fixtures/<fixture_id>.json` with shape:
+    ```json
+    {
+      "fixture_id": "fx-001",
+      "description": "one-line description",
+      "input": { ... opaque payload the evaluator accepts ... },
+      "golden_outputs": { "<metric>": <number>, ... }
+    }
+    ```
+  - The metric keys in `golden_outputs` MUST match the names declared in
+    `metrics.yaml` (`primary_metric.name`, every `secondary_metrics[].name`,
+    every `guardrails[].name`). Mismatches surface as `CONFIG ERROR` from
+    the script.
+
+After writing the fixtures, run the verifier (it checks-only — no
+recording):
+```
+python template/scripts/behavioral_equivalence.py \
+  --metrics autoresearch/config/metrics.yaml \
+  --fixtures evaluation/fixtures \
+  --evaluator <module.path>:<compute_fn>
+```
+Exit 0 = fixtures + evaluator round-trip cleanly within tolerance. Exit
+non-zero = read the printed reason; fix and re-run before continuing.
+
+The template's `protected_paths.yaml.example` already lists
+`evaluation/fixtures/**` as protected, so no path additions are needed
+here.
+Commit: `chore(autoresearch): seed behavioral-equivalence fixtures`.
 
 **8. Hand off to the human.**
 Print a summary:
@@ -158,8 +192,8 @@ A successful bootstrap leaves the host repo with:
 - `autoresearch/bootstrap-answers.yaml` recording every answer (for
   reproducibility and future re-bootstraps).
 - `data/splits/MANIFEST.json` with SHA-256 content hashes.
-- `autoresearch/state/be_fixtures.json` with at least one fixture entry
-  and golden outputs recorded.
+- `evaluation/fixtures/*.json` with at least one fixture file, and the
+  behavioral-equivalence script exits 0 against them.
 - A clean commit history on the integration branch with one commit per
   workflow step.
 - An open PR titled `chore(autoresearch): bootstrap integration` with this

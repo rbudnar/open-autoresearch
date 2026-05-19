@@ -226,6 +226,44 @@ groups:
         required: true
         example: 200
 
+      - id: llm_token_budget
+        ask: |
+          Total LLM token budget across the campaign (input + output tokens
+          summed across every API call the agent makes).
+        why: |
+          Mirrors the dollar budget at a different layer — tokens stay
+          comparable across pricing changes and across providers. §17.7
+          requires both this and the dollar budget; the loop enforces
+          whichever hits first.
+        maps_to: "config/metrics.yaml :: budgets.llm.max_tokens_total"
+        required: true
+        example: 50000000
+
+      - id: tool_call_budget
+        ask: |
+          Total tool-call budget across the campaign (file writes, shell
+          commands, search queries, web fetches, etc. — every non-LLM
+          action the agent issues).
+        why: |
+          Without this, an agent can quietly burn through hundreds of
+          thousands of tool calls reading the same files over and over.
+          §17.7 makes the budget explicit and enforceable.
+        maps_to: "config/metrics.yaml :: budgets.tool_calls.max_calls_total"
+        required: true
+        example: 5000
+
+      - id: wall_clock_budget
+        ask: |
+          Total wall-clock hours the campaign is allowed to run. Distinct
+          from GPU-hours: a 24-hour campaign with 4 parallel GPUs has
+          24h wall-clock and 96h GPU.
+        why: |
+          Bounds the calendar duration of the campaign so it can't drift
+          past human attention. §17.7.
+        maps_to: "config/metrics.yaml :: budgets.compute.max_wall_clock_hours"
+        required: true
+        example: 72
+
   - group: "6. Enforcement (§3.1.1)"
     questions:
 
@@ -257,16 +295,25 @@ groups:
 
       - id: enforcement_params
         ask: |
-          Fill in the parameters for the mechanism you chose. If
-          ci_enforced: confirm base_branch (default `main`) and the
-          reviewer_identity that approves protected-path changes (MUST NOT
-          be the agent). If pre_receive: remote_host + hook_script_path. If
-          oop_verifier: verifier_script + verifier_runner. If container_ro:
-          container_image_digest. If none: skip — the trust_level is forced
-          to `advisory`.
+          Fill in the parameters for the mechanism chosen above. The answer
+          MUST be a mapping (possibly empty), not a skipped field — the
+          loop's verifier reads this even when the mechanism is `none` (it
+          just expects an empty mapping in that case).
+            ci_enforced  → base_branch (default `main`) + reviewer_identity
+                           that approves protected-path changes (MUST NOT be
+                           the agent's identity).
+            pre_receive  → remote_host + hook_script_path.
+            oop_verifier → verifier_script + verifier_runner.
+            container_ro → container_image_digest (sha256:... of the locked
+                           image).
+            none         → answer with `{}` (empty mapping). The trust_level
+                           question below is forced to `advisory`.
         why: |
           Mechanism parameters are how the verifier knows what to check
           against. Generic answers like "we have CI" aren't enough.
+          Recording `{}` for `none` is deliberately explicit so the answer
+          file is always complete and re-bootstraps don't ambiguously infer
+          "was this skipped or was it none?"
         maps_to: "config/enforcement.yaml :: <mechanism>.*"
         required: true
         example: |
@@ -362,23 +409,33 @@ groups:
       - id: be_fixtures
         ask: |
           Give me 1–5 representative inputs to the host's evaluation
-          function (or to the model the evaluator wraps). The first run
-          will record golden outputs; future runs compare. One simple input
+          function (or to the model the evaluator wraps). One simple input
           is enough to start; the human can add more after the first
           campaign.
 
-          For each fixture, provide:
+          For each fixture, the agent needs three things from the human:
             - A short id (e.g. "fx-001")
             - The input payload, exactly as the evaluator expects it
             - A one-line description of what makes this input representative
+
+          The fourth field — `golden_outputs` — is NOT something to ask for.
+          The agent computes it by running the host's evaluator on each
+          input once and recording the returned metric dict. The protocol
+          has no auto-record CLI by design: it would let the loop self-
+          attest its own baselines, which is the failure mode §17.1.1
+          exists to prevent.
         why: |
           Without behavioral-equivalence fixtures, silent evaluator drift
           (numerical, library-version, hardware) goes undetected and
           contaminates all measured results. One fixture is enough to
           start; the protocol just needs the loop installed.
-        maps_to: "<host>/autoresearch/state/be_fixtures.json"
+        maps_to: "<host>/evaluation/fixtures/<fixture_id>.json (one file per fixture; shape: {fixture_id, description, input, golden_outputs})"
         required: true
         example: |
-          - id: fx-001
-            description: "median-length sample from val set"
-            input: { ... }
+          # Per-fixture JSON file written to <host>/evaluation/fixtures/fx-001.json:
+          {
+            "fixture_id": "fx-001",
+            "description": "median-length sample from val set",
+            "input": { "...": "..." },
+            "golden_outputs": { "val_nll": 1.2345 }
+          }
