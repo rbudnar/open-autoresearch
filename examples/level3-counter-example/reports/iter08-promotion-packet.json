@@ -1,0 +1,60 @@
+{
+  "criteria_check": {
+    "10_enforcement_caps_status": {
+      "note": null,
+      "pass": true
+    },
+    "1_protocol_version_match": {
+      "note": null,
+      "pass": true
+    },
+    "2_references_rehash": {
+      "note": null,
+      "pass": true
+    },
+    "3_maturity_level_ge_3": {
+      "note": null,
+      "pass": true
+    },
+    "4_role_separation_ok": {
+      "note": null,
+      "pass": true
+    },
+    "5_stack_requires_factorial": {
+      "note": null,
+      "pass": true
+    },
+    "6_val_exposure_not_exhausted": {
+      "note": "val exposure 52 >= budget 50; \u00a717.6 requires holdout refresh before further promotion",
+      "pass": false
+    },
+    "7_behavioral_equivalence_passed": {
+      "note": null,
+      "pass": true
+    },
+    "8_skeptic_verdict_clean": {
+      "note": null,
+      "pass": true
+    },
+    "9_statistics_recomputed": {
+      "note": null,
+      "pass": true
+    }
+  },
+  "enforcement": "in_band_only",
+  "maturity_level": 3,
+  "not_deployable": true,
+  "packet_id": "20260518-233753-pkt",
+  "protocol_version": "0.4",
+  "rejection_reasons": [
+    "val exposure 52 >= budget 50; \u00a717.6 requires holdout refresh before further promotion"
+  ],
+  "request_id": "20260518-220000-bbb008",
+  "status": "rejected",
+  "verifier": {
+    "identity": "smoke-test",
+    "signature": "unsigned",
+    "signed_at": "2026-05-18T23:37:53.468894+00:00",
+    "type": "non_agent_ci"
+  }
+}

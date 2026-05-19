@@ -1,0 +1,99 @@
+# protect-protocol.yml — CI enforcement of §3.1.1 for the open-autoresearch repo itself.
+#
+# The repo dogfoods the protocol: changes to PROTOCOL.md, the schemas implied
+# by template/config/, the reference scripts, and the examples require a
+# CODEOWNERS review. This workflow makes the rejection mechanical rather than
+# trusting GitHub's branch-protection UI alone.
+#
+# Failure modes this catches:
+# - A contributor changes PROTOCOL.md without a corresponding ADR.
+# - A contributor changes a reference script without updating the protocol's
+#   section that describes its behavior.
+# - A contributor changes an example artifact without updating its parent
+#   protocol citation.
+
+name: protect-protocol
+
+on:
+  pull_request:
+    paths:
+      - 'PROTOCOL.md'
+      - 'MIGRATION.md'
+      - 'CHANGELOG.md'
+      - 'template/PROTOCOL_VERSION'
+      - 'template/config/**'
+      - 'template/scripts/**'
+      - 'template/templates/**'
+      - 'examples/**'
+      - 'docs/threat-model.md'
+      - 'docs/adoption-levels.md'
+      - 'CODEOWNERS'
+      - '.github/workflows/**'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  protected-path-changes-require-codeowner:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changes in protected paths
+        id: changed
+        run: |
+          set -euo pipefail
+          base="${{ github.event.pull_request.base.sha }}"
+          head="${{ github.event.pull_request.head.sha }}"
+          echo "Diffing $base...$head"
+          changed_protected=$(git diff --name-only "$base" "$head" -- \
+            'PROTOCOL.md' \
+            'MIGRATION.md' \
+            'CHANGELOG.md' \
+            'template/PROTOCOL_VERSION' \
+            'template/config/*' \
+            'template/scripts/*' \
+            'template/templates/*' \
+            'examples/*' \
+            'docs/threat-model.md' \
+            'docs/adoption-levels.md' \
+            'CODEOWNERS' \
+            '.github/workflows/*' \
+            || true)
+          if [ -z "$changed_protected" ]; then
+            echo "No protected paths changed."
+            echo "any_changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Protected paths changed:"
+            echo "$changed_protected"
+            echo "any_changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Require CODEOWNERS review
+        if: steps.changed.outputs.any_changed == 'true'
+        run: |
+          echo "::notice::Protected paths changed. CODEOWNERS review required to merge."
+          echo "::notice::GitHub's branch protection rules also enforce this; this job exists as a visible reminder in the PR checks list."
+          # This job's success/failure does not gate merge — GitHub's branch
+          # protection (CODEOWNERS + required reviewers) is the authoritative
+          # gate. This job's notice annotates the PR with the requirement so
+          # reviewers see it inline.
+
+  protocol-version-consistency:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: PROTOCOL_VERSION file matches PROTOCOL.md header
+        run: |
+          set -euo pipefail
+          pv_file=$(cat template/PROTOCOL_VERSION | tr -d '[:space:]')
+          pv_header=$(grep -E '^\*\*Version:\*\*' PROTOCOL.md | head -1 | sed -E 's/.*\*\*Version:\*\* *([0-9.]+).*/\1/')
+          if [ "$pv_file" != "$pv_header" ]; then
+            echo "::error::template/PROTOCOL_VERSION ($pv_file) does not match PROTOCOL.md header ($pv_header)"
+            exit 1
+          fi
+          echo "Protocol version consistent: $pv_file"

@@ -1,0 +1,100 @@
+# metrics.yaml — the single source of truth for what gets optimized, how it's
+# scored, what budgets bound the campaign, and what tolerances apply.
+#
+# Driven by PROTOCOL.md §6.1, §13.2.1, §17.1.1, §17.6, §17.7.
+# Replace every <FILL_ME> with a real value before the first iteration.
+
+protocol_version: "0.4"
+
+# --- Cost tier (§6.1) ----------------------------------------------------------
+# Time one full baseline run. Pick the tier whose row matches.
+#   micro    ≤30 min     min_seeds: 5 / 5    (cheap; demand strong evidence)
+#   small    30 min–4 hr min_seeds: 3 / 5
+#   medium   4–24 hr     min_seeds: 2 / 3    (default for solo research)
+#   large    24–72 hr    min_seeds: 2 / 3 + bootstrap CI
+#   xlarge   >72 hr      min_seeds: 1 / 2  (results carry evidence_level: low)
+cost_tier: <FILL_ME>     # one of: micro | small | medium | large | xlarge
+max_gpu_hours_per_candidate: <FILL_ME>   # hard cap per candidate
+
+# --- Primary metric (§6.1, §13.2.1) -------------------------------------------
+primary_metric:
+  name: <FILL_ME>                          # e.g., validation_nll
+  direction: <FILL_ME>                     # maximize | minimize  — REQUIRED
+  aggregation: <FILL_ME>                   # mean | sum | count | ratio  — REQUIRED
+  eval_dtype: <FILL_ME>                    # fp32 | bf16 | fp16 | int  — REQUIRED
+  minimum_meaningful_delta: <FILL_ME>      # absolute delta in same units as the metric
+
+# --- Secondary metrics ---------------------------------------------------------
+secondary_metrics:
+  - {name: <FILL_ME>, direction: <FILL_ME>, aggregation: <FILL_ME>, eval_dtype: <FILL_ME>}
+
+# --- Guardrails (direction-aware regression thresholds, §13.2.1) --------------
+guardrails:
+  - name: <FILL_ME>
+    direction: <FILL_ME>                   # REQUIRED
+    aggregation: <FILL_ME>
+    eval_dtype: <FILL_ME>
+    max_regression_relative: <FILL_ME>     # OR use max_absolute:
+
+# --- Subgroup metrics ----------------------------------------------------------
+subgroups: []   # optional; each entry mirrors guardrails + subgroup_min_delta
+
+# --- Promotion (§18) -----------------------------------------------------------
+promotion:
+  require_baseline_rerun: true
+  require_candidate_rerun: true
+  require_ablation: true
+  require_locked_test_set: true
+  # seed counts come from cost_tier above
+
+# --- Statistical decision rule (§13.2.1) --------------------------------------
+statistics:
+  method: paired_bootstrap                 # see PROTOCOL.md §13.2 for alternatives
+  resamples: 10000
+  confidence_level: 0.95
+  multiple_comparison_correction: holm     # across guardrails
+
+# --- Evaluator behavioral-equivalence tolerances (§17.1.1) --------------------
+# Calibrated so reduction-order changes do NOT trip the test, while
+# ~1e-3 magnitude behavioral changes DO. Defaults by dtype:
+evaluator_equivalence:
+  defaults_by_dtype:
+    fp32: {rtol: 1.0e-4, atol: 1.0e-6}
+    bf16: {rtol: 1.0e-2, atol: 1.0e-3}
+    fp16: {rtol: 1.0e-3, atol: 1.0e-4}
+    int:  {rtol: 0.0,    atol: 0.0}
+  per_metric: {}   # optional overrides; tolerance MUST be ≤ 0.1 × minimum_meaningful_delta
+
+# --- Validation-set exposure budget (§17.6) -----------------------------------
+# Suggested defaults: 100 (L1), 300 (L2-3), 1000 (L4+). Scale with √(val_size).
+val_set_exposure_budget: <FILL_ME>
+
+# --- Campaign budgets (§17.7) -------------------------------------------------
+budgets:
+  llm:
+    max_tokens_total: <FILL_ME>
+    max_dollars_total: <FILL_ME>
+    soft_warn_fraction: 0.7
+  tool_calls:
+    max_calls_total: <FILL_ME>
+  compute:
+    max_gpu_hours: <FILL_ME>
+    max_wall_clock_hours: <FILL_ME>
+
+  # Per-iteration caps scale by maturity level. Override per-row if needed.
+  per_iteration_caps_by_level:
+    L1: {max_llm_tokens:   500000, max_tool_calls:  100, max_gpu_hours: 30}
+    L2: {max_llm_tokens:  1000000, max_tool_calls:  200, max_gpu_hours: 30}
+    L3: {max_llm_tokens:  2000000, max_tool_calls:  400, max_gpu_hours: 30}
+    L4: {max_llm_tokens:  5000000, max_tool_calls:  800, max_gpu_hours: 30}
+    L5: {max_llm_tokens:  8000000, max_tool_calls: 1500, max_gpu_hours: 30}
+
+# --- Memory bounds (§3.7, §17.5.4) --------------------------------------------
+memory:
+  max_playbook_tokens: 8000
+  ledger_rotation_iterations: 200
+
+# --- Current maturity level (§24) ---------------------------------------------
+# Bump this as you graduate from Level 1 to higher levels. Determines which run
+# categories are available (§13.3) and which §18 gates can apply.
+maturity_level: 1   # 1 | 2 | 3 | 4 | 5

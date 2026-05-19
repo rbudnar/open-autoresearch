@@ -1,0 +1,32 @@
+# CODEOWNERS for open-autoresearch
+#
+# This file dogfoods PROTOCOL.md §3.1.1 — protected paths require an
+# out-of-band reviewer (a CODEOWNER) before merging.
+#
+# Format: <pattern> <space-separated @users>
+
+# Protocol document — the centerpiece artifact. Two CODEOWNER approvals required
+# (enforced by branch protection rules, not by this file).
+/PROTOCOL.md                @rbudnar
+/MIGRATION.md               @rbudnar
+/CHANGELOG.md               @rbudnar
+
+# Schemas embedded in the protocol — changes to scaffolding that imply protocol
+# changes require maintainer review.
+/template/PROTOCOL_VERSION  @rbudnar
+/template/config/**         @rbudnar
+/template/templates/**      @rbudnar
+
+# Reference scripts — verifier and behavioral-equivalence are security-relevant.
+/template/scripts/**        @rbudnar
+
+# Example campaigns — must validate against the protocol via CI.
+/examples/**                @rbudnar
+
+# Docs — light review.
+/docs/threat-model.md       @rbudnar
+/docs/adoption-levels.md    @rbudnar
+
+# CI workflows — protect the protection.
+/.github/workflows/**       @rbudnar
+/CODEOWNERS                 @rbudnar

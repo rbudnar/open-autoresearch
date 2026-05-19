@@ -1,0 +1,22 @@
+protocol_version: "0.4"
+
+# With enforcement.yaml mechanism: none, these are honor-system declarations
+# only. The campaign documents what would be protected if an out-of-band
+# mechanism were active.
+
+protected_paths:
+  - data/splits/**
+  - data/splits/MANIFEST.json
+  - evaluation/**
+  - evaluation/fixtures/**
+  - autoresearch/scripts/behavioral_equivalence.py
+  - autoresearch/scripts/verifier/**
+  - autoresearch/config/metrics.yaml
+  - autoresearch/config/protected_paths.yaml
+  - autoresearch/config/enforcement.yaml
+  - autoresearch/state/eval_manifest.signed
+
+requires_human_review:
+  - data/**
+  - evaluation/**
+  - production/**

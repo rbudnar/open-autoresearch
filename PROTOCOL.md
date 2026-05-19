@@ -1,0 +1,1711 @@
+# AutoResearch++ Protocol: A Disciplined Skill for Autonomous ML Model Improvement
+
+**Version:** 0.4
+**Date:** 2026-05-18
+**Status:** Draft. Final pre-1.0 candidate. Breaking changes possible until v1.0.
+**Purpose:** Give any capable coding/research agent — Claude Code, Codex, Gemini, OpenAI agents, etc. — an implementation-ready protocol for improving machine learning models through tight, disciplined research loops, with **honest separation between mechanically-enforced controls and policy-only controls**.
+
+This protocol generalizes beyond any single domain. It can be applied to autoencoders, forecasting models, transformers, tabular models, recommender systems, classifiers, reinforcement learning systems, or any ML project where candidate improvements can be trained and evaluated under a controlled harness.
+
+> **New to this protocol?** Read §1.5 first — it gives a Level-1 "Start Here" path so you can run a campaign without trying to adopt all 26 sections at once.
+
+### Changelog
+
+- **v0.4 (2026-05-18):** Polish pass after second dual-voice review of v0.3. Promotion packet split into agent-emitted `promotion_request` and verifier-signed `promotion_packet` (§10.5); §18 criterion 2 made direction-aware; stale "13 criteria" and `§18.13` references fixed; tightened val-exposure query unit definition to cover Stage-B-on-val + seed reruns + ablation reruns + early-stop peeks (§17.6); behavioral-equivalence tolerances bumped to be safe for 10k-example NLL (`rtol: 1e-4`/`atol: 1e-6` fp32 default), added bf16/fp16 row, required per-metric `aggregation: mean|sum` (§17.1.1); per-iteration token caps moved to per-level defaults L1–L4 (§17.7); `branch_winner` namespaced to `level1_branch_winner`/`level2_branch_winner`/`branch_winner` with `maturity_level` + `not_deployable` frontmatter requirement (§13.3, §24); promotion packet schema rewritten as references-to-ledger (no duplicate fields) (§10.5); §1.5 Step 4 handoff fixed (new §6.3.1 split freeze); Level-1 → Level-3 graduation path corrected; §11.1.1 inline stack example replaces v0.1 cross-reference; minor numerical consistency cleanups; all artifact `protocol_version` stamps bumped to `0.4`.
+- **v0.3 (2026-05-18):** Direction-aware statistical decision rule (§13.2.1); tolerance-based behavioral equivalence (§17.1.1); explicit Level-1 promotion semantics — Level 1 can label `promising`/`branch_winner` but not `promoted` (§23, §24); new §1.5 "Start Here" implementation path; new §10.5 promotion packet schema; new §17.6 validation-set exhaustion policy; new §17.7 LLM/tool-call/compute budget accounting; minor cleanups throughout.
+- **v0.2 (2026-05-18):** Major revision after dual-voice review. Added: §0 versioning policy; §2 citation status table; §3.1.1 out-of-band enforcement requirement; §5.0 role-separation modes; §6.1 cost-tiered seed counts; §9.0 offline literature mode; §11.1.1 candidate/component/stack definitions; §13.2.1 default statistical decision rule; §16.1 ablation decision tree; §17.1 split (in-band vs out-of-band controls); §17.1.1 behavioral-equivalence test; §17.5 operational realities; §22a counter-example campaign; reconciled §23 minimal checklist with §24 maturity levels.
+- **v0.1 (2026-05-18, internal):** Initial draft.
+
+---
+
+## 0. Versioning policy
+
+### 0.1 Semver
+
+The protocol uses semantic versioning. **Breaking changes only on major bumps.** Minor bumps add optional fields, sections, or examples. Patch bumps fix typos, broken links, or wording.
+
+### 0.2 Artifact version stamping
+
+Every generated artifact — proposal, ledger record, report, playbook entry — MUST carry a `protocol_version` field equal to the protocol version that produced it. Future tools and humans reading the artifact know what schema they're looking at.
+
+Example:
+
+```yaml
+protocol_version: 0.4
+```
+
+### 0.3 Migration policy
+
+Each major bump ships:
+1. A `MIGRATION.md` walking through each breaking change.
+2. A `migrate_to_vX.Y.py` script template (idempotent, dry-run capable).
+3. A grace period where the new version reads old artifacts and emits deprecation warnings.
+
+The first migration entry is for v0.1 → v0.2: re-read every cited paper in §2 and update its status tag; add `protocol_version: 0.4` to all artifacts; pick a cost tier in §6.1.
+
+### 0.4 "Implementation-ready" honesty
+
+A pre-1.0 protocol is **explorationally-ready**, not production-ready. The first 1.0 release will be tagged when at least three independent host projects have completed end-to-end campaigns and reported negative or positive results.
+
+---
+
+## 1. Executive summary
+
+The goal is not brute-force grid search. The goal is an **autonomous research system** that repeatedly:
+
+1. understands the domain and current model,
+2. searches available literature and strong implementations for relevant ideas (with an offline fallback — §9.0),
+3. proposes a small number of high-leverage hypotheses,
+4. implements one tightly scoped candidate change (§11.1.1 defines "one"),
+5. trains/evaluates under a controlled harness,
+6. compares against baselines with statistically meaningful evidence (§13.2.1 defines "meaningful"),
+7. performs ablations and robustness checks before promotion,
+8. stores durable lessons in memory,
+9. uses those lessons to improve the next search iteration.
+
+The central design principle is:
+
+> The agent may modify candidate model code, training logic, features, and architecture. **Enforcement of the evaluator boundary must come from out-of-band machinery** (§3.1.1), not from prompt rules. In-band controls (rules in this document) are advisory until out-of-band enforcement is configured.
+
+This keeps the system aligned with real model improvement rather than benchmark gaming.
+
+---
+
+## 1.5 Start Here — Level-1 implementation path (NEW)
+
+If you are an agent adopting this protocol for the first time, **do not try to implement all 26 sections at once.** Run the Level-1 path below first. Run categories at Level 1 are limited to `promising` / `level1_branch_winner` / `failed` / `invalid` / `informative_failure` (see §13.3) — full `promoted` status requires the ablation discipline that arrives at Level 3 (§24).
+
+### Start Here checklist
+
+Do these in order. Each step references the section you need, but you only need to read that one section to do the step.
+
+1. **Pick a cost tier (§6.1).** Time one full baseline run. Look up the tier. This single decision configures seed counts, evidence labels, and budgets throughout the rest of the protocol.
+2. **Declare enforcement (§3.1.1).** Pick one of the 4 enforcement patterns or `mechanism: none` (and accept the in-band-only label). Write `enforcement.yaml`. Without this step, anti-cheating is honor-system and you must communicate that honestly in every report.
+3. **Define the scorecard (§6.1).** Write `metrics.yaml` with: primary metric, 2-4 secondaries, 1-3 guardrails, the cost tier from step 1, the statistical defaults (§13.2.1 will fill in if you omit), `max_playbook_tokens`, ledger rotation interval.
+4. **Freeze splits (§6.3.1) and snapshot data (§6.3).** Content-hash the dataset and commit the hash. Freeze train/val/test split definitions — these become read-only via §3.1.1 enforcement.
+5. **Establish baseline (§6.3).** Run baseline at the cost-tier seed count. Save reproducibility metadata (§17.5.1). Write a baseline report including known weaknesses.
+6. **Write 3-5 golden fixtures (§17.1.1).** Pick 3-5 representative inputs; record the current evaluator's outputs as ground truth. This is your tripwire for evaluator drift.
+7. **Open the playbook + ledger (§14).** Empty files are fine. The first iteration fills them.
+8. **First iteration loop (§7).** Pick the most observable failure mode. Write a hypothesis (§3.2). Write a one-switch candidate proposal (§10 + §11.1.1). Implement. Smoke test. Cheap proxy. Full validation. Score against §13.2.1. Mark category per §13.3. **The highest label available at Level 1 is `level1_branch_winner`** (§13.3) — `promoted` is reserved for Level 3+.
+9. **Iterate.** Two to four iterations is enough to know whether the loop is working for your project.
+10. **Decide whether to graduate to Level 2 or skip to Level 3.** If the loop produces a `level1_branch_winner` you want to validate, you'll need ablations (Level 3) and a Skeptic (Level 3) — not Literature Scout (Level 2). If you want to *find more* candidates before promoting any, add the Literature Scout (Level 2). The two upgrades are independent.
+
+### What Level 1 deliberately omits
+
+| Skipped at Level 1 | Arrives at | Reason |
+|---|---|---|
+| Literature Scout role + briefs | Level 2 | Adds an LLM-call cost; not necessary to learn the loop |
+| Required ablations + factorial grids (§16) | Level 3 | Ablations cost N more runs; defer until baseline-vs-candidate is reliable |
+| Skeptic role + role separation (§5.0–5.7) | Level 3 | Defer until you have a candidate worth red-teaming |
+| Counter-example campaign reporting (§22a) | Level 3 | Negative-result discipline matters more once you have ablations |
+| Validation-set exhaustion enforcement (§17.6) | Level 2 | Tracking begins at Level 1 (cheap); enforcement at Level 2+ |
+| Promotion packet schema (§10.5) | Level 3 | Required at first `promoted` status, not before |
+
+### Smallest legitimate "campaign" at Level 1
+
+One baseline + two candidate iterations (one per cost-tier seed count) + one branch decision. That's a complete Level-1 unit of work. The output is either: "no candidate beat the threshold; here is the negative lesson" or "candidate X is `level1_branch_winner`; next step is **Level-3 graduation** (ablation + Skeptic + non-agent verifier) to attempt `promoted`."
+
+This is the Karpathy-baseline equivalent in this protocol — minus the cheating risk.
+
+---
+
+## 2. Research basis and design influences
+
+This protocol synthesizes patterns from publicly-available work. Each citation is tagged with its review status. Patterns are not validated by the protocol; the protocol re-states their structure.
+
+### 2.1 Citation status table
+
+| Source | arXiv / URL | Type | Review status | Date checked | Used for |
+|---|---|---|---|---|---|
+| Karpathy `autoresearch` | github.com/karpathy/autoresearch | GitHub prototype | Unreviewed (prototype) | 2026-05-18 | Baseline loop pattern |
+| AutoResearch-RL | arxiv.org/abs/2603.07300 | arXiv preprint | **Withdrawn by arXiv admin** | 2026-05-18 | Loop-as-RL framing (idea source only) |
+| Hyperagents / DGM-H | arxiv.org/abs/2603.19461 | arXiv preprint | Unreviewed concurrent preprint | 2026-05-18 | Self-improvement framing (idea source only) |
+| MARS | arxiv.org/abs/2602.02660 | arXiv preprint | Unreviewed concurrent preprint | 2026-05-18 | Budget-aware tree search, reflective memory |
+| AlphaLab | arxiv.org/abs/2604.08590 | arXiv preprint | Unreviewed concurrent preprint | 2026-05-18 | Strategist/Worker, persistent playbook |
+| Deep Researcher Agent | arxiv.org/abs/2604.05854 | arXiv preprint | Unreviewed concurrent preprint | 2026-05-18 | Leader/worker, bounded memory |
+| ResearchGym | arxiv.org/abs/2602.15112 | ICLR 2026 workshop | Peer-reviewed (workshop) | 2026-05-18 | Long-horizon failure modes |
+| MLGym | openreview.net/forum?id=ryTr83DxRq | COLM 2025 | Peer-reviewed (conference) | 2026-05-18 | Long-horizon failure modes |
+| AI Scientist v2 | arxiv.org/abs/2504.08066 | arXiv technical report | Technical report | 2026-05-18 | Tree search, ablation requirement |
+| AI Scientist (Nature) | nature.com/articles/s41586-026-10265-5 | Nature article | Peer-reviewed (journal) | 2026-05-18 | End-to-end automated research framing |
+
+### 2.2 How to read this table
+
+- **Peer-reviewed** sources support specific patterns adopted by this protocol.
+- **Unreviewed preprints** are design influences only. **The protocol's structural choices are not validated by these papers** — they are inspired by them.
+- **Withdrawn** sources are listed for traceability; their ideas may still be useful but their empirical claims are not.
+
+This labeling exists because §17.3 requires marking unreviewed papers as such. The v0.1 draft violated its own rule; v0.2 corrects this.
+
+### 2.3 Notable patterns absorbed (per source)
+
+**Karpathy `autoresearch`:** simple repeatable loop; constrained editable surface; fixed evaluation budget; code judged by external metric. Limitations addressed here: too local/greedy, no literature search, weak cross-branch memory, no multi-objective handling, vulnerable to repeated validation-set overfit.
+
+**MARS (preprint, unreviewed):** budget-aware tree search rather than flat exploration; modular decomposition; sibling comparisons for causal lessons; cross-branch transfer over single-best-branch following.
+
+**AlphaLab (preprint, unreviewed):** domain-understanding phase before model edits; adversarial evaluator validation; Strategist/Worker architecture; persistent domain playbook; explicit literature search; multiple frontier models for coverage.
+
+**Deep Researcher Agent (preprint, unreviewed):** separate high-level planning from cheap process monitoring; bounded distilled memory; leader-worker minimal-toolset; sustained multi-day operation.
+
+**ResearchGym (workshop) + MLGym (conference):** locked-environment evaluation; reliability gaps; explicit budget/time/confidence management; multi-run promotion gate.
+
+**AI Scientist v2 (tech report):** experiment-manager agent for tree budget allocation; required ablations and review artifacts.
+
+**Hyperagents / DGM-H (preprint, unreviewed):** archive of variants; meta-level improvement; preserved cross-iteration lessons.
+
+---
+
+## 3. Core principles
+
+### 3.1 Locked judge, editable candidate (advisory; see §3.1.1 for enforcement)
+
+The agent may edit:
+
+- model architecture, training loop, loss functions, feature construction, preprocessing, sampling strategy, optimizer/scheduler, regularization, inference-time post-processing, calibration modules, experiment configs, documentation and analysis scripts.
+
+The agent must not edit without explicit human approval:
+
+- train/validation/test split definitions, held-out data, metric formulas, promotion thresholds, leaderboard writer, bootstrap/uncertainty code, final reporting code, benchmark harness, data leakage checks, any file used to decide whether a candidate is accepted.
+
+### 3.1.1 Enforcement is out-of-band (REQUIRED for non-toy adoption)
+
+**The rules in §3.1 are policy, not enforcement.** A protocol document cannot prevent an agent from editing a file. To make §3.1 real, the host project MUST configure at least one out-of-band enforcement pattern from the menu below. **Until one is configured, all anti-cheating controls in §17.1 are advisory; campaigns must label their results "low-trust" in reports.**
+
+Acceptable out-of-band enforcement patterns:
+
+1. **CI-enforced protection.** `protected_paths.yaml` is committed to a `main` branch with branch protection enabled. CODEOWNERS requires a non-agent reviewer for any PR touching listed paths. CI fails any PR whose diff includes a protected path. The agent operates on a feature branch with no rights to bypass branch protection. *Trust level: high if the agent has no admin token.*
+2. **Pre-receive hook on a remote without agent shell access.** The remote git server runs a pre-receive hook that rejects pushes touching protected paths or evaluator hashes. The agent has push but not server-shell access. *Trust level: high.*
+3. **Out-of-process verifier.** A `make verify` (or equivalent) target runs from a human-controlled session before each promotion attempt. It (a) recomputes a tamper-evident manifest of `evaluator/`, (b) compares it to a signed baseline in a separate VCS or signed file, (c) launches training only if the manifest matches. *Trust level: medium — requires the human to actually run it.*
+4. **OS / container-level read-only mount.** The training process runs inside a container where `evaluator/` is bind-mounted read-only and the agent's identity has no write permission. The container image is built from a signed source the agent cannot modify. *Trust level: high.*
+
+**Honesty disclaimer.** No protocol document can make a self-bootstrapping agent uncheatable. The patterns above shift the threat model from "agent self-discipline" to "agent self-discipline plus an external verifier the agent did not write." If the host project does not implement at least one of these, any anti-cheating claim in this protocol is a description, not a guarantee — and the protocol's promotion-gate output (§18) must be labeled `enforcement: in-band-only`.
+
+### 3.2 Hypothesis-first, not patch-first
+
+Every experiment must start from a written hypothesis:
+
+> Because [observed failure], changing [specific mechanism] should improve [specific metric/subgroup] without worsening [guardrail metrics].
+
+A patch without a written hypothesis is invalid.
+
+### 3.3 Literature-informed search (with offline fallback — §9.0)
+
+Before proposing nontrivial architecture changes, the research agent should search for recent papers, strong public implementations, and benchmark-tested methods related to the current model family and failure mode. **When live literature search is unavailable, the agent operates in offline mode (§9.0) and labels its proposals `not literature-verified`.**
+
+### 3.4 Multi-objective model quality
+
+Do not optimize a single scalar unless the project truly has only one objective. Use a scorecard:
+
+- primary metric, calibration metric, subgroup metrics, robustness across seeds, inference/training cost, memory footprint, failure-class behavior, fairness/safety constraints when applicable.
+
+A candidate can win the primary metric and still fail promotion.
+
+### 3.5 Research tree, not greedy chain
+
+Maintain multiple branches: architecture, loss/objective, data/sampling, features, optimization, calibration/post-processing, system/performance. Allocate more budget to branches with evidence, preserve diversity.
+
+### 3.6 Ablate before promotion
+
+A candidate is not promotable until the system has identified the minimal change or set of changes that caused the improvement. Every promoted candidate needs:
+
+- baseline rerun, candidate rerun, at least one ablation (see §16.1 for the type), **the number of random seeds defined by the cost tier in §6.1** (not a hard universal minimum), unchanged evaluator, subgroup-regression analysis, cost comparison.
+
+### 3.7 Memory must be distilled, not dumped
+
+Two memory stores:
+
+1. **Experiment ledger:** append-only, full detail, **rotated per §17.5.4** to prevent unbounded growth.
+2. **Research playbook:** compact, curated, bounded by `max_playbook_tokens` from `metrics.yaml`.
+
+---
+
+## 4. Required repository structure
+
+A project adopting this protocol creates an `autoresearch/` directory.
+
+```text
+autoresearch/
+  README.md
+  PROTOCOL_VERSION              # contains 0.4
+  protocol.md
+  MIGRATION.md
+  config/
+    editable_paths.yaml
+    protected_paths.yaml        # also listed in itself; only meaningful if §3.1.1 enforcement is configured
+    metrics.yaml                # carries cost_tier, per-metric direction + aggregation + eval_dtype,
+                                # statistics defaults, evaluator_equivalence, budgets, val_set_exposure_budget
+    agents.yaml
+    enforcement.yaml            # declares chosen §3.1.1 mechanism + parameters
+  state/
+    experiment_ledger.jsonl     # append-only, rotated per §17.5.4
+    experiment_ledger.archive/  # rotated chunks
+    research_tree.json
+    playbook.md
+    open_questions.md
+    known_failures.md
+    eval_manifest.signed        # tamper-evident hash list of evaluator/ contents
+    val_exposure.json           # cumulative val-query counter (§17.6)
+    budget_ledger.jsonl         # per-iteration LLM/tool/compute accounting (§17.7)
+  proposals/
+    YYYYMMDD-HHMMSS-<6hex>-<slug>.md         # 6-hex hash suffix avoids same-second collisions
+    YYYYMMDD-HHMMSS-<6hex>-promotion-request.md  # agent-emitted; references ledger (§10.5)
+    YYYYMMDD-HHMMSS-<6hex>-promotion-request.json
+  reports/
+    YYYYMMDD-HHMMSS-<6hex>-<slug>.md
+    YYYYMMDD-HHMMSS-<6hex>-skeptic.md        # §5.7 artifact
+    YYYYMMDD-HHMMSS-<6hex>-ablation.md       # §16 artifact
+    YYYYMMDD-HHMMSS-<6hex>-promotion-packet.md     # verifier-written + signed (§10.5)
+    YYYYMMDD-HHMMSS-<6hex>-promotion-packet.json
+  literature/
+    canon.bib                   # curated bibliography for offline mode (§9.0)
+    briefs/
+      YYYYMMDD-<slug>.md
+  scripts/
+    run_candidate.sh
+    evaluate_candidate.sh
+    compare_to_baseline.py
+    validate_no_tampering.py    # advisory — real enforcement per §3.1.1
+    summarize_results.py
+    rotate_ledger.py
+    behavioral_equivalence.py   # §17.1.1 tolerance-based golden-fixture test
+    verifier/                   # NEW — non-agent verifier scripts for §10.5 promotion packets
+      verify_request.py
+      sign_packet.py
+  templates/
+    proposal_template.md
+    promotion_request_template.md
+    promotion_packet_template.md
+    result_report_template.md
+    literature_review_template.md
+    skeptic_review_template.md
+    counter_example_report_template.md
+
+# Project-level (outside autoresearch/, but referenced by it):
+data/
+  splits/
+    MANIFEST.json               # frozen-split content hashes (§6.3.1); protected
+    train.parquet               # or whatever your data layout is
+    val.parquet
+    test.parquet
+evaluation/
+  fixtures/                     # §17.1.1 golden fixtures; protected
+  fixtures/archive/             # archived goldens after refresh
+  metric_defs.py                # protected
+```
+
+---
+
+## 5. Agent roles
+
+### 5.0 Role separation modes (NEW)
+
+A "role" in §5 is meaningful only to the extent the role-holder is independent from other roles. Four independence levels:
+
+| Level | Mechanism | Adversarial value | Required for |
+|---|---|---|---|
+| 0 — Same session, same model | Same context window, different prompt headers | None (model has shared memory) | Toy / Level 1 (§24) |
+| 1 — Fresh session, same model | New conversation, no shared scratchpad | Weak — same priors | Level 2 |
+| 2 — Different model family | E.g., Claude as ideator, Codex as skeptic | Medium — different priors | Level 3-4 |
+| 3 — Human or deterministic CI | Final reviewer is non-AI or a pre-registered script | Strong | Promotion (§18) |
+
+**Required separation by role:**
+
+- Implementation Worker × Skeptic: **Level 2 minimum.** If only Level 0 is available, the Skeptic operates from a fixed checklist (no free reasoning), and any "promoted" result MUST be labeled `skeptic: checklist-only`.
+- Research Director × Reflection Analyst: Level 1 minimum.
+- Literature Scout × Implementation Worker: Level 1 minimum.
+- Promotion approval: Level 3 (human or deterministic CI) for any production-facing release.
+
+**Fallback when separation is unavailable:** the campaign continues, but every promoted result carries the lowest-independence-level achieved as metadata. Reports and dashboards display this prominently.
+
+### 5.1 Research Director
+
+Maintains the research tree; chooses next branch; assigns work; enforces budget and promotion gates; updates the playbook; decides stop/branch/backtrack/escalate. **Must not directly edit protected evaluator files** (per §3.1.1).
+
+### 5.2 Domain Scout
+
+Inspects dataset docs, baseline model and metrics; identifies failure modes; maps domain constraints; writes initial domain report; maintains `known_failures.md`.
+
+### 5.3 Literature Scout
+
+Searches available sources (web when available, canon.bib when offline — §9.0); focuses on active branch and failure mode; extracts implementation-relevant ideas; prefers methods with ablations and code; flags speculative ideas; produces a literature brief. Includes `web_search_used: bool` field in every brief.
+
+### 5.4 Implementation Worker
+
+Implements one scoped candidate change (§11.1.1); avoids protected paths; adds/updates tests; minimal diffs; writes change summary; runs smoke tests before training.
+
+### 5.5 Experiment Runner
+
+Launches training/evaluation; cheap log monitoring; early-stops failed runs; collects artifacts; captures reproducibility metadata (§17.5.1). **This role SHOULD be non-LLM automation** — letting an LLM tail logs is the cost sink §12.3 warns against. Use shell scripts / make targets.
+
+### 5.6 Reflection Analyst
+
+Compares candidate vs baseline; identifies likely causal mechanisms; inspects failure cases; updates branch lessons; proposes ablations; decides noise / promising / promotable.
+
+### 5.7 Skeptic / Red Team
+
+Looks for leakage; checks metric gaming; verifies no protected file modified (per §3.1.1 enforcement output); tests subgroup regressions; challenges overconfident claims; requires ablations for surprising wins. **Produces an explicit `skeptic_review.md` artifact every iteration** so the pass is visible after the fact. **Must operate at Level 2 separation from Implementation Worker** (per §5.0).
+
+---
+
+## 6. Initialization procedure
+
+### 6.1 Define objective, constraints, and cost tier
+
+Write `autoresearch/config/metrics.yaml`. **Pick a cost tier** based on the wall-clock cost of one full training run; the tier determines the seed counts used by the promotion gate (§18).
+
+#### Cost tiers (NEW)
+
+| Tier | Full-run wall clock | min_seeds_for_candidate | min_seeds_for_promotion | Notes |
+|---|---|---|---|---|
+| micro | ≤ 30 min | 5 | 5 | Cheap; demand strong evidence |
+| small | 30 min – 4 hr | 3 | 5 | Default for hobby / class projects |
+| medium | 4 – 24 hr | 2 | 3 | Default for solo-research persona |
+| large | 24 – 72 hr | 2 + bootstrap CI | 3 + bootstrap CI | Acknowledge cost; document |
+| xlarge | > 72 hr | 1 + bootstrap CI + paired examples | 2 + cost-justification override | Promotions labeled `low-evidence` |
+
+**Low-evidence promotion label:** at xlarge tier (and at large tier without bootstrap), the report MUST include an `evidence_level: low` field. Production deployment from a low-evidence promotion requires a separate human override (§18 criterion 13).
+
+#### Example metrics.yaml
+
+```yaml
+protocol_version: 0.4
+cost_tier: medium
+max_gpu_hours_per_candidate: 30
+
+primary_metric:
+  name: validation_nll
+  direction: minimize          # required — §13.2.1 decision rule branches on this
+  minimum_meaningful_delta: 0.005
+
+secondary_metrics:
+  - {name: ranked_probability_score, direction: minimize}
+  - {name: accuracy, direction: maximize}
+  - {name: expected_calibration_error, direction: minimize}
+
+guardrails:
+  # Direction is required for §13.2.1. max_regression_relative is the
+  # tolerance threshold; the sign convention is "how much worse the
+  # candidate is allowed to be on this metric, given its direction."
+  - {name: rare_class_recall,    direction: maximize, max_regression_relative: 0.02}
+  - {name: inference_latency_ms, direction: minimize, max_regression_relative: 0.10}
+  - {name: gpu_memory_gb,        direction: minimize, max_absolute: 24}
+
+promotion:
+  require_baseline_rerun: true
+  require_candidate_rerun: true
+  require_ablation: true
+  require_locked_test_set: true
+  # seed counts come from cost_tier above
+
+statistics:
+  method: paired_bootstrap          # see §13.2.1
+  resamples: 10000
+  confidence_level: 0.95
+  multiple_comparison_correction: holm
+  decision_rule: ci_clears_min_delta
+
+memory:
+  max_playbook_tokens: 8000
+  ledger_rotation_iterations: 200
+```
+
+### 6.2 Lock evaluator and protected paths (per §3.1.1)
+
+Write `protected_paths.yaml` and `enforcement.yaml`. **Until `enforcement.yaml` declares one of the §3.1.1 patterns, all `protected_paths.yaml` checks are advisory.**
+
+```yaml
+# protected_paths.yaml
+protocol_version: 0.4
+protected_paths:
+  - data/splits/**
+  - evaluation/**
+  - metrics/**
+  - autoresearch/scripts/compare_to_baseline.py
+  - autoresearch/scripts/behavioral_equivalence.py
+  - autoresearch/config/metrics.yaml
+  - autoresearch/config/protected_paths.yaml
+  - autoresearch/config/enforcement.yaml
+  - autoresearch/state/eval_manifest.signed
+  - notebooks/final_report/**
+  - dashboards/model_comparison/**
+
+requires_human_review:
+  - data/**
+  - evaluation/**
+  - metrics/**
+  - production/**
+```
+
+```yaml
+# enforcement.yaml
+protocol_version: 0.4
+mechanism: ci_enforced       # one of: ci_enforced, pre_receive, oop_verifier, container_ro, none
+ci_enforced:
+  base_branch: main
+  branch_protection: required
+  codeowners_required: true
+  reviewer_identity: human   # NOT the agent
+trust_level: high
+# If mechanism: none, the host project acknowledges that anti-cheating controls are advisory only.
+```
+
+### 6.3 Establish baselines
+
+Before the first candidate run:
+1. Run baseline under the evaluator.
+2. Save metrics, artifacts, hardware/software versions, seeds, git SHA, data snapshot ID, runtime/cost.
+3. Capture reproducibility metadata (§17.5.1): torch version, CUDA, cuDNN, `torch.use_deterministic_algorithms` state, AMP/dtype, dataloader workers, OS.
+4. Create baseline report with known weaknesses and subgroup failures.
+
+### 6.3.1 Freeze splits
+
+Before any candidate run, **the train/val/test split definitions must be frozen and committed under §3.1.1 enforcement.** "Frozen" means:
+
+- Split membership is content-addressed (e.g., a sorted list of example IDs hashed to a single `train_split_sha256`, `val_split_sha256`, `test_split_sha256`).
+- The hashes are written to `data/splits/MANIFEST.json` and committed.
+- `data/splits/MANIFEST.json` is listed in `protected_paths.yaml` and protected by the host's §3.1.1 mechanism.
+- Any change to split membership is a holdout refresh (§17.6.3), requires human review, and bumps `val_set_version` in `metrics.yaml`.
+
+Concretely, for a project with row-indexed data:
+
+```json
+{
+  "protocol_version": "0.4",
+  "data_snapshot_id": "data-snap-2026-05-15",
+  "data_snapshot_sha256": "...",
+  "splits": {
+    "train": {"row_ids_sha256": "...", "size": 80000},
+    "val":   {"row_ids_sha256": "...", "size": 10000},
+    "test":  {"row_ids_sha256": "...", "size": 10000}
+  },
+  "val_set_version": 1,
+  "frozen_at": "2026-05-15T12:00:00Z",
+  "frozen_by": "<human-or-CI-identity>"
+}
+```
+
+The agent CANNOT regenerate this file. Any drift between the live split files and the manifest hashes invalidates the campaign until a holdout refresh is performed (§17.6.3) or the live splits are restored. The `behavioral_equivalence.py` script (§17.1.1) reads `MANIFEST.json` at every iteration and refuses to launch evaluation on a mismatched split.
+
+### 6.4 Create initial research tree
+
+```json
+{
+  "protocol_version": "0.4",
+  "root": {
+    "children": ["architecture", "loss_objective", "data_sampling", "features", "optimization", "calibration", "systems_efficiency"]
+  }
+}
+```
+
+Each branch tracks: active hypotheses, completed experiments, best result, known dead ends, next candidate ideas, literature notes.
+
+---
+
+## 7. The main loop
+
+```text
+1. Select branch (§8)
+2. Diagnose current bottleneck
+3. Run literature pass (live or offline — §9, §9.0)
+4. Write proposal (§10)
+5. Pre-register expected outcome
+6. Implement one scoped change (§11.1.1)
+7. Run §3.1.1 enforcement check; if mechanism: none, label results
+8. Smoke tests (§12.1 Stage A)
+9. Cheap proxy (§12.1 Stage B); kill obvious losers
+10. Full validation (§12.1 Stage C)
+11. Statistical comparison (§13.2.1)
+12. Skeptic review (§5.7); produce skeptic_review.md
+13. Reflect; update ledger + playbook
+14. Decide: reject, revise, ablate, expand, or promote (§18)
+```
+
+---
+
+## 8. Branch selection
+
+Coarse-grained scoring (low/medium/high). Suggested formula as guidance only, not literal arithmetic:
+
+```text
+branch_priority ≈ (expected_gain × confidence × novelty × lit_support) / cost
+```
+
+Prioritize: clear failure mode, plausible mechanism, literature support, low complexity, low eval cost, underexplored opportunity, cross-branch lesson. Avoid: repeated failures without new info, unclear success criteria, expensive-before-cheap-validation, evaluator-touching changes (forbidden), no plausible mechanism.
+
+---
+
+## 9. Literature Scout procedure (live mode)
+
+### 9.0 When literature search is unavailable (NEW)
+
+If web search is unavailable, rate-limited, paywalled, or otherwise infeasible, the Scout enters **offline mode**:
+
+1. Read `autoresearch/literature/canon.bib` — a curated, version-controlled bibliography the host project maintains manually.
+2. Read any cached papers under `autoresearch/literature/cache/`.
+3. Read the host project's own README, design docs, and prior briefs.
+4. Produce a brief labeled `mode: offline` and `web_search_used: false`.
+5. **Block novelty claims** in offline mode. Engineering experiments (already-published techniques) may proceed; novel-architecture proposals must wait for live mode.
+
+Every proposal records its scout's mode in the frontmatter.
+
+### 9.1–9.5 (live-mode procedure)
+
+[Unchanged from v0.1 — search inputs, search targets, query patterns, brief format, quality rules. See v0.1 §9 for full text; reproduced briefly below.]
+
+**Search targets:** arXiv, Papers With Code, conference proceedings, GitHub, Hugging Face, reputable lab blogs, benchmark leaderboards, issue discussions.
+
+**Brief format** (add to v0.1's version):
+
+```markdown
+# Literature Brief: <branch> / <hypothesis>
+
+protocol_version: 0.4
+mode: live | offline
+web_search_used: true | false
+scout_agent: claude-sonnet-4.5 | codex | ...
+
+## Search scope
+...
+
+## Candidate ideas
+### Idea 1: <name>
+- Source: <link or canon.bib key>
+- Source type: peer-reviewed | preprint | blog | repo | speculation
+- ...
+```
+
+**Quality rules:** prefer code-available + ablation-tested + clear mechanism + compatible-with-constraints. Skeptical of: no-baseline papers, benchmark-only wins, large-compute methods, single-metric-with-other-regressions, evaluator-touching changes.
+
+---
+
+## 10. Proposal template
+
+```markdown
+# Experiment Proposal: <short name>
+
+protocol_version: 0.4
+proposal_id: <YYYYMMDD-HHMMSS-6hex-slug>
+branch: architecture | loss_objective | data_sampling | features | optimization | calibration | systems_efficiency
+parent_proposal_id: <id or "baseline">
+literature_brief: <path>
+web_search_used: true | false
+
+## Hypothesis
+Because <observed failure>, changing <mechanism> should improve <metric/subgroup> by ≥ <expected_delta> without worsening <guardrails> beyond <regression_tolerance>.
+
+## Literature basis
+- <source 1> [<source type>]: <relevant finding>
+
+## Proposed change
+Describe the minimal implementation. Per §11.1.1, ONE non-baseline config switch.
+
+## Single non-baseline switch
+config:
+  <switch_name>: <non-baseline value>
+all other switches pinned to baseline.
+
+## Files expected to change
+- <editable file>
+
+## Protected files that must not change
+- <protected file>
+
+## Expected result
+- Primary metric:     baseline=___    target=___    minimum_meaningful_delta=___
+- Secondary metrics:  [<name>: baseline=___ target=___]
+- Guardrails:         [<name>: baseline=___ max_regression=___]
+
+## Evaluation plan
+- Smoke test:       <budget>
+- Cheap proxy:      <budget>
+- Full validation:  <budget>
+- Seeds:            <from cost_tier>
+- Ablation:         <type from §16.1>
+
+## Early stopping rule
+Stop if <condition>.
+
+## Risks
+- leakage:           ...
+- compute:           ...
+- metric gaming:     ...
+- implementation:    ...
+
+## Promotion criteria
+This candidate is promotable if all of: <enumerate from §18>.
+```
+
+---
+
+## 10.5 Promotion request and promotion packet — separation of concerns
+
+A promotion is **two artifacts**, written by **two different actors**:
+
+1. **`promotion_request`** — written by the agent (Research Director role). Describes a candidate the agent believes meets the §18 criteria. Names the ledger entries that contribute. Does NOT set `status: promoted`. The agent CANNOT self-sign a promotion.
+2. **`promotion_packet`** — written by a **non-agent verifier** that reads the request, validates it against the schema, re-checks ledger evidence, and signs `status: promoted` (or rejects). The verifier is a separate process: a non-agent CI job, an out-of-process verification script run by a human, or a human reviewer using the standard checklist.
+
+Without the verifier, a campaign can produce `promotion_request` artifacts but cannot promote. This is the protocol-level expression of §3.1.1: enforcement is out-of-band, not self-attested.
+
+### File layout
+
+```text
+autoresearch/proposals/<id>-promotion-request.md   # agent-written
+autoresearch/reports/<id>-promotion-request.json   # agent-written, machine-readable
+
+autoresearch/reports/<id>-promotion-packet.md      # verifier-written
+autoresearch/reports/<id>-promotion-packet.json    # verifier-written + signed
+```
+
+### Promotion-request schema (agent-emitted)
+
+The request **references ledger entries** rather than duplicating their content. The ledger (§14.1) is the single source of truth for metrics, costs, statuses, and artifacts. The request collects pointers and the small set of incremental fields the verifier needs.
+
+```yaml
+protocol_version: 0.4
+request_id: "<YYYYMMDD-HHMMSS-6hex>"
+candidate_proposal_id: "<id>"
+campaign_id: "<id>"
+maturity_level_used: 1 | 2 | 3 | 4 | 5    # MUST be >= 3 to attempt promotion
+
+# References to ledger entries — content is read from the ledger by the verifier.
+# Each reference also carries a content hash so the verifier can detect drift.
+references:
+  baseline_run:    {ledger_id: "<id>", content_sha256: "..."}
+  candidate_runs:                                 # one entry per seed
+    - {ledger_id: "<id>", content_sha256: "..."}
+    - {ledger_id: "<id>", content_sha256: "..."}
+    - {ledger_id: "<id>", content_sha256: "..."}
+  baseline_rerun:  {ledger_id: "<id>", content_sha256: "..."}
+  ablation_runs:
+    - {ledger_id: "<id>", content_sha256: "..."}
+  skeptic_review:  {path: "reports/<id>-skeptic.md", content_sha256: "..."}
+  literature_brief:{path: "literature/briefs/<id>.md", content_sha256: "..."}  # optional, Level 2+
+
+# Verifier-checkable claims (the agent asserts these; the verifier re-checks)
+claims:
+  enforcement_mode: "ci_enforced | pre_receive | oop_verifier | container_ro | none"
+  role_separation_achieved:
+    implementation_worker_vs_skeptic: "level_0 | level_1 | level_2 | level_3"
+    research_director_vs_reflection_analyst: "..."
+    literature_scout_vs_implementation_worker: "..."
+  ablation:
+    change_type: "single_component_swap | stack | additive_component | algorithmic"
+    factorial_grid_completed: false              # true only for stacks
+  val_set_exposure_at_request:
+    queries_against_val_this_campaign: 47
+    exposure_budget: 100                          # from metrics.yaml
+  budget_at_request:
+    llm_tokens_total: 1284000
+    tool_calls_total: 312
+    gpu_hours_total: 71.2
+  behavioral_equivalence_test_passed_for_evaluator: true
+  causal_attribution: "<one-paragraph causal claim grounded in the referenced ablation entries>"
+
+# Requested status — the agent asks; the verifier decides.
+requested_status: "promoted | low_evidence_promoted"
+```
+
+### Promotion-packet schema (verifier-written, signed)
+
+The verifier reads the request, fetches every referenced ledger entry, re-verifies each claim, and signs the result.
+
+```yaml
+protocol_version: 0.4
+packet_id: "<YYYYMMDD-HHMMSS-6hex>"
+request_id: "<the request that produced this packet>"
+
+# Verifier identity — required, must NOT be the agent
+verifier:
+  type: "non_agent_ci | oop_verifier_script | human"
+  identity: "<CI job id or human name>"
+  signed_at: "<timestamp>"
+  signature: "<HMAC or detached signature of the packet's other fields>"
+
+# Final status — set by the verifier, not the agent
+status: "promoted | low_evidence_promoted | rejected"
+rejection_reasons: []                # populated only when status == "rejected"
+
+# Computed enforcement label (derived from claims, not asserted)
+enforcement: "ci_enforced | pre_receive | oop_verifier | container_ro | in_band_only"
+
+# Computed deployability label
+not_deployable: false                # true iff enforcement == "in_band_only" OR status == "low_evidence_promoted"
+
+# Verifier's check results — one boolean per §18 criterion
+criteria_check:
+  c1_primary_meaningful_delta: true
+  c2_statistical_evidence_direction_aware: true
+  c3_guardrails_pass: true
+  c4_subgroups_acceptable: true
+  c5_candidate_reruns_count: 3
+  c6_baseline_rerun_matches: true
+  c7_ablation_supports_mechanism: true
+  c8_protected_paths_unchanged: true
+  c9_no_leakage_detected: true
+  c10_runtime_within_budget: true
+  c11_reproducible_within_tolerance: true
+  c12_skeptic_review_complete: true
+  c13_human_review_complete: true | false | "pending"
+  c14_exposure_budget_ok: true
+  c15_total_budgets_ok: true
+  c16_request_schema_valid: true
+  c17_maturity_level_ge_3: true
+
+# Pointer to artifacts the verifier produced
+artifacts:
+  derived_summary: "<short prose, by verifier, not by agent>"
+  signed_archive: "<path to tarball or content-addressed bundle>"
+```
+
+### Verifier validation rules
+
+The verifier MUST:
+
+1. Re-hash every referenced ledger entry; reject if any `content_sha256` does not match the live ledger.
+2. Re-compute the §13.2.1 decision rule from referenced ledger metrics; reject if any claim disagrees.
+3. Set `enforcement: "in_band_only"` and `not_deployable: true` if `enforcement_mode == "none"`.
+4. Cap status at `low_evidence_promoted` (never `promoted`) if `enforcement == "in_band_only"`.
+5. Reject if `claims.ablation.change_type == "stack"` AND `claims.ablation.factorial_grid_completed != true`.
+6. Reject if `val_set_exposure_at_request.queries >= exposure_budget` (`holdout_refresh_due`).
+7. Reject if `behavioral_equivalence_test_passed_for_evaluator != true`.
+8. Reject if `maturity_level_used < 3`.
+9. Reject if `role_separation_achieved.implementation_worker_vs_skeptic` is below `level_2`.
+10. Sign `packet.signature` over all preceding fields with a key not available to the agent.
+
+A rejected request returns the candidate to `promotion_candidate` status; the agent may revise and resubmit.
+
+### Why split request from packet
+
+In v0.3, §10.5 said "the agent produces a promotion packet" — but the packet contained `status: promoted` and `signature`-equivalent fields. That makes promotion self-attested. v0.4 separates the two:
+
+- The **agent** is the experimenter; it documents what it did and asks for promotion.
+- The **verifier** is the judge; it sets status.
+
+This is the same split that §3.1.1 makes for evaluator enforcement: in-band assertions are advisory until an out-of-band actor confirms them. The promotion packet is the protocol's most consequential artifact, so it gets the same treatment.
+
+If your environment cannot host a non-agent verifier (e.g., a solo researcher with no CI), the campaign can still produce `promotion_request` artifacts but every `promotion_packet` carries `verifier.type: human`, `enforcement: in_band_only`, `not_deployable: true`. That is honest. Self-signed promotions are not honest.
+
+---
+
+## 11. Implementation rules
+
+### 11.1 One *conceptual* change per patch
+
+Each candidate tests one conceptual change. If a change requires multiple files (e.g., a new module + its config + its test), that is acceptable, but the *mechanism* must be singular.
+
+### 11.1.1 Candidate / Component / Stack
+
+The protocol distinguishes three levels:
+
+- **Component** — a single adapter or module that can be enabled/disabled by one config switch (e.g., `encoder_type: candidate_attention_pool`).
+- **Candidate** — a proposal that flips **exactly one** non-baseline switch. All other switches pinned to baseline. This is what §11.1 means by "one idea per patch".
+- **Stack** — two or more non-baseline switches active simultaneously. Stacks are NOT candidates. They require a factorial ablation grid (§16.1.2) to attribute causality. A stack cannot be promoted until main effects AND interactions are measured.
+
+**Inline example.** A `model.yaml` baseline config might read:
+
+```yaml
+encoder_type: baseline_mean_pool
+loss_type: cross_entropy
+calibration: none
+optimizer: adamw
+lr_schedule: cosine
+```
+
+A valid **candidate** flips ONE switch only:
+
+```yaml
+# candidate.yaml — flips only encoder_type
+encoder_type: candidate_attention_pool   # ← the single non-baseline switch
+loss_type: cross_entropy                  # pinned to baseline
+calibration: none                          # pinned to baseline
+optimizer: adamw                           # pinned to baseline
+lr_schedule: cosine                        # pinned to baseline
+```
+
+A **stack** (NOT a candidate) flips two or more:
+
+```yaml
+# stack.yaml — flips encoder_type AND loss_type simultaneously
+encoder_type: candidate_attention_pool   # non-baseline #1
+loss_type: ordinal_ce_hybrid              # non-baseline #2  ← makes this a stack
+calibration: none
+optimizer: adamw
+lr_schedule: cosine
+```
+
+A stack proposal returns to the Research Director for factorial planning (§16.1.2). For 2 switches × 2 levels (baseline / non-baseline), the factorial is 4 cells; at medium-tier 3 seeds, 12 runs total before any causal claim is supportable.
+
+### 11.2 Use adapters for major architecture families
+
+When implementing literature ideas, create adapter modules in the tree:
+
+```text
+models/
+  encoders/
+    baseline_encoder.py
+    candidate_attention_pool_encoder.py
+  decoders/
+    baseline_decoder.py
+    candidate_residual_decoder.py
+```
+
+Adapters may coexist in the tree. Each *candidate* still flips only one switch (§11.1.1).
+
+### 11.3 Compatibility switches
+
+Every candidate is controlled by config. No manual code surgery required to revert.
+
+### 11.4 Tests
+
+At minimum: shape, forward-pass smoke, loss-finite, tiny-overfit (when applicable), serialization round-trip, deterministic-seed (per §17.5.1 caveats).
+
+### 11.5 Validate no tampering (advisory unless §3.1.1 configured)
+
+Before running:
+- inspect git diff
+- check protected paths
+- hash evaluator files; compare to `eval_manifest.signed`
+- verify data split IDs
+- verify metric code hash
+- verify no hidden network/download dependency unless declared in `enforcement.yaml`
+- verify no hardcoded validation/test labels
+
+**If `enforcement.yaml` declares `mechanism: none`, these checks are honor-system.** Per §3.1.1, the resulting promotion artifact is labeled `enforcement: in-band-only`.
+
+---
+
+## 12. Experiment execution
+
+### 12.1 Three-stage evaluation
+
+**Stage A: smoke test** (minutes) — catch broken code, verify shapes, training loop runs, loss decreases on tiny sample.
+
+**Stage B: cheap proxy** (small fraction of full training) — detect obvious losers, estimate learning curve, compare to baseline proxy.
+
+**Stage C: full validation** (full agreed budget) — produce comparable metrics, collect artifacts, prepare ablation/promotion decision.
+
+### 12.2 Early stopping
+
+Stop candidate early if: training diverges; loss non-finite; proxy metric far worse than baseline; memory/runtime exceeds budget; validation curve clearly dominated by baseline (defined per §12.2.1); implementation violates constraints.
+
+**§12.2.1 "Dominated" definition (NEW):** at any Stage B/C epoch step, the candidate's moving 5-epoch average of validation loss exceeds the baseline's by more than 2× the baseline's seed-variance.
+
+### 12.3 Monitoring
+
+Prefer cheap monitoring: process status, log files, metric files, GPU memory, checkpoint existence, wall-clock budget. **Experiment Runner SHOULD be non-LLM automation** (§5.5). Do not spend LLM calls on continuous log watching.
+
+---
+
+## 13. Evaluation and comparison
+
+### 13.1 Required metrics
+
+Every completed candidate reports: primary, secondaries, guardrails, subgroups, runtime, memory, parameter count, training stability, inference cost, seed variance, **reproducibility metadata (§17.5.1)**.
+
+### 13.2 Statistical comparison
+
+Acceptable methods (use the one declared in `metrics.yaml`):
+
+- paired bootstrap (default per §13.2.1)
+- Bayesian bootstrap
+- repeated-seed intervals
+- paired per-example metric deltas
+- subgroup confidence intervals
+
+Prefer paired comparisons when candidate and baseline predict on the same examples.
+
+### 13.2.1 Default decision rule (direction-aware)
+
+If `metrics.yaml` does not override, the protocol uses paired-bootstrap intervals on the per-example delta `(candidate − baseline)` and applies the rule below.
+
+**Each metric declares its `direction` in `metrics.yaml`** — `maximize` (e.g., accuracy) or `minimize` (e.g., NLL, RPS, ECE, latency). The decision rule branches on direction.
+
+```text
+- Method:           paired_bootstrap
+- Resamples:        10,000
+- CI level:         95% (two-sided unless otherwise noted)
+- MCC (guardrails): Holm at α=0.05
+
+Let Δ = candidate − baseline.
+
+For the PRIMARY metric:
+  PRIMARY-PASS iff
+    (direction = maximize AND lower_95_CI(Δ) ≥ +minimum_meaningful_delta)
+    OR
+    (direction = minimize AND upper_95_CI(Δ) ≤ −minimum_meaningful_delta)
+
+For each GUARDRAIL metric (with Holm-corrected α):
+  GUARDRAIL-PASS iff
+    (direction = maximize AND lower_95_CI(Δ) ≥ −max_regression_threshold)
+    OR
+    (direction = minimize AND upper_95_CI(Δ) ≤ +max_regression_threshold)
+
+For each SUBGROUP metric:
+  SUBGROUP-PASS iff
+    (direction = maximize AND lower_95_CI(Δ) ≥ subgroup_min_delta)
+    OR
+    (direction = minimize AND upper_95_CI(Δ) ≤ −subgroup_min_delta)
+
+PROMOTE-ELIGIBLE iff PRIMARY-PASS AND (∀ guardrails: GUARDRAIL-PASS) AND (∀ subgroups: SUBGROUP-PASS).
+```
+
+### Worked example — minimize metric (NLL)
+
+```text
+primary_metric.direction      = minimize
+primary_metric.minimum_meaningful_delta = 0.005
+candidate NLL − baseline NLL  = paired bootstrap distribution
+95% CI on Δ                   = [−0.012, −0.006]
+
+Direction is minimize. Decision rule: upper_95_CI(Δ) ≤ −0.005?
+upper_95_CI = −0.006 ≤ −0.005 → TRUE.
+
+PRIMARY-PASS.
+```
+
+### Worked example — guardrail violation
+
+```text
+guardrail = inference_latency_ms (minimize, lower is better)
+max_regression_threshold = +1.0ms
+
+95% CI on Δ_latency = [+0.3, +1.4]
+
+Direction minimize. Rule: upper_95_CI(Δ) ≤ +1.0?
+upper_95_CI = +1.4 > +1.0 → FALSE.
+
+GUARDRAIL-FAIL — candidate regresses latency beyond tolerance with statistical confidence.
+PROMOTE-ELIGIBLE overall verdict: FALSE (any FAIL fails the conjunction in §13.2.1).
+```
+
+### How §13.2.1 relates to §18
+
+The decision rule above produces a **PROMOTE-ELIGIBLE** boolean. PROMOTE-ELIGIBLE is necessary but not sufficient — final promotion requires all 17 criteria in §18 (statistical, ablation, role separation, exposure, budget, packet, maturity level).
+
+### Note on cost-tier seed reduction
+
+When the cost tier (§6.1) reduces seed counts below 3, bootstrap intervals widen proportionally. The decision rule is unchanged, but the resulting verdict carries `evidence_level: low` (§13.3) and is labeled `low_evidence_promoted` if it passes §18 — production deployment from low-evidence promotion requires explicit human override (§18 criterion 13).
+
+### 13.3 Promotion decision categories
+
+The label vocabulary is **namespaced by maturity level** so that an external reader can tell at a glance how much evidence backs a "win." Every label-carrying artifact (ledger entries, reports, dashboards) MUST include `maturity_level: <N>` and `not_deployable: true|false` frontmatter — the namespaced labels are not optional sugar.
+
+- **invalid** — tampering / leakage / broken eval / unreproducible.
+- **failed** — worse or too costly.
+- **informative_failure** — worse but produced a useful lesson.
+- **promising** — improves a target but needs further work. Available at all levels.
+- **level1_branch_winner** — best in branch at Level 1. No ablation, no Skeptic, no factorial. Carries `maturity_level: 1`, `not_deployable: true`. Reader cue: "interesting signal; needs Level-3 follow-up."
+- **level2_branch_winner** — best in branch at Level 2 (literature-backed). Carries `maturity_level: 2`, `not_deployable: true`. Reader cue: "interesting signal with a literature trail; needs Level-3 follow-up."
+- **branch_winner** — best in branch at Level 3+. Implies ablation discipline AND Skeptic review were available. Carries `maturity_level: >=3`, `not_deployable: false`. Reader cue: "real candidate awaiting promotion verifier."
+- **promotion_candidate** — passes §13.2.1 PROMOTE-ELIGIBLE gate (Level 3+ only). The agent has emitted a `promotion_request` (§10.5).
+- **promoted** — passes all §18 gates AND the verifier-signed `promotion_packet` exists (Level 3+ only).
+- **low_evidence_promoted** — passed §18 but at large/xlarge tier with reduced seed count, OR `enforcement_mode: none`. Carries `not_deployable: true` for production unless human-overridden.
+
+Reading the table externally: any label containing the string `branch_winner` without a `level1_`/`level2_` prefix implies Level-3-or-higher discipline.
+
+### 13.4 Guardrail logic
+
+A candidate is invalid for promotion if it: improves primary but violates hard constraints; regresses critical subgroup beyond threshold; worsens calibration beyond threshold; increases inference cost beyond budget; relies on leakage; changes the evaluator (per §17.1.1); cannot be reproduced.
+
+---
+
+## 14. Reflection and memory
+
+### 14.1 Experiment ledger (rotated per §17.5.4)
+
+Append-only JSONL. **Rotated every `ledger_rotation_iterations` entries** (default 200 per `metrics.yaml`) into `experiment_ledger.archive/`. Active ledger stays bounded.
+
+Each record (with filled example for §14.1 to avoid `{}` placeholders being copied verbatim):
+
+```json
+{
+  "protocol_version": "0.4",
+  "id": "20260518-130045-a3f7d2",
+  "timestamp": "2026-05-18T13:00:45Z",
+  "branch": "loss_objective",
+  "hypothesis": "Ordinal-aware loss should improve rare-class recall.",
+  "parent_ids": ["20260518-100012-x4q1p9"],
+  "git_sha_before": "abc123...",
+  "git_sha_after": "def456...",
+  "data_snapshot": "data-snap-2026-05-15",
+  "single_non_baseline_switch": "loss_type=ordinal_ce_hybrid",
+  "metrics": {"validation_nll": 0.842, "rps": 0.41, "accuracy": 0.78, "ece": 0.067},
+  "guardrails": {"rare_class_recall": 0.62, "inference_latency_ms": 18.4, "gpu_memory_gb": 14.2},
+  "seed_variance": {"validation_nll_seed_std": 0.011},
+  "cost": {"gpu_hours": 11.7, "wall_clock_hours": 12.3},
+  "status": "promising",
+  "evidence_level": "standard",
+  "enforcement_mode": "ci_enforced",
+  "scout_mode": "live",
+  "skeptic_review_path": "reports/20260518-130200-a3f7d2-skeptic.md",
+  "artifacts": {"checkpoint": "checkpoints/exp-a3f7d2.pt", "predictions": "preds/exp-a3f7d2.parquet"},
+  "lessons": ["ordinal hybrid improves rare-class recall; calibration regresses slightly"],
+  "next_actions": ["test calibration ablation", "rerun with seed=42"]
+}
+```
+
+### 14.2 Research playbook
+
+Compact. Bounded by `max_playbook_tokens`. Periodic distillation: pull durable lessons from ledger entries before rotation; archive the raw entries.
+
+### 14.3 Comparative reflective memory
+
+When two sibling experiments differ, write the contrast explicitly. (Unchanged from v0.1.)
+
+---
+
+## 15. Research tree management
+
+[Unchanged from v0.1 — node schema, expand-when, backtrack-when, preserve-diversity. Records carry `protocol_version: 0.4`.]
+
+---
+
+## 16. Ablation protocol
+
+### 16.1 Ablation decision tree (NEW)
+
+Pick the ablation type by the kind of change being tested:
+
+#### 16.1.1 Single component swap
+
+Candidate replaces baseline component with a new one (e.g., baseline encoder → attention-pool encoder).
+
+**Ablations required:**
+- (A) Baseline rerun (already in §3.6).
+- (B) Candidate rerun (already in §3.6).
+- (C) Lesion test: candidate with the new component's *key feature* disabled (e.g., attention weights replaced with uniform). Confirms the feature, not the surrounding scaffolding, drives the result.
+
+#### 16.1.2 Stack / multi-switch candidate
+
+Candidate flips more than one switch (per §11.1.1, this is a stack, not a candidate). Promotion requires a **factorial ablation grid**:
+
+```text
+For 2 switches × 2 levels = 4 runs minimum (per seed).
+For 3 switches × 2 levels = 8 runs minimum (per seed).
+At medium tier (3 seeds for promotion): 24 runs for 3 switches.
+```
+
+If the factorial cost is unaffordable, the stack must be **decomposed** into one-switch-at-a-time candidates over multiple iterations.
+
+#### 16.1.3 Additive component
+
+Candidate adds a new component to baseline (e.g., add calibration head after training).
+
+**Ablations required:** baseline + baseline-without-new-component (degenerate; reduces to baseline rerun) + candidate + candidate-without-new-component-but-with-side-effects (if any).
+
+#### 16.1.4 Algorithmic / hyperparameter change
+
+Candidate changes optimizer, scheduler, or hyperparameter.
+
+**Ablations required:** baseline + candidate + sensitivity sweep over the changed hyperparameter (±10%, ±50%) to detect cherry-picking.
+
+### 16.2 Ablation report template
+
+```markdown
+# Ablation Report: <candidate>
+
+protocol_version: 0.4
+
+## Candidate summary
+## Change type (per §16.1)
+## Ablations run
+| Ablation | Result | Interpretation |
+|---|---:|---|
+
+## What caused the improvement?
+## What did not matter?
+## Remaining uncertainty
+## Promotion recommendation
+```
+
+---
+
+## 17. Reliability safeguards
+
+### 17.1 Anti-cheating controls — split between in-band (advisory) and out-of-band (enforced)
+
+**Out-of-band (real enforcement; require §3.1.1 mechanism):**
+
+- protected evaluator paths
+- immutable data snapshot IDs (content-hashed by external storage)
+- hidden/locked final test set held by a non-agent process
+- no leaderboard writes by candidate code (enforced by §3.1.1 CI or read-only mount)
+- artifact-based comparison (verifier runs from clean checkout)
+- human review for evaluator changes (CODEOWNERS-gated)
+
+**In-band (advisory only; valuable as defense in depth but not enforcement):**
+
+- metric code hashing — agent can update the hash list; useful for accidental drift detection only
+- "no self-reported metrics" — the ledger is agent-written; pair with §17.1.1
+- automated recomputation — only real if run by a process the agent cannot configure
+
+**If `enforcement.yaml: mechanism: none`:** the out-of-band column collapses into the in-band column. The entire §17.1 list is then advisory. Promotion reports must label `enforcement: in-band-only`.
+
+### 17.1.1 Evaluator behavioral-equivalence test (tolerance-based)
+
+To distinguish refactors from behavioral changes to evaluator code:
+
+- Maintain a **golden fixture set** under `evaluation/fixtures/` with paired (input → metric output) examples covering edge cases (empty input, single example, full validation-set sample, known degenerate cases).
+- `behavioral_equivalence.py` reads the fixtures, runs the current evaluator, and asserts every metric output is **within declared tolerance** of the recorded golden value. **Byte-identical equality is not required** — floating-point ops are not bit-deterministic across torch / numpy / CUDA versions, and a refactor that changes summation order will fail bit-equality without changing semantics.
+- Tolerances are declared per-metric in `metrics.yaml` **alongside the metric's `aggregation` and `eval_dtype`**, because both affect what tolerance is sensible:
+
+```yaml
+# Each metric MUST declare aggregation and eval_dtype so tolerances are interpretable.
+primary_metric:
+  name: validation_nll
+  direction: minimize
+  minimum_meaningful_delta: 0.005
+  aggregation: mean        # one of: mean | sum | count | ratio
+  eval_dtype: fp32         # one of: fp32 | bf16 | fp16 | int
+
+evaluator_equivalence:
+  # Defaults by dtype — calibrated so reduction-order changes over ~10k examples
+  # do NOT trip the test, while ~1e-3 magnitude behavioral changes DO trip it.
+  defaults_by_dtype:
+    fp32: {rtol: 1e-4, atol: 1e-6}
+    bf16: {rtol: 1e-2, atol: 1e-3}
+    fp16: {rtol: 1e-3, atol: 1e-4}
+    int:  {rtol: 0.0,  atol: 0.0}     # integer/discrete metrics: exact equality
+
+  # Per-metric overrides (optional). Tolerance MUST satisfy:
+  #   tolerance_absolute_at_golden_value ≤ 0.1 × minimum_meaningful_delta
+  # i.e., the equivalence test is at least 10× more sensitive than the promotion threshold.
+  per_metric:
+    validation_nll:           {rtol: 1e-4, atol: 1e-6}    # fp32 mean
+    ranked_probability_score: {rtol: 1e-4, atol: 1e-6}    # fp32 mean
+    accuracy:                 {rtol: 0.0,  atol: 0.0}     # integer-comparable
+    expected_calibration_error: {rtol: 1e-3, atol: 1e-5}  # binned ratio, looser
+    rare_class_recall:        {rtol: 0.0,  atol: 1e-6}    # ratio of small ints
+```
+
+- The equality check is `abs(new − golden) ≤ atol + rtol * abs(golden)` — the standard numpy `allclose` rule.
+- For **integer or discrete metrics** (counts, exact match, top-1 accuracy on a fixed eval set), set `rtol: 0, atol: 0`. Refactors must produce exactly the same integer answer.
+- For **fp32 reductions over many examples** (typical NLL, RPS on 10k val): `rtol: 1e-5` is **too tight** — reduction-order changes alone accumulate ~`sqrt(N) * eps_fp32 ≈ 1e-5` error. The v0.4 default of `rtol: 1e-4, atol: 1e-6` is calibrated to pass benign refactors and catch ~1e-3 behavioral drift on NLL values around 0.1–2.0.
+- For **bf16/fp16 evaluators**: tolerances are 1–2 orders of magnitude looser. Be explicit. If your evaluator runs in mixed precision, set `eval_dtype: bf16` (or `fp16`); a v0.4-compliant evaluator MUST declare its eval dtype.
+- For **sum-aggregated metrics** (e.g., total loss across an eval set rather than mean): the effective absolute tolerance scales with the sum's magnitude. Either convert to a mean, or set `atol` proportionally larger and document the choice.
+- **Tolerance must be ≤ 0.1 × `minimum_meaningful_delta`.** The equivalence test exists to catch behavioral drift; if its tolerance approaches the promotion threshold, refactors could mask real changes that would have moved the gate. The protocol enforces this by rejecting `metrics.yaml` configurations that violate the inequality.
+- A refactor that passes within tolerance is automatically approved.
+- A refactor that fails goes to human review (per §3.1). The human looks at: (a) whether the diff is semantic or a numerical-order change, (b) whether the change moves every fixture by a similar small amount (likely benign) or only some fixtures (suspicious).
+- The fixture set itself is in `protected_paths`.
+
+**Updating the golden fixtures.** Allowed only when the human reviewer signs off (per §3.1). Update is a non-trivial event — the old values are archived under `evaluation/fixtures/archive/<date>/` with a `reason.md` explaining why golden values needed to change. Multiple updates per quarter are a warning sign that the evaluator is drifting and the protocol's anti-overfit story (§17.2) needs review.
+
+### 17.2 Anti-overfitting controls
+
+[Unchanged from v0.1 — repeated seeds, rolling/temporal validation, multiple slices, locked test rare-use, subgroup reporting, baseline reruns, holdout refresh schedule.]
+
+### 17.3 Anti-hallucination controls for literature agents
+
+[Unchanged from v0.1 — links for all citations, source classification, no fabrication, paraphrase only what was found, mark withdrawn/unreviewed, prefer primary sources.]
+
+### 17.4 Long-horizon controls
+
+[Unchanged from v0.1 — patience, resource management, ablation/uncertainty, role assignment, context limits, dead-end list.]
+
+### 17.5 Operational realities (NEW)
+
+#### 17.5.1 Nondeterminism
+
+Modern GPU kernels (cuDNN, FlashAttention, certain CUDA ops) are not bit-deterministic across runs even with fixed seeds. The protocol does NOT require bit-identical reproducibility. Instead:
+- Capture and record `torch.use_deterministic_algorithms` state, cuDNN version, CUDA version, GPU model, dataloader worker count, AMP/dtype, OS, Python version.
+- Use **fixed-tolerance** equality (`abs_diff < 1e-4` for typical fp32 metrics; adjust per task) when comparing reproducibility-check reruns.
+- Report nondeterministic-mode runs with `deterministic_mode: false` metadata.
+
+#### 17.5.2 Distributed training
+
+For multi-GPU/multi-node:
+- Pin collective-op deterministic mode where supported.
+- Record world size, gradient-reduction order, NCCL version.
+- Treat any reduction-order change as a new run (not a rerun).
+
+#### 17.5.3 Dependency / data drift
+
+- Pin all dependencies via `requirements.txt` lockfile (or `poetry.lock`/`uv.lock`) committed in `protected_paths`.
+- Ship a `container.Dockerfile` with digest-pinned base image; record the image digest in every ledger entry.
+- HF/network downloads MUST be cached in a project-local cache committed-or-snapshotted; record cache hashes in `data_snapshot` field.
+- Data snapshots are content-hashed; any re-pull invalidates the snapshot ID.
+
+#### 17.5.4 Ledger growth + rotation
+
+- `experiment_ledger.jsonl` is append-only but **rotated** every `ledger_rotation_iterations` entries (default 200).
+- Rotated chunks move to `experiment_ledger.archive/<chunk-id>.jsonl`.
+- Before rotation, the Reflection Analyst distills durable lessons from the chunk into the playbook.
+- `scripts/rotate_ledger.py` performs the rotation; runs from a human-controlled process.
+
+#### 17.5.5 Multi-agent contention
+
+- Only **one Ledger Writer** at a time. All agents emit ledger events through a queue (file lock or single-writer broker).
+- The Ledger Writer is a non-LLM process (matching §5.5).
+- Per-iteration worktrees: each Implementation Worker operates in a separate git worktree to avoid shared-file races.
+
+#### 17.5.6 Infrastructure failures
+
+- Define an explicit failure taxonomy: OOM, preemption, disk full, NaN, NCCL-hang, network-timeout, evaluator-hash-mismatch.
+- Every failure produces a structured `failure_reason` field on the ledger entry; the run is marked `infra_failed`, not `failed` — does not count against branch failure budget.
+- Checkpoint/resume policy: training scripts checkpoint at fixed wall-clock intervals; preempted runs resume from latest checkpoint; resumed runs are flagged in metadata.
+
+### 17.6 Validation-set exhaustion policy (NEW)
+
+Every comparison against the validation set is a query against a finite resource. As experiments accumulate, the agent effectively performs many hypothesis tests on the same val data — risking implicit overfitting even without any single iteration cheating. The protocol enforces an exposure budget.
+
+#### 17.6.1 Tracking
+
+- `metrics.yaml` declares `val_set_exposure_budget: N` (suggested starting defaults: 100 for Level 1, 300 for Level 2–3, 1000 for Level 4+ — these are starting points, not empirically validated thresholds; scale with √(val_size) or set empirically with a held-back meta-val set).
+
+#### What counts as a "query against val"
+
+A **query** is **any read of the locked validation split that produces a metric used to compare candidate against baseline**. This is broader than just Stage-C runs. Every one of the following increments the counter:
+
+- Stage-C (full validation) runs — one increment per seed.
+- Stage-B (cheap proxy) runs **if they evaluate on the same split** as Stage-C. If Stage B uses a **separate proxy slice** never reused for promotion, those reads do NOT increment.
+- Baseline reruns on val (every seed).
+- Ablation reruns on val (every seed, every ablation).
+- Re-grades after evaluator refactors (counted in addition to the original run).
+- Per-epoch early-stopping peeks at val **if early-stopping uses val itself rather than a separate dev slice**. If you have a dedicated early-stop slice, peeks on it do NOT increment.
+
+The rule of thumb: **if any read of the held-out val data could influence a candidate's promotion decision, it counts.** Stage-B exists to be cheap; the protocol's preferred design is Stage-B on a separate proxy slice, with the locked val reserved for Stage C + reruns.
+
+Where the counter lives: `state/val_exposure.json`. Each ledger entry records `val_queries_incurred_by_this_run` (an integer) and the cumulative `val_queries_total_at_start` and `val_queries_total_at_end`. Promotion requests (§10.5) carry the count at request time.
+
+#### 17.6.2 Soft and hard thresholds
+
+| Exposure level | Action |
+|---|---|
+| `< 0.5 × budget` | Normal operation |
+| `0.5 × budget ≤ exposure < 0.9 × budget` | **Soft warning** in every report and dashboard ("validation set 60% exhausted"). Encourage cheaper proxy-stage decisions; reserve full-val for high-confidence candidates only. |
+| `0.9 × budget ≤ exposure < 1.0 × budget` | **Hard warning** + automatic `evidence_level: low` on all subsequent promotions. |
+| `≥ 1.0 × budget` | **Holdout refresh required.** No promotion (§18) until refresh completes. `holdout_refresh_due: true` in promotion packet (§10.5). |
+
+#### 17.6.3 Refresh procedure
+
+A holdout refresh is a non-trivial event requiring human review per §3.1. Two options:
+
+1. **Rotate splits.** Re-split the dataset under a documented procedure (new seed, same proportions). Old val becomes test; old test becomes train; fresh val from train. Allowed only if the dataset is large enough that re-splitting doesn't break statistical assumptions.
+2. **Refresh holdout from a held-back pool.** Draw a new val slice from data not previously exposed. Requires the host project to have set aside a pool in §6.3 for this purpose.
+
+Either way: increment a `val_set_version` integer in `metrics.yaml`; the §13.2.1 decision rule treats the new val as a fresh resource; campaign continues with `exposure.queries = 0`. The packets of any candidates promoted in the previous val version are tagged with that version for historical traceability.
+
+#### 17.6.4 Why this matters
+
+ResearchGym and MLGym (peer-reviewed sources in §2) document validation-set overfitting as a top long-horizon failure mode. Without exposure accounting, an agent running 200 iterations is implicitly running 200 hypothesis tests on the same data — and `p < 0.05` is meaningless when you've drawn 200 cards.
+
+### 17.7 LLM, tool-call, and compute budget accounting (NEW)
+
+Every research campaign consumes three real budgets: LLM tokens, tool/MCP calls, and compute (GPU hours, wall-clock). The protocol treats each as first-class and accounted-for. Without budget accounting, campaigns drift into "spend until something works" — the opposite of disciplined research.
+
+#### 17.7.1 Budget declarations
+
+`metrics.yaml` declares per-campaign caps. Per-iteration caps default by maturity level since higher levels run more roles per iteration.
+
+```yaml
+budgets:
+  llm:
+    max_tokens_total: 10_000_000        # campaign total across all roles
+    max_dollars_total: 50.00            # provider-billing estimate
+    soft_warn_fraction: 0.7             # warn at 70% of total
+  tool_calls:
+    max_calls_total: 5000
+    per_role_caps:                      # optional
+      research_director: 2000
+      literature_scout: 1500
+      implementation_worker: 1000
+      reflection_analyst: 500
+  compute:
+    max_gpu_hours: 500
+    max_wall_clock_hours: 1000          # for multi-day campaigns
+
+  # Per-iteration caps scale with maturity level. Pick the row matching your
+  # campaign's Level (§24). Defaults can be overridden — the level row sets
+  # the floor, not the ceiling.
+  per_iteration_caps_by_level:
+    L1: {max_llm_tokens: 500_000,   max_tool_calls: 100,  max_gpu_hours: 30}
+    L2: {max_llm_tokens: 1_000_000, max_tool_calls: 200,  max_gpu_hours: 30}
+    L3: {max_llm_tokens: 2_000_000, max_tool_calls: 400,  max_gpu_hours: 30}
+    L4: {max_llm_tokens: 5_000_000, max_tool_calls: 800,  max_gpu_hours: 30}
+    L5: {max_llm_tokens: 8_000_000, max_tool_calls: 1500, max_gpu_hours: 30}
+
+  # Optional per-role-per-iteration sub-caps (recommended at L3+).
+  per_role_per_iteration_caps:
+    research_director:     {max_llm_tokens: 200_000}
+    literature_scout:      {max_llm_tokens: 600_000}    # web search adds tokens
+    implementation_worker: {max_llm_tokens: 1_500_000}
+    reflection_analyst:    {max_llm_tokens: 400_000}
+    skeptic:               {max_llm_tokens: 600_000}
+```
+
+**Important:** The **Experiment Runner** (§5.5) is non-LLM and contributes **zero LLM tokens** — it is shell scripts, make targets, or other non-LLM automation. It does count GPU hours and wall-clock. If your harness pushes the Experiment Runner role to an LLM, you have left the protocol's recommended setup and must add explicit per-iteration overhead.
+
+#### 17.7.2 Tracking
+
+- `state/budget_ledger.jsonl` records, per iteration: `iteration_id`, `role`, `llm_tokens`, `tool_calls`, `gpu_hours`, `wall_clock_seconds`, `provider_costs_estimated`, `maturity_level`.
+- The Experiment Runner (§5.5, non-LLM) maintains this ledger. LLM roles emit token counts via the provider API; tool-call counts come from the harness wrapper around tool invocations.
+- **Fallback when the harness does not emit per-call counts**: set `tool_calls: null` in the ledger entry, use wall-clock + per-step counters as a proxy, and label the campaign `budget_accounting: degraded` in its reports.
+
+#### 17.7.3 Soft and hard limits
+
+- At `soft_warn_fraction` of any cap: every subsequent proposal must include a `budget_justification:` field. The Research Director can reject proposals that don't justify their cost.
+- At `max_*_per_iteration` cap: the iteration is automatically truncated; the run is marked `budget_truncated` (a sibling of `infra_failed`) and does not count as `failed`.
+- At `max_*_total` cap: campaign halts. The Research Director must produce a campaign-end report (§19) using only currently-available results. No new iterations are launched.
+
+#### 17.7.4 Reporting
+
+Every promotion packet (§10.5) carries `costs.*` with realized values. Every campaign-end report includes a budget summary table:
+
+```text
+              Spent        Cap         Headroom
+LLM tokens   3.4M / 10M   34%         66%
+Dollars      $12.40       $50.00      75%
+Tool calls   2,103        5,000       58%
+GPU hours    143          500         71%
+Wall clock   207h         1000h       79%
+```
+
+#### 17.7.5 Why this matters
+
+A protocol that doesn't account for cost optimizes for the wrong thing. The Karpathy baseline had a fixed-budget loop (5 minutes); this protocol scales the budget concept to LLM calls and tool calls, which are the new dominant cost for agent-driven campaigns.
+
+---
+
+## 18. Promotion gate
+
+A model is promoted only if ALL hold. **Criterion 17 is a prerequisite** — Level 1 and Level 2 cannot reach this gate at all; their wins are labeled `level1_branch_winner` / `level2_branch_winner` and never `promoted`.
+
+1. Candidate beats baseline on primary metric by ≥ `minimum_meaningful_delta` (§13.2.1 decision rule).
+2. **Statistical evidence per §13.2.1, direction-appropriate.** For `direction: maximize`: `lower_95_CI(Δ) ≥ +minimum_meaningful_delta`. For `direction: minimize`: `upper_95_CI(Δ) ≤ −minimum_meaningful_delta`. Guardrail and subgroup bounds also direction-aware. Holm-corrected across guardrails at α=0.05.
+3. Guardrail metrics pass within their declared regression tolerances (direction-aware, §13.2.1).
+4. Subgroup regressions documented and acceptable per §6.1 declared `subgroup_min_delta`.
+5. Candidate was rerun from scratch on `min_seeds_for_promotion` from cost tier (§6.1).
+6. Baseline rerun matches initial baseline within seed-variance band (§17.5.1 fixed tolerance).
+7. At least one ablation per §16.1 supports the claimed causal mechanism.
+8. No protected files were modified, per §3.1.1 enforcement output. **`enforcement_mode: none` is not permitted at this gate** — the promotion is then capped at `low_evidence_promoted` with `enforcement: in-band-only` and `not_deployable: true` regardless of other criteria.
+9. No leakage detected.
+10. Runtime/memory/inference cost within budget.
+11. Results and artifacts are reproducible per §17.5.1 fixed-tolerance rules.
+12. Skeptic review complete; `skeptic_review.md` artifact present (§5.7); operating at required separation level (§5.0).
+13. Human review approves deployment if production-facing; required for `low_evidence_promoted` regardless of production-facing.
+14. **Validation-set exposure budget not exhausted** (§17.6) — `holdout_refresh_due: false`.
+15. **Budget caps not exceeded** (§17.7) — campaign within `max_*_total` for LLM tokens, tool calls, GPU hours; per-iteration caps not exceeded for this candidate's runs.
+16. **Promotion packet present and verifier-signed** (§10.5). The agent emits a `promotion_request`; a **non-agent verifier** writes and signs the `promotion_packet` after running the schema validation rules. A self-signed packet is not a valid promotion artifact.
+17. **Maturity level ≥ 3** (§24) — prerequisite. Level 1 and Level 2 produce `level1_branch_winner` / `level2_branch_winner`, not `promoted`.
+
+---
+
+## 19. Stop conditions
+
+Stop or pause campaign when: budget exhausted, no branch has positive expected value, best candidates fail reproducibility, evaluator weakness discovered (run §17.1.1 behavioral-equivalence test), data quality issue dominates, improvements below meaningful threshold, required human decision blocked, safety/compliance issue. **A campaign's correct output may be: "no trustworthy improvement found; here are the strongest negative lessons."** See §22a for what that report looks like.
+
+---
+
+## 20. Agent prompt template (Research Director)
+
+```markdown
+You are the Research Director for an autonomous ML improvement campaign.
+
+Your goal is to improve the model under the AutoResearch++ Protocol v0.4,
+NOT to maximize superficial metrics.
+
+The protocol is at @autoresearch/protocol.md. Required reading:
+- §0 (versioning), §3.1.1 (enforcement is out-of-band), §5.0 (role separation),
+  §11.1.1 (candidate vs stack), §13.2.1 (decision rule),
+  §16.1 (ablation tree), §17 (reliability), §18 (promotion gate).
+
+Rules:
+1. Do not modify protected evaluator files. (Per §3.1.1, this is enforced
+   out-of-band; if the host has `enforcement.yaml: mechanism: none`, label
+   results `enforcement: in-band-only`.)
+2. Every experiment begins with a written hypothesis and proposal carrying
+   `protocol_version: 0.4`.
+3. Use literature search (§9) when web is available; otherwise offline mode (§9.0).
+4. Prefer small, causal, ablatable changes. A *candidate* flips exactly one
+   non-baseline config switch (§11.1.1). Stacks require factorial ablation
+   (§16.1.2) and cannot promote on a single ablation.
+5. Use staged evaluation: smoke, cheap proxy, full validation.
+6. Use seed counts from the host's cost tier (§6.1).
+7. Maintain a research tree (§15).
+8. Update the immutable ledger and compact playbook after every run; respect
+   ledger rotation (§17.5.4) and playbook token budget.
+9. Treat surprising wins as suspicious until ablated and reproduced.
+10. Promotion requires ALL §18 gates (now 17 criteria) AND the achieved
+    role-separation level (§5.0) MUST be recorded; a promotion packet (§10.5)
+    MUST be produced. Level 1 and Level 2 campaigns CANNOT promote — see §24.
+11. Be honest about uncertainty, failed runs, infra failures, and negative results.
+
+At iteration start:
+- read the latest playbook
+- inspect open branches
+- choose next branch (§8)
+- request literature brief (live or offline)
+- write proposal (§10 template, flagging single non-baseline switch)
+- implement (§11)
+- run §17.1.1 behavioral-equivalence test on evaluator/
+- run the harness
+- compare via §13.2.1 decision rule
+- skeptic review (§5.7)
+- update ledger + playbook
+- decide next action (§18)
+```
+
+---
+
+## 21. Worker prompt templates
+
+[Same structure as v0.1 §21.1–21.4; each now references `protocol_version: 0.4`, the §5.0 separation level it requires, and includes explicit reminders about the relevant fixes from v0.1.]
+
+### 21.1 Literature Scout (excerpt)
+
+```markdown
+You are the Literature Scout (operating at Level 1+ separation from
+Implementation Worker per §5.0).
+
+If web search is available, follow §9.1–§9.5. If not, follow §9.0 offline mode
+and label your brief `mode: offline`, `web_search_used: false`. In offline mode,
+block novel-architecture claims; engineering experiments may proceed.
+
+Do not invent citations. Mark withdrawn/unreviewed papers per §17.3. Use the
+§9.4 brief format and include `protocol_version: 0.4`.
+```
+
+### 21.2 Implementation Worker (excerpt)
+
+```markdown
+You are the Implementation Worker (operating at Level 2 separation from the
+Skeptic per §5.0 — fresh session preferred; different model family ideal).
+
+Implement exactly the approved proposal. Per §11.1.1, flip exactly ONE
+non-baseline config switch. If the proposal requires more, flag it as a stack
+and return to the Director for factorial planning (§16.1.2).
+
+Modify only editable paths. Run §17.1.1 behavioral-equivalence test if any
+evaluator-adjacent file was touched. Add tests (§11.4). Run smoke tests.
+Report changed files and risks.
+```
+
+### 21.3 Reflection Analyst (excerpt)
+
+```markdown
+You are the Reflection Analyst.
+
+Apply §13.2.1 decision rule. Update playbook with durable lessons only.
+Decide promotion category from §13.3. Mark `evidence_level: low` for
+xlarge-tier or seed-reduced runs.
+```
+
+### 21.4 Skeptic (excerpt)
+
+```markdown
+You are the Skeptic (REQUIRED at Level 2 separation from Implementation
+Worker per §5.0 — different session or different model family).
+
+If only Level 0 separation is available, operate from this fixed checklist
+and label your review `skeptic: checklist-only`; promotion is blocked from
+"production-facing" but may proceed for "internal" with the label visible.
+
+Checklist:
+- protected file changes? (per §3.1.1 enforcement output)
+- data leakage?
+- metric gaming via §17.1.1 behavioral-equivalence test failure?
+- overfit to validation slices?
+- cherry-picked seeds vs cost-tier seed requirement?
+- subgroup regressions?
+- hidden cost increases?
+- missing or wrong-type ablation (per §16.1)?
+- unsupported literature claims?
+- stack masquerading as candidate (§11.1.1)?
+- nondeterminism / drift / dependency change unaccounted (§17.5)?
+
+You may veto promotion. Produce `skeptic_review.md` artifact.
+```
+
+---
+
+## 22. Example campaign flow
+
+This example assumes **Level 3 maturity** (§24) — ablations, Skeptic role, and verifier-signed promotion packets are available. A Level-1 or Level-2 campaign on the same project would stop after iteration 3 with a `level1_branch_winner` (or `level2_branch_winner`) label and graduate to Level 3 before attempting the factorial in iteration 4. See §22a for what failures look like in the same setup.
+
+```text
+Iteration 0: Baseline. Create failure report. (maturity_level: 3)
+Iteration 1: Branch=loss_objective. Lit Scout finds ordinal-aware losses.
+             Candidate: single switch `loss_type: ordinal_ce_hybrid`.
+             Result: NLL slightly better, calibration worse. Decision: promising.
+Iteration 2: Branch=calibration. Candidate: single switch `calibration: temp_scale`.
+             Result: calibration fixed, NLL preserved. Decision: branch_winner (L3).
+Iteration 3: Branch=architecture. Candidate: single switch `encoder: attention_pool`.
+             Result: long-history subgroup improves, cost OK. Decision: expand.
+Iteration 4: STACK — combines ordinal loss + calibration + attention pool.
+             Per §11.1.1 this is a stack, NOT a candidate.
+             Per §16.1.2 requires factorial ablation: 2x2x2 = 8 cells × seeds.
+             At medium tier (3 seeds): 24 runs. Outcome: attention pool drives
+             most of the gain; ordinal loss contributes little; calibration
+             additive. Decision: emit promotion_request for attention pooling
+             only; ordinal-loss branch deferred. Verifier reviews request,
+             re-runs §13.2.1 on the referenced ledger entries, signs
+             promotion_packet → status: promoted.
+```
+
+## 22a. Counter-example campaign — when things go sideways (NEW)
+
+```text
+Iteration 5: Branch=data_sampling. Candidate: single switch `sampler: weighted_rare`.
+             Result: primary metric improved 0.7%. Single seed.
+             §13.2.1 decision rule: lower 95% CI = +0.2%, minimum_meaningful_delta = 0.5%.
+             VERDICT: not PROMOTE-ELIGIBLE — within noise.
+             Decision: rerun with cost-tier seed count.
+
+Iteration 6: Rerun of iter-5 with 3 seeds. Result: primary delta becomes -0.1%
+             on average; iter-5's 0.7% was an outlier seed.
+             Decision: failed. Lesson: weighted_rare did NOT improve primary.
+             Branch=data_sampling deprioritized.
+
+Iteration 7: Branch=optimization. Candidate: single switch `lr_schedule: cosine_restarts`.
+             Result: primary improves 1.2%, guardrail `rare_class_recall` regresses
+             by 1.8% (limit was 2%). Holm-corrected upper bound on guardrail
+             regression = 2.4% — EXCEEDS limit.
+             VERDICT: not PROMOTE-ELIGIBLE.
+             Skeptic checks ablation: lr-only change should not affect recall directly.
+             Hypothesis: cosine restarts interact with class imbalance.
+             Decision: quarantine. Add to known_failures.md. Branch backtracks.
+
+Iteration 8: §17.1.1 behavioral-equivalence test fails on `metric_defs.py`.
+             Hash mismatch: a stray import was added by a refactor.
+             VERDICT: invalid. Human review (§3.1) decides: cosmetic-only;
+             update golden fixtures and revert. Last 3 iterations' results
+             flagged for potential invalidation pending re-grade.
+
+Iteration 9: After re-grade, iteration 7's recall regression is even larger
+             than originally measured. Confirmed failed.
+
+Campaign end: best result is attention pooling from iteration 3 + temp scaling
+              from iteration 2 stack-ablated in iteration 4. No new wins
+              from iterations 5-9. Final report labels iterations 5-9 as
+              negative results with specific lessons:
+              - weighted_rare did not generalize across seeds (iter-5/6)
+              - cosine_restarts interacts badly with class imbalance (iter-7/9)
+              - refactor discipline matters: behavioral-equivalence test caught
+                a near-miss (iter-8)
+```
+
+The campaign's value is the negative lessons, not zero results. §19 explicitly allows this outcome.
+
+---
+
+## 23. Minimal implementation checklist (aligned with §24 Level 1)
+
+A team starting at Level 1 needs:
+
+- [ ] `enforcement.yaml` declaring a §3.1.1 mechanism (or honest `mechanism: none`)
+- [ ] `protected_paths.yaml` and `editable_paths.yaml`
+- [ ] `metrics.yaml` with a cost tier (§6.1), per-metric direction, and exposure budget (§17.6)
+- [ ] baseline report + reproducibility metadata (§17.5.1)
+- [ ] proposal template (§10)
+- [ ] experiment ledger (with rotation per §17.5.4)
+- [ ] compact playbook (with token budget)
+- [ ] staged run script (smoke / proxy / full)
+- [ ] candidate-vs-baseline comparison using §13.2.1 default rule (direction-aware)
+- [ ] §17.1.1 tolerance-based behavioral-equivalence fixtures (even minimal — 3-5 fixtures is enough)
+- [ ] §17.6 val-exposure counter wired up
+- [ ] §17.7 budget ledger wired up (LLM tokens + tool calls + GPU hours)
+
+### What Level 1 can and cannot label
+
+Level 1 CAN produce these run categories (§13.3): `invalid`, `failed`, `informative_failure`, `promising`, `level1_branch_winner`. Every label-carrying artifact MUST include `maturity_level: 1` and `not_deployable: true` frontmatter.
+
+**Level 1 CANNOT produce `branch_winner` (unprefixed), `promoted`, or `low_evidence_promoted` status.** Full promotion (§18) requires Level 3 ablation discipline (§16.1), Skeptic review (§5.7), and a verifier-signed promotion packet (§10.5). At Level 1, the highest-value output is a well-labeled `level1_branch_winner` plus a clear hand-off: "this candidate is `level1_branch_winner`; graduate to Level 3 to attempt `promoted`."
+
+This is intentional. The Karpathy baseline implicitly conflates "this seemed to help" with "this is shippable." This protocol separates the two: Level 1 finds promising candidates with honest labels; Level 3+ promotes them under independent verification.
+
+Literature briefs (§9) enter at Level 2. Required ablations (§16), Skeptic role (§5.7), and the §18 promotion gate enter at Level 3. They are NOT minimum-viable for Level 1.
+
+Do not add self-modifying meta-agents until these basics work.
+
+---
+
+## 24. Recommended maturity levels
+
+### Level 1: Safe autoresearch — exploration mode
+- single Research Director + non-LLM Experiment Runner
+- config/code patches only; one switch per candidate (§11.1.1)
+- evaluator boundary enforced per §3.1.1
+- ledger + playbook with rotation
+- smoke / proxy / full evaluation
+- §13.2.1 statistical rule (direction-aware)
+- §17.1.1 behavioral-equivalence fixtures (tolerance-based)
+- §17.5 operational realities baked in
+- §17.6 val-exposure tracking active
+- §17.7 budget accounting active
+
+**Promotion ceiling at Level 1: `level1_branch_winner`.** No `promoted` status. Candidates worth promoting graduate to Level 3.
+
+### Level 2: Literature-informed autoresearch
+- add Literature Scout (live or offline per §9.0)
+- require literature briefs for nontrivial proposals
+- implement published model-family ideas
+- branch-specific playbooks
+- §17.6 exposure budget enforcement active (hard thresholds)
+
+**Promotion ceiling at Level 2: `level2_branch_winner`.** Literature backing strengthens candidates but does not substitute for ablation. Candidates still graduate to Level 3 for promotion attempts.
+
+### Level 3: Tree-search autoresearch — first level that can `promote`
+- explicit research tree (§15)
+- branch budget allocation
+- cross-branch reflective memory
+- ablations required before promotion (§16.1)
+- Skeptic role active (§5.7) at Level 2 separation (§5.0)
+- promotion packet schema (§10.5) populated for every promotion attempt
+
+**First level that may label runs `promoted` / `low_evidence_promoted`.**
+
+### Level 4: Multi-agent campaign
+- all 7 roles
+- different model families for Implementation Worker × Skeptic (Level 2 separation minimum, Level 2+ preferred)
+- factorial ablation infrastructure (§16.1.2)
+- counter-example campaigns expected (§22a)
+
+### Level 5: Meta-improving research process
+- proposals may improve search strategy itself
+- evaluator boundary still §3.1.1-enforced
+- human review for protocol changes
+- compare research policies, not just model variants
+
+Do not jump to Level 5 before Level 1-3 are reliable.
+
+### Summary table — what each Level adds and what it can label
+
+| Level | Adds | Max run label | `not_deployable` default | Min role separation |
+|---|---|---|---|---|
+| 1 | Loop + locked judge + stats + behavioral-eq + budgets + split freeze + exposure tracking | `level1_branch_winner` | `true` | Level 0 OK |
+| 2 | Literature Scout, exposure budget enforcement | `level2_branch_winner` | `true` | Level 0 OK |
+| 3 | Tree + ablations + Skeptic + verifier-signed packets | `promoted` / `low_evidence_promoted` | `false` (if `enforcement_mode != none`) | Level 2 for Impl × Skeptic |
+| 4 | All 7 roles, factorial grids, counter-examples | `promoted` | `false` | Level 2+ (different model families preferred) |
+| 5 | Self-improving search policy | `promoted` | `false` | Level 2+ |
+
+---
+
+## 25. What this protocol intentionally avoids
+
+- brute-force grid search as main strategy
+- single-metric optimization without guardrails
+- unconstrained code rewriting
+- letting the agent edit the evaluator
+- promoting single-seed wins (at any cost tier)
+- accepting surprising gains without ablation
+- relying on self-reported results when out-of-band enforcement is absent (§3.1.1)
+- unbounded memory growth (ledger rotates per §17.5.4)
+- literature-free architecture changes (in live mode)
+- claiming novelty without evidence (offline mode blocks novelty claims)
+- pretending in-band controls enforce when they're advisory (§17.1)
+- mistaking a stack for a candidate (§11.1.1)
+
+---
+
+## 26. Final operating rule
+
+At every step, ask:
+
+> Did we learn something reliable that should change the next experiment?
+
+If yes, update the playbook and continue.
+
+If no, simplify, ablate, or backtrack.
+
+If the evaluator is suspect, stop model search and fix the evaluator first (§17.1.1).
+
+If `enforcement.yaml: mechanism: none`, any "promoted" result is `enforcement: in-band-only` — communicated honestly in reports and dashboards.

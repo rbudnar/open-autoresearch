@@ -1,0 +1,47 @@
+# protected_paths.yaml — paths the agent must NOT modify without out-of-band approval.
+#
+# PROTOCOL.md §3.1 + §3.1.1. The agent runs a no-op iteration on bootstrap to
+# confirm that every listed path resists agent writes under the chosen
+# enforcement mechanism. If enforcement.yaml mechanism is `none`, the entries
+# here are honor-system; the verifier (§10.5) caps any resulting promotion at
+# low_evidence_promoted with not_deployable: true.
+
+protocol_version: "0.4"
+
+protected_paths:
+  # Data splits — content hashes pinned by §6.3.1 MANIFEST.
+  - data/splits/**
+  - data/splits/MANIFEST.json
+
+  # Locked evaluator code and definitions.
+  - evaluation/**
+  - metrics/**
+
+  # Behavioral-equivalence golden fixtures and archive.
+  - evaluation/fixtures/**
+
+  # Comparison and verifier infrastructure that should not be edited mid-campaign.
+  - autoresearch/scripts/compare_to_baseline.py
+  - autoresearch/scripts/behavioral_equivalence.py
+  - autoresearch/scripts/verifier/**
+
+  # The campaign's own configuration — once locked at bootstrap, immutable.
+  - autoresearch/config/metrics.yaml
+  - autoresearch/config/protected_paths.yaml
+  - autoresearch/config/enforcement.yaml
+
+  # Tamper-evident manifests of evaluator/ contents.
+  - autoresearch/state/eval_manifest.signed
+
+  # Final report and dashboard surfaces.
+  - notebooks/final_report/**
+  - dashboards/model_comparison/**
+
+# Subset that additionally requires human (not just CODEOWNER) sign-off.
+# Changes to these paths trigger §3.1 escalation regardless of enforcement
+# mechanism.
+requires_human_review:
+  - data/**
+  - evaluation/**
+  - metrics/**
+  - production/**

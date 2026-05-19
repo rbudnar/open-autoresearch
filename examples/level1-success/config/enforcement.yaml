@@ -1,0 +1,12 @@
+protocol_version: "0.4"
+
+# This example explicitly chooses `mechanism: none` to demonstrate honest
+# in-band-only operation. A real adoption would pick ci_enforced, pre_receive,
+# oop_verifier, or container_ro per PROTOCOL.md §3.1.1.
+#
+# Consequence: every promotion attempt is capped at low_evidence_promoted
+# with enforcement: in_band_only and not_deployable: true. Since this is a
+# Level-1 campaign and Level 1 cannot promote at all, the cap is moot — but
+# the configuration is still honest about what it does and doesn't enforce.
+mechanism: none
+trust_level: advisory

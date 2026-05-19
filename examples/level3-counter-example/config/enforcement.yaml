@@ -1,0 +1,15 @@
+protocol_version: "0.4"
+
+# CI-enforced enforcement: protected_paths.yaml is committed to a main branch
+# with branch protection; CODEOWNERS requires a non-agent reviewer for any
+# diff against listed paths. The agent operates on a feature branch with no
+# rights to bypass branch protection.
+mechanism: ci_enforced
+
+ci_enforced:
+  base_branch: main
+  branch_protection: required
+  codeowners_required: true
+  reviewer_identity: human
+
+trust_level: high

@@ -1,0 +1,26 @@
+% canon.bib.example — seed bibliography for §9.0 offline mode.
+%
+% When web literature search is unavailable, rate-limited, paywalled, or
+% otherwise infeasible, the Literature Scout (§5.3) operates in offline mode
+% (§9.0) and works only from this curated, version-controlled bibliography.
+%
+% Replace with your project's domain canon. Keep entries you trust and have
+% read; do NOT add entries the agent hasn't verified. Anti-hallucination
+% controls (§17.3) require source classification and primary-source preference.
+%
+% Suggested fields beyond standard BibTeX:
+%   review_status = {peer-reviewed | preprint | blog | repo | withdrawn}
+%   relevance     = {primary | secondary}
+%   notes         = {one-line takeaway you'd hand the Scout}
+
+@misc{karpathy_autoresearch_2026,
+  title        = {autoresearch},
+  author       = {Karpathy, Andrej},
+  year         = {2026},
+  howpublished = {\url{https://github.com/karpathy/autoresearch}},
+  review_status = {prototype},
+  relevance    = {primary},
+  notes        = {Baseline single-branch keep-or-revert loop. The point of departure for this protocol.}
+}
+
+% Add your domain's seminal works here. Mark review_status honestly.

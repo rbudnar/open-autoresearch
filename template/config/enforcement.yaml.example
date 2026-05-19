@@ -1,0 +1,49 @@
+# enforcement.yaml — chosen §3.1.1 enforcement mechanism for the evaluator boundary.
+#
+# PROTOCOL.md §3.1.1 mandates that "the agent must not be able to modify the
+# evaluator" be enforced out-of-band. This file declares the chosen mechanism.
+# Without one, all anti-cheating controls in §17.1 are advisory only and
+# promotion packets carry `enforcement: in-band-only`, `not_deployable: true`.
+
+protocol_version: "0.4"
+
+# REQUIRED. Pick exactly one mechanism. See PROTOCOL.md §3.1.1 for trust levels.
+#   ci_enforced       — main-branch protection + CODEOWNERS on the host repo.
+#                       Highest trust if the agent has no admin token.
+#   pre_receive       — remote git pre-receive hook the agent has no shell on.
+#                       Highest trust if the remote is fully under your control.
+#   oop_verifier      — a Makefile target run by a human/runner; medium trust.
+#   container_ro      — read-only bind-mount of evaluator/ in a container the
+#                       agent cannot rebuild. High trust if the build pipeline
+#                       is itself protected.
+#   none              — honor-system. Acceptable for solo Level-1 exploration
+#                       but caps all results at low_evidence_promoted +
+#                       enforcement: in-band-only + not_deployable: true.
+mechanism: <FILL_ME>     # one of: ci_enforced | pre_receive | oop_verifier | container_ro | none
+
+# Mechanism-specific parameters. Only fill the block matching `mechanism` above.
+
+ci_enforced:
+  base_branch: main
+  branch_protection: required
+  codeowners_required: true
+  # The reviewer identity that signs off on changes to protected paths.
+  # MUST NOT be the agent's identity.
+  reviewer_identity: human
+
+pre_receive:
+  remote_host: <FILL_ME>          # e.g., "git@github.com:rbudnar/myproject"
+  hook_script_path: <FILL_ME>     # path on the remote where the hook lives
+
+oop_verifier:
+  verifier_script: <FILL_ME>      # e.g., "make verify"
+  verifier_runner: <FILL_ME>      # who runs it (human name or CI job id)
+
+container_ro:
+  container_image_digest: <FILL_ME>  # sha256:... of the locked image
+  evaluator_mount_point: /workspace/evaluator
+  # The image build pipeline MUST be protected separately.
+
+# Declared trust level. The verifier (§10.5) uses this when computing the
+# packet's `enforcement` field. If mechanism: none, trust_level MUST be "advisory".
+trust_level: <FILL_ME>   # one of: high | medium | advisory

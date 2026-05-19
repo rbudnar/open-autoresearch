@@ -1,0 +1,28 @@
+# editable_paths.yaml — paths the agent is allowed to modify.
+#
+# PROTOCOL.md §3.1 declares the allowed editable surface. This file is the
+# concrete realization for the host project. Anything not in editable_paths and
+# not in protected_paths is implicitly editable; protected_paths takes
+# precedence. Keep this file together with protected_paths for clarity.
+
+protocol_version: "0.4"
+
+editable_paths:
+  - models/**
+  - training/**
+  - losses/**
+  - features/**
+  - configs/experiments/**
+  - calibration/candidates/**
+  - autoresearch/proposals/**
+  - autoresearch/reports/**
+  - autoresearch/state/experiment_ledger.jsonl
+  - autoresearch/state/research_tree.json
+  - autoresearch/state/playbook.md
+  - autoresearch/state/open_questions.md
+  - autoresearch/state/known_failures.md
+  - autoresearch/state/val_exposure.json
+  - autoresearch/state/budget_ledger.jsonl
+  - autoresearch/literature/briefs/**
+
+# Add your project-specific editable paths here.

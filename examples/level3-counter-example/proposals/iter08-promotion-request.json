@@ -1,0 +1,52 @@
+{
+  "protocol_version": "0.4",
+  "request_id": "20260518-220000-bbb008",
+  "candidate_proposal_id": "20260518-130000-bbb003",
+  "campaign_id": "level3-counter-example-2026-05-18",
+  "maturity_level_used": 3,
+  "requested_status": "promoted",
+  "references": {
+    "baseline_run": {
+      "ledger_id": "20260518-090000-bbb000",
+      "content_sha256": "d984ec6bfe47918defb61bcca9907d43502baec7860a05693554ca1fdfdb2ce2"
+    },
+    "candidate_runs": [
+      {"ledger_id": "20260518-160000-bbb005-regrade", "content_sha256": "48c1ad78e86c991645ce24231e2cec43fd989b8d4eed889083ce06a58ffefef1"}
+    ],
+    "baseline_rerun": {
+      "ledger_id": "20260518-160000-bbb005-regrade",
+      "content_sha256": "48c1ad78e86c991645ce24231e2cec43fd989b8d4eed889083ce06a58ffefef1"
+    },
+    "ablation_runs": [
+      {"ledger_id": "20260518-190000-bbb007-factorial", "content_sha256": "8b4baa28053df328fd348dd31ba091f2a8a779bde172485da4f7bf1597d79437"},
+      {"ledger_id": "20260518-220000-bbb008-promotion-request", "content_sha256": "60b666c5ff94de7dd61d35e89db31f2c388a55ef6b6679fab25cc685c7ce9f2c"}
+    ],
+    "skeptic_review": {
+      "path": "reports/iter09-skeptic-review.md",
+      "content_sha256": "3fb818448fc0ec7d80f36ed42334d0de0871870c5606841637c881b969c9ce7f"
+    }
+  },
+  "claims": {
+    "enforcement_mode": "ci_enforced",
+    "role_separation_achieved": {
+      "implementation_worker_vs_skeptic": "level_2",
+      "research_director_vs_reflection_analyst": "level_1",
+      "literature_scout_vs_implementation_worker": "level_2"
+    },
+    "ablation": {
+      "change_type": "single_component_swap",
+      "factorial_grid_completed": false
+    },
+    "val_set_exposure_at_request": {
+      "queries_against_val_this_campaign": 52,
+      "exposure_budget": 50
+    },
+    "budget_at_request": {
+      "llm_tokens_total": 440000,
+      "tool_calls_total": 180,
+      "gpu_hours_total": 96.0
+    },
+    "behavioral_equivalence_test_passed_for_evaluator": true,
+    "causal_attribution": "Attention pooling drives the validation_nll improvement of approximately -0.022 vs baseline. The §16.1.1 lesion test (attention weights replaced with uniform) returns NLL to 0.846, within seed variance of the baseline's 0.847 — confirming the attention mechanism, not the surrounding scaffolding, is the cause. The §16.1.2 factorial showed ordinal_ce_hybrid contributes a smaller, just-significant secondary effect with no detectable interaction; the present request is for attention_pool alone, leaving ordinal_hybrid for a future campaign."
+  }
+}

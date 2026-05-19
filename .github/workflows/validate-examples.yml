@@ -1,0 +1,111 @@
+# validate-examples.yml — every example campaign must validate against the
+# protocol via the reference verifier. The examples are part of the test
+# suite, not just illustrative.
+
+name: validate-examples
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'PROTOCOL.md'
+      - 'template/scripts/**'
+      - 'examples/**'
+
+permissions:
+  contents: read
+
+jobs:
+  scripts-parse-and-help:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install minimal deps
+        run: pip install pyyaml
+      - name: Parse reference scripts
+        run: |
+          python -c "import ast; [ast.parse(open(p).read()) for p in ['template/scripts/behavioral_equivalence.py', 'template/scripts/verifier/verify_request.py', 'template/scripts/verifier/sign_packet.py']]; print('OK: all scripts parse')"
+      - name: --help on each script
+        run: |
+          python template/scripts/behavioral_equivalence.py --help > /dev/null
+          python template/scripts/verifier/verify_request.py --help > /dev/null
+          python template/scripts/verifier/sign_packet.py --help > /dev/null
+          echo "OK: --help works on all scripts"
+
+  level3-counter-example-verifier-rejects:
+    runs-on: ubuntu-latest
+    needs: scripts-parse-and-help
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install minimal deps
+        run: pip install pyyaml
+      - name: Run verifier against the rejected promotion request
+        id: verify
+        continue-on-error: true
+        run: |
+          cd examples/level3-counter-example
+          mkdir -p /tmp/oar-ci-out
+          python ../../template/scripts/verifier/verify_request.py \
+            --request proposals/iter08-promotion-request.json \
+            --ledger state/experiment_ledger.jsonl \
+            --metrics config/metrics.yaml \
+            --enforcement config/enforcement.yaml \
+            --out-dir /tmp/oar-ci-out \
+            --verifier-identity "ci-validate-examples" \
+            --unsigned
+          echo "verify_exit=$?" >> "$GITHUB_OUTPUT"
+      - name: Assert verifier returned 1 (rejected)
+        run: |
+          if [ "${{ steps.verify.outputs.verify_exit }}" != "1" ]; then
+            echo "::error::verifier exit code was ${{ steps.verify.outputs.verify_exit }}, expected 1 (rejected)"
+            exit 1
+          fi
+          echo "OK: verifier returned 1 as expected for the rejected counter-example."
+      - name: Assert packet status is 'rejected' and rejection reason mentions val exposure
+        run: |
+          python - <<'EOF'
+          import json, sys
+          with open("/tmp/oar-ci-out/20260518-220000-bbb008-promotion-packet.json") as f:
+              p = json.load(f)
+          assert p["status"] == "rejected", f"expected status=rejected, got {p['status']}"
+          assert p["not_deployable"] is True, "expected not_deployable=true"
+          reasons = " ".join(p["rejection_reasons"])
+          assert "val exposure" in reasons.lower(), f"expected val-exposure rejection, got: {p['rejection_reasons']}"
+          print(f"OK: packet status={p['status']}, reason mentions val exposure.")
+          EOF
+
+  example-ledger-entries-have-protocol-version:
+    runs-on: ubuntu-latest
+    needs: scripts-parse-and-help
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Every ledger entry stamps protocol_version 0.4
+        run: |
+          python - <<'EOF'
+          import json, glob, sys
+          bad = []
+          for path in glob.glob("examples/**/state/experiment_ledger.jsonl", recursive=True):
+              with open(path) as f:
+                  for i, line in enumerate(f, 1):
+                      line = line.strip()
+                      if not line:
+                          continue
+                      entry = json.loads(line)
+                      if entry.get("protocol_version") != "0.4":
+                          bad.append(f"{path}:{i}: protocol_version={entry.get('protocol_version')!r}")
+          if bad:
+              print("FAIL: ledger entries with wrong/missing protocol_version:")
+              for b in bad: print(f"  {b}")
+              sys.exit(1)
+          print("OK: every example ledger entry stamps protocol_version=0.4")
+          EOF
