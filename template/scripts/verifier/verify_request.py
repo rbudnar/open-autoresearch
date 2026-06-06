@@ -12,7 +12,7 @@ Usage
 -----
     OPEN_AUTORESEARCH_VERIFIER_KEY=<secret> python verify_request.py \\
         --request    autoresearch/proposals/<id>-promotion-request.json \\
-        --ledger     autoresearch/state/experiment_ledger.jsonl \\
+        --ledger     autoresearch/state/ledger/ \\
         --metrics    autoresearch/config/metrics.yaml \\
         --enforcement autoresearch/config/enforcement.yaml \\
         --out-dir    autoresearch/reports/ \\
@@ -39,6 +39,7 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -51,10 +52,24 @@ except ImportError:
     sys.stderr.write("ERROR: PyYAML is required. Install with: pip install pyyaml\n")
     sys.exit(2)
 
+# Import the SHARED canonical serializer. This MUST be the SAME helper used by
+# regenerate_state.py and log_experiment.py so the §10.5 hash basis is byte-
+# identical across all tools. scripts/ sits one level up from scripts/verifier/.
+try:
+    from _ledger_common import _canonical_record_bytes
+except ImportError:  # pragma: no cover - path shim for direct invocation
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from _ledger_common import _canonical_record_bytes
+
 
 # --- Constants ----------------------------------------------------------------
 
-PROTOCOL_VERSION = "0.4"
+PROTOCOL_VERSION = "0.5"
+
+VALID_SKEPTIC_VERDICTS = {
+    "no_objection",
+    "objected_but_overridden_by_human",
+}
 
 # §10.5 verifier validation rules, in order. Each function takes the verifier
 # context and returns (ok: bool, rejection_reason: str | None).
@@ -103,31 +118,61 @@ def load_json(path: Path) -> dict[str, Any]:
     return data
 
 
-def load_ledger(path: Path) -> dict[str, dict[str, Any]]:
-    """Read experiment_ledger.jsonl and return {id: {entry, raw_bytes}}.
+def _skeptic_verdict(text: str) -> "str | None":
+    """Extract the skeptic-review ``verdict`` from a markdown document.
 
-    The raw bytes are preserved so we can re-hash them and compare against the
-    request's claimed content_sha256.
+    Reads the leading frontmatter block (between the first two ``---`` fences)
+    and returns the ``verdict`` value, tolerating optional single/double quotes
+    and unquoted YAML scalars. Stdlib-only (no PyYAML dependency).
     """
-    if not path.exists():
-        raise SystemExit(f"CONFIG ERROR: ledger {path} does not exist")
+    block = text
+    if text.startswith("---"):
+        parts = text.split("---", 2)
+        if len(parts) >= 3:
+            block = parts[1]
+    match = re.search(r'(?m)^\s*verdict:\s*["\']?([A-Za-z_]+)["\']?\s*$', block)
+    return match.group(1) if match else None
+
+
+def load_ledger(ledger_dir: Path) -> dict[str, dict[str, Any]]:
+    """Read state/ledger/*.json shards and return {id: {entry, canonical_bytes}}.
+
+    Protocol 0.5: the source of truth is one immutable file per experiment at
+    state/ledger/<id>.json. The hash basis is the SHARED canonical serialization
+    (_ledger_common._canonical_record_bytes) — byte-identical to the line that
+    regenerate_state.py writes into experiment_ledger.jsonl. We compute it here
+    and preserve it so rule_2 can re-hash and compare against the request's
+    claimed content_sha256.
+
+    Per-shard duplicate-id and missing-id checks are preserved.
+    """
+    if not ledger_dir.is_dir():
+        raise SystemExit(
+            f"CONFIG ERROR: ledger dir {ledger_dir} does not exist or is not a "
+            f"directory (Protocol 0.5 expects the state/ledger/ shard directory)"
+        )
     out: dict[str, dict[str, Any]] = {}
-    with path.open("rb") as f:
-        for raw_line in f:
-            stripped = raw_line.strip()
-            if not stripped:
-                continue
-            entry = json.loads(stripped)
-            entry_id = entry.get("id")
-            if not entry_id:
-                raise SystemExit(
-                    f"CONFIG ERROR: ledger entry missing 'id' field: {stripped[:120]!r}"
-                )
-            if entry_id in out:
-                raise SystemExit(
-                    f"CONFIG ERROR: duplicate ledger entry id {entry_id!r}"
-                )
-            out[entry_id] = {"entry": entry, "raw_bytes": stripped}
+    for shard in sorted(ledger_dir.glob("*.json")):
+        with shard.open("r", encoding="utf-8") as f:
+            entry = json.load(f)
+        if not isinstance(entry, dict):
+            raise SystemExit(
+                f"CONFIG ERROR: ledger shard {shard.name} is not a JSON object"
+            )
+        entry_id = entry.get("id")
+        if not entry_id:
+            raise SystemExit(
+                f"CONFIG ERROR: ledger shard {shard.name} missing 'id' field"
+            )
+        if entry_id in out:
+            raise SystemExit(
+                f"CONFIG ERROR: duplicate ledger entry id {entry_id!r} "
+                f"(in shard {shard.name})"
+            )
+        out[entry_id] = {
+            "entry": entry,
+            "canonical_bytes": _canonical_record_bytes(entry),
+        }
     return out
 
 
@@ -176,7 +221,7 @@ def rule_2_references_rehash(ctx: VerifierContext) -> tuple[bool, str | None]:
             if entry is None:
                 missing.append(f"{label}: ledger_id={ledger_id} not in ledger")
                 return
-            actual = sha256_bytes(entry["raw_bytes"])
+            actual = sha256_bytes(entry["canonical_bytes"])
             if actual != claimed:
                 mismatches.append(
                     f"{label}: ledger_id={ledger_id} claimed={claimed[:12]}... "
@@ -296,10 +341,7 @@ def rule_8_skeptic_verdict_clean(ctx: VerifierContext) -> tuple[bool, str | None
     if not skeptic_path.exists():
         return False, f"skeptic review file not found: {skeptic_path}"
     text = skeptic_path.read_text(encoding="utf-8")
-    if (
-        'verdict: "no_objection"' in text
-        or 'verdict: "objected_but_overridden_by_human"' in text
-    ):
+    if _skeptic_verdict(text) in VALID_SKEPTIC_VERDICTS:
         return True, None
     return False, (
         f"skeptic_review verdict is neither no_objection nor "
@@ -549,7 +591,12 @@ def main(argv: list[str]) -> int:
         )
     )
     parser.add_argument("--request", required=True, type=Path)
-    parser.add_argument("--ledger", required=True, type=Path)
+    parser.add_argument(
+        "--ledger",
+        required=True,
+        type=Path,
+        help="Protocol 0.5 state/ledger/ shard DIRECTORY (one *.json per record)",
+    )
     parser.add_argument("--metrics", required=True, type=Path)
     parser.add_argument("--enforcement", required=True, type=Path)
     parser.add_argument("--out-dir", required=True, type=Path)

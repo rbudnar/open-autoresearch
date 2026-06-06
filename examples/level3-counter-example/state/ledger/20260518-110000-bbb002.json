@@ -1,0 +1,62 @@
+{
+  "protocol_version": "0.5",
+  "id": "20260518-110000-bbb002",
+  "timestamp": "2026-05-18T11:00:00Z",
+  "branch": "optimization",
+  "hypothesis": "Cosine restarts schedule should improve NLL by re-warming the optimizer past local minima",
+  "parent_ids": [
+    "20260518-090000-bbb000"
+  ],
+  "git_sha_before": "aaa000",
+  "git_sha_after": "bbb002",
+  "data_snapshot": "data-snap-2026-05-15",
+  "single_non_baseline_switch": "lr_schedule=cosine_restarts",
+  "metrics": {
+    "validation_nll": 0.837,
+    "accuracy": 0.79
+  },
+  "guardrails": {
+    "inference_latency_ms": 20.2
+  },
+  "seed_variance": {
+    "validation_nll_seed_std": 0.011,
+    "accuracy_seed_std": 0.005
+  },
+  "delta_vs_baseline": {
+    "validation_nll": -0.01,
+    "validation_nll_95_ci": [
+      -0.016,
+      -0.004
+    ],
+    "accuracy": 0.01,
+    "inference_latency_ms": 1.8,
+    "inference_latency_ms_95_ci_upper": 2.1
+  },
+  "cost": {
+    "gpu_hours": 9.0,
+    "wall_clock_hours": 3.1,
+    "llm_tokens": 48000,
+    "tool_calls": 19
+  },
+  "status": "failed",
+  "failure_reason": "guardrail_regression: inference_latency_ms Δ 95% CI upper = +2.1ms, exceeds Holm-corrected threshold +1.84ms (10% relative to baseline 18.4ms). Per §13.2.1, GUARDRAIL-FAIL; per §13.4, candidate cannot promote.",
+  "evidence_level": "standard",
+  "enforcement_mode": "ci_enforced",
+  "maturity_level": 3,
+  "not_deployable": false,
+  "scout_mode": "live",
+  "val_queries_incurred_by_this_run": 3,
+  "val_queries_total_at_start": 5,
+  "val_queries_total_at_end": 8,
+  "artifacts": {
+    "checkpoint": "checkpoints/bbb002.pt"
+  },
+  "lessons": [
+    "Cosine restarts on this task increase latency variance; some checkpoints land in slower kernels due to attention activation patterns differing per restart phase.",
+    "Optimization branch is not a free lunch when guardrails include latency."
+  ],
+  "next_actions": [
+    "Optimization branch deprioritized",
+    "Try architecture branch next"
+  ]
+}

@@ -11,6 +11,7 @@ on:
     paths:
       - 'PROTOCOL.md'
       - 'template/scripts/**'
+      - 'template/schema/**'
       - 'examples/**'
       - '.github/workflows/validate-examples.yml'
 
@@ -29,12 +30,16 @@ jobs:
         run: pip install pyyaml
       - name: Parse reference scripts
         run: |
-          python -c "import ast; [ast.parse(open(p).read()) for p in ['template/scripts/behavioral_equivalence.py', 'template/scripts/verifier/verify_request.py', 'template/scripts/verifier/sign_packet.py']]; print('OK: all scripts parse')"
+          python -c "import ast; [ast.parse(open(p).read()) for p in ['template/scripts/behavioral_equivalence.py', 'template/scripts/verifier/verify_request.py', 'template/scripts/verifier/sign_packet.py', 'template/scripts/_ledger_common.py', 'template/scripts/log_experiment.py', 'template/scripts/regenerate_state.py', 'template/scripts/validate_ledger.py', 'template/scripts/migrate_ledger_v04_to_v05.py']]; print('OK: all scripts parse')"
       - name: --help on each script
         run: |
           python template/scripts/behavioral_equivalence.py --help > /dev/null
           python template/scripts/verifier/verify_request.py --help > /dev/null
           python template/scripts/verifier/sign_packet.py --help > /dev/null
+          python template/scripts/log_experiment.py --help > /dev/null
+          python template/scripts/regenerate_state.py --help > /dev/null
+          python template/scripts/validate_ledger.py --help > /dev/null
+          python template/scripts/migrate_ledger_v04_to_v05.py --help > /dev/null
           echo "OK: --help works on all scripts"
 
   level3-counter-example-verifier-rejects:
@@ -52,6 +57,10 @@ jobs:
         run: |
           cd examples/level3-counter-example
           mkdir -p /tmp/oar-ci-out
+          # Derived aggregates are git-ignored; examples use CI-regenerate (not
+          # committed derived files). Rebuild them from the state/ledger/ shards
+          # before the verifier reads anything.
+          python ../../template/scripts/regenerate_state.py --state-dir state/
           # The verifier is *expected* to exit 1 here (the request is the
           # counter-example and must be rejected). Under `bash -e`, that exit
           # would abort the step before we can record the code, so capture
@@ -59,7 +68,7 @@ jobs:
           verify_exit=0
           python ../../template/scripts/verifier/verify_request.py \
             --request proposals/iter08-promotion-request.json \
-            --ledger state/experiment_ledger.jsonl \
+            --ledger state/ledger/ \
             --metrics config/metrics.yaml \
             --enforcement config/enforcement.yaml \
             --out-dir /tmp/oar-ci-out \
@@ -94,23 +103,25 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Every ledger entry stamps protocol_version 0.4
+      - name: Every ledger record stamps protocol_version 0.5
         run: |
           python - <<'EOF'
           import json, glob, sys
+          # Read the source-of-truth shard records, not the derived (git-ignored)
+          # experiment_ledger.jsonl.
           bad = []
-          for path in glob.glob("examples/**/state/experiment_ledger.jsonl", recursive=True):
+          paths = sorted(glob.glob("examples/**/state/ledger/*.json", recursive=True))
+          if not paths:
+              print("FAIL: no state/ledger/*.json records found")
+              sys.exit(1)
+          for path in paths:
               with open(path) as f:
-                  for i, line in enumerate(f, 1):
-                      line = line.strip()
-                      if not line:
-                          continue
-                      entry = json.loads(line)
-                      if entry.get("protocol_version") != "0.4":
-                          bad.append(f"{path}:{i}: protocol_version={entry.get('protocol_version')!r}")
+                  entry = json.load(f)
+              if entry.get("protocol_version") != "0.5":
+                  bad.append(f"{path}: protocol_version={entry.get('protocol_version')!r}")
           if bad:
-              print("FAIL: ledger entries with wrong/missing protocol_version:")
+              print("FAIL: ledger records with wrong/missing protocol_version:")
               for b in bad: print(f"  {b}")
               sys.exit(1)
-          print("OK: every example ledger entry stamps protocol_version=0.4")
+          print(f"OK: every example ledger record ({len(paths)}) stamps protocol_version=0.5")
           EOF

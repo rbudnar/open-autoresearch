@@ -1,0 +1,552 @@
+#!/usr/bin/env python3
+"""test_ledger.py — stdlib unittest suite for the Protocol 0.5 ledger tools.
+
+Run:
+    python3 -m unittest discover -s template/scripts/tests -v
+"""
+
+from __future__ import annotations
+
+import datetime as dt
+import json
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+# Make the scripts dir importable.
+SCRIPTS_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SCRIPTS_DIR))
+
+import _ledger_common  # noqa: E402
+import log_experiment  # noqa: E402
+import migrate_ledger_v04_to_v05 as migrate_mod  # noqa: E402
+import regenerate_state  # noqa: E402
+import validate_ledger  # noqa: E402
+
+SCHEMA_PATH = SCRIPTS_DIR.parent / "schema" / "experiment_record.schema.json"
+
+
+def make_record(rid, parents=None, branch="b", status="ok", val=0, metrics=None):
+    return {
+        "protocol_version": "0.5",
+        "id": rid,
+        "timestamp": "2026-05-18T10:00:00Z",
+        "branch": branch,
+        "hypothesis": "h",
+        "parent_ids": list(parents or []),
+        "git_sha_before": "aaa",
+        "git_sha_after": "bbb",
+        "status": status,
+        "metrics": metrics if metrics is not None else {},
+        "val_queries_incurred_by_this_run": val,
+    }
+
+
+def write_shard(ledger_dir: Path, record: dict) -> Path:
+    ledger_dir.mkdir(parents=True, exist_ok=True)
+    p = ledger_dir / f"{record['id']}.json"
+    p.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    return p
+
+
+class TempStateMixin(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="ledger-test-"))
+        self.state = self.tmp / "state"
+        self.ledger = self.state / "ledger"
+        self.ledger.mkdir(parents=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+
+# --- _ledger_common ----------------------------------------------------------
+
+
+class TestCanonicalBytes(unittest.TestCase):
+    def test_insertion_order_not_sorted(self):
+        entry = {"b": 1, "a": 2}
+        out = _ledger_common._canonical_record_bytes(entry)
+        self.assertEqual(out, b'{"b":1,"a":2}')
+
+    def test_no_trailing_newline(self):
+        out = _ledger_common._canonical_record_bytes({"x": 1})
+        self.assertFalse(out.endswith(b"\n"))
+
+    def test_ensure_ascii_false_raw_utf8(self):
+        out = _ledger_common._canonical_record_bytes({"s": "§17.6"})
+        self.assertIn("§".encode("utf-8"), out)
+        self.assertNotIn(b"\\u00a7", out)
+
+    def test_compact_separators(self):
+        out = _ledger_common._canonical_record_bytes({"a": 1, "b": 2})
+        self.assertEqual(out, b'{"a":1,"b":2}')
+
+
+class TestResolveValQueries(unittest.TestCase):
+    def test_prefers_direct_field(self):
+        self.assertEqual(
+            _ledger_common.resolve_val_queries(
+                {"val_queries_incurred_by_this_run": 7, "metrics": {"validation_set_queries": 99}}
+            ),
+            7,
+        )
+
+    def test_falls_back_to_metrics(self):
+        self.assertEqual(
+            _ledger_common.resolve_val_queries({"metrics": {"validation_set_queries": 4}}),
+            4,
+        )
+
+    def test_default_zero(self):
+        self.assertEqual(_ledger_common.resolve_val_queries({"metrics": {}}), 0)
+        self.assertEqual(_ledger_common.resolve_val_queries({}), 0)
+
+    def test_bool_is_not_a_count(self):
+        self.assertEqual(
+            _ledger_common.resolve_val_queries({"val_queries_incurred_by_this_run": True}),
+            0,
+        )
+
+
+class TestSanitizeSlug(unittest.TestCase):
+    def test_lowercase_and_map(self):
+        self.assertEqual(_ledger_common.sanitize_slug("Ordinal Loss!"), "ordinal-loss")
+
+    def test_collapse_and_strip(self):
+        self.assertEqual(_ledger_common.sanitize_slug("--a___b--"), "a-b")
+
+    def test_cap_40(self):
+        self.assertLessEqual(len(_ledger_common.sanitize_slug("x" * 100)), 40)
+
+    def test_empty(self):
+        self.assertEqual(_ledger_common.sanitize_slug("!!!"), "")
+        self.assertEqual(_ledger_common.sanitize_slug(""), "")
+
+
+# --- log_experiment ----------------------------------------------------------
+
+
+class TestLogExperiment(TempStateMixin):
+    def _args(self, **over):
+        ns = log_experiment.argparse.Namespace(
+            state_dir=self.state,
+            branch="loss_objective",
+            hypothesis="ordinal loss helps",
+            status="promising",
+            parent=[],
+            slug="My Slug!",
+            metrics_json="",
+            val_queries=3,
+            node_title="",
+            node_lesson=[],
+            schema=SCHEMA_PATH,
+            protocol_version_file=self.tmp / "PV",
+            repo_dir=self.tmp,
+            git_sha_before="",
+            git_sha_after="",
+            regenerate=False,
+        )
+        for k, v in over.items():
+            setattr(ns, k, v)
+        return ns
+
+    def test_autofill_fields(self):
+        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
+        rec = log_experiment.build_record(self._args(), now)
+        self.assertEqual(rec["protocol_version"], "0.5")
+        self.assertEqual(rec["timestamp"], "2026-05-18T10:00:00Z")
+        self.assertTrue(rec["id"].startswith("20260518-100000-"))
+        self.assertTrue(rec["id"].endswith("-my-slug"))
+        # git_sha auto-filled (git rev-parse fails in empty dir -> "unknown")
+        self.assertTrue(rec["git_sha_before"])
+        self.assertTrue(rec["git_sha_after"])
+
+    def test_refuses_overwrite(self):
+        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
+        rec = log_experiment.build_record(self._args(), now)
+        p = log_experiment.write_record(self.state, rec)
+        contents_before = p.read_text(encoding="utf-8")
+        with self.assertRaises(SystemExit):
+            log_experiment.write_record(self.state, rec)
+        self.assertEqual(p.read_text(encoding="utf-8"), contents_before)
+
+    def test_schema_rejection_missing_required(self):
+        schema = _ledger_common.load_schema(SCHEMA_PATH)
+        bad = make_record("20260518-100000-abc123")
+        del bad["status"]
+        errors = _ledger_common.validate_against_schema(bad, schema)
+        self.assertTrue(any("status" in e for e in errors))
+
+    def test_schema_rejection_wrong_type(self):
+        schema = _ledger_common.load_schema(SCHEMA_PATH)
+        bad = make_record("20260518-100000-abc123")
+        bad["parent_ids"] = "not-a-list"
+        errors = _ledger_common.validate_against_schema(bad, schema)
+        self.assertTrue(any("parent_ids" in e for e in errors))
+
+    def test_same_second_different_hex_no_collision(self):
+        now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
+        ids = {log_experiment.make_id(now, "slug") for _ in range(200)}
+        # 6 hex chars -> collisions astronomically unlikely across 200 draws.
+        self.assertEqual(len(ids), 200)
+        for i in ids:
+            self.assertTrue(i.startswith("20260518-100000-"))
+
+
+# --- regenerate_state --------------------------------------------------------
+
+
+class TestRegenerate(TempStateMixin):
+    def test_tree_reconstruction_from_parent_ids(self):
+        write_shard(self.ledger, make_record("20260518-090000-aaa000", parents=[], branch="baseline"))
+        write_shard(self.ledger, make_record("20260518-100000-aaa001", parents=["20260518-090000-aaa000"]))
+        write_shard(self.ledger, make_record("20260518-110000-aaa002", parents=["20260518-090000-aaa000"]))
+        regenerate_state.regenerate(self.state)
+        tree = json.loads((self.state / "research_tree.json").read_text())
+        self.assertEqual(tree["roots"], ["20260518-090000-aaa000"])
+        self.assertEqual(
+            tree["children"]["20260518-090000-aaa000"],
+            ["20260518-100000-aaa001", "20260518-110000-aaa002"],
+        )
+        self.assertEqual(len(tree["nodes"]), 3)
+
+    def test_baseline_sentinel_is_root(self):
+        write_shard(self.ledger, make_record("20260518-090000-aaa000", parents=["baseline"]))
+        regenerate_state.regenerate(self.state)
+        tree = json.loads((self.state / "research_tree.json").read_text())
+        self.assertEqual(tree["roots"], ["20260518-090000-aaa000"])
+
+    def test_val_counter_sum(self):
+        write_shard(self.ledger, make_record("20260518-090000-aaa000", val=5))
+        write_shard(self.ledger, make_record("20260518-100000-aaa001", val=3, parents=["20260518-090000-aaa000"]))
+        # one record uses metrics fallback
+        write_shard(self.ledger, make_record("20260518-110000-aaa002", parents=["20260518-090000-aaa000"], metrics={"validation_set_queries": 4}))
+        # overwrite to drop the direct field for the fallback record
+        rec = make_record("20260518-110000-aaa002", parents=["20260518-090000-aaa000"], metrics={"validation_set_queries": 4})
+        del rec["val_queries_incurred_by_this_run"]
+        write_shard(self.ledger, rec)
+        regenerate_state.regenerate(self.state)
+        ve = json.loads((self.state / "val_exposure.json").read_text())
+        self.assertEqual(ve["queries"], 12)
+        # derived counter ONLY: no hand prose
+        self.assertNotIn("notes", ve)
+        self.assertNotIn("last_incremented_by_iteration", ve)
+
+    def test_idempotence(self):
+        write_shard(self.ledger, make_record("20260518-090000-aaa000", val=5))
+        write_shard(self.ledger, make_record("20260518-100000-aaa001", val=3, parents=["20260518-090000-aaa000"]))
+        regenerate_state.regenerate(self.state)
+        snap1 = {p.name: p.read_bytes() for p in self.state.glob("*") if p.is_file()}
+        regenerate_state.regenerate(self.state)
+        snap2 = {p.name: p.read_bytes() for p in self.state.glob("*") if p.is_file()}
+        self.assertEqual(snap1, snap2)
+
+    def test_atomic_write_no_tmp_left(self):
+        write_shard(self.ledger, make_record("20260518-090000-aaa000", val=1))
+        regenerate_state.regenerate(self.state)
+        leftover = list(self.state.glob(".tmp-*"))
+        self.assertEqual(leftover, [])
+
+    def test_curated_node_fields_used(self):
+        rec = make_record("20260518-090000-aaa000")
+        rec["node_title"] = "Curated Title"
+        rec["node_lessons"] = ["curated lesson"]
+        write_shard(self.ledger, rec)
+        regenerate_state.regenerate(self.state)
+        tree = json.loads((self.state / "research_tree.json").read_text())
+        node = tree["nodes"]["20260518-090000-aaa000"]
+        self.assertEqual(node["title"], "Curated Title")
+        self.assertEqual(node["lessons"], ["curated lesson"])
+
+    def test_jsonl_lines_are_canonical(self):
+        rec = make_record("20260518-090000-aaa000")
+        write_shard(self.ledger, rec)
+        regenerate_state.regenerate(self.state)
+        lines = (self.state / "experiment_ledger.jsonl").read_bytes().splitlines()
+        self.assertEqual(len(lines), 1)
+        self.assertEqual(lines[0], _ledger_common._canonical_record_bytes(json.loads(lines[0])))
+
+
+# --- validate_ledger ---------------------------------------------------------
+
+
+class TestValidateLedger(TempStateMixin):
+    def test_valid_set_passes(self):
+        write_shard(self.ledger, make_record("20260518-090000-aaa000", parents=["baseline"]))
+        write_shard(self.ledger, make_record("20260518-100000-aaa001", parents=["20260518-090000-aaa000"]))
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertTrue(ok, lines)
+
+    def test_duplicate_id(self):
+        # Two files, same id -> filenames differ so both exist on disk.
+        r1 = make_record("20260518-090000-aaa000")
+        (self.ledger / "a.json").write_text(json.dumps(r1), encoding="utf-8")
+        (self.ledger / "b.json").write_text(json.dumps(r1), encoding="utf-8")
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+        self.assertTrue(any("duplicate" in line for line in lines))
+
+    def test_orphan_parent(self):
+        write_shard(self.ledger, make_record("20260518-100000-aaa001", parents=["does-not-exist"]))
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+        self.assertTrue(any("orphan" in line for line in lines))
+
+    def test_malformed_json(self):
+        (self.ledger / "bad.json").write_text("{not json", encoding="utf-8")
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+        self.assertTrue(any("malformed" in line for line in lines))
+
+    def test_schema_invalid_record(self):
+        bad = make_record("20260518-090000-aaa000")
+        del bad["metrics"]
+        write_shard(self.ledger, bad)
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+
+
+# --- migration round-trip ----------------------------------------------------
+
+
+class TestMigration(TempStateMixin):
+    def _write_v04_jsonl(self, records):
+        path = self.state / "experiment_ledger.jsonl"
+        with path.open("w", encoding="utf-8") as f:
+            for r in records:
+                f.write(json.dumps(r, separators=(",", ":"), ensure_ascii=False) + "\n")
+        return path
+
+    def test_round_trip_deep_equal_all_fields(self):
+        # Rich records with additive/nested fields (AE-shaped).
+        r1 = {
+            "protocol_version": "0.4",
+            "id": "20260521-205012-5a60bd-process-smoke",
+            "timestamp": "2026-05-21T20:50:12Z",
+            "branch": "baseline",
+            "hypothesis": "h",
+            "parent_ids": ["baseline"],
+            "git_sha_before": "x",
+            "git_sha_after": "y",
+            "status": "baseline",
+            "metrics": {"validation_nll": 0.80, "validation_set_queries": 0},
+            "maturity_level": 3,
+            "not_deployable": False,
+            "artifacts": {"mlflow": {"run_id": "abc", "experiment_id": "1"}},
+            "lessons": ["§17.6 budget note"],
+        }
+        r2 = {
+            "protocol_version": "0.4",
+            "id": "20260521-213555-5a60bd-gradient-loss-smoke",
+            "timestamp": "2026-05-21T21:35:55Z",
+            "branch": "loss",
+            "hypothesis": "h2",
+            "parent_ids": ["20260521-205012-5a60bd-process-smoke"],
+            "git_sha_before": "y",
+            "git_sha_after": "z",
+            "status": "promising",
+            "metrics": {},
+            "val_queries_incurred_by_this_run": 0,
+        }
+        # remove the prior committed val_exposure so no reconciliation kicks in
+        self.ledger.rmdir()
+        self._write_v04_jsonl([r1, r2])
+        migrate_mod.migrate(self.state, force=False)
+
+        # Deep-equal every field EXCEPT protocol_version (stamped) and any
+        # val-query reconciliation (none here since no prior committed counter).
+        for orig in (r1, r2):
+            shard = json.loads((self.state / "ledger" / f"{orig['id']}.json").read_text())
+            expected = dict(orig)
+            expected["protocol_version"] = "0.5"
+            self.assertEqual(shard, expected)
+
+    def test_val_reconciliation_reproduces_prior_committed(self):
+        # per-record sum = 28 but prior committed = 52 (the level3 scenario)
+        self.ledger.rmdir()
+        vals = [5, 0, 3, 3, 0, 3, 0, 12, 2]  # sums to 28
+        records = []
+        prev = None
+        for i, v in enumerate(vals):
+            rid = f"20260518-{i:02d}0000-bbb{i:03d}"
+            r = make_record(rid, parents=([prev] if prev else ["baseline"]), val=v)
+            r["protocol_version"] = "0.4"
+            records.append(r)
+            prev = rid
+        self._write_v04_jsonl(records)
+        (self.state / "val_exposure.json").write_text(
+            json.dumps({"protocol_version": "0.4", "val_set_version": 1, "queries": 52}),
+            encoding="utf-8",
+        )
+        stats = migrate_mod.migrate(self.state, force=False)
+        self.assertEqual(stats["val_query_sum"], 52)
+        ve = json.loads((self.state / "val_exposure.json").read_text())
+        self.assertEqual(ve["queries"], 52)
+
+    def test_refuses_clobber_without_force(self):
+        self.ledger.rmdir()
+        r = make_record("20260518-090000-aaa000", parents=["baseline"])
+        r["protocol_version"] = "0.4"
+        self._write_v04_jsonl([r])
+        migrate_mod.migrate(self.state, force=False)
+        with self.assertRaises(SystemExit):
+            migrate_mod.migrate(self.state, force=False)
+
+    def test_idempotent_with_force(self):
+        self.ledger.rmdir()
+        r = make_record("20260518-090000-aaa000", parents=["baseline"], val=2)
+        r["protocol_version"] = "0.4"
+        self._write_v04_jsonl([r])
+        migrate_mod.migrate(self.state, force=False)
+        shard1 = (self.state / "ledger" / f"{r['id']}.json").read_bytes()
+        migrate_mod.migrate(self.state, force=True)
+        shard2 = (self.state / "ledger" / f"{r['id']}.json").read_bytes()
+        self.assertEqual(shard1, shard2)
+
+
+# --- headline concurrency test -----------------------------------------------
+
+
+class TestConcurrencyMerge(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="ledger-git-"))
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        self._git("init", "-q")
+        self._git("config", "user.email", "t@example.com")
+        self._git("config", "user.name", "Test")
+        self._git("config", "commit.gpgsign", "false")
+        # seed commit so branches share a base
+        (self.repo / "state").mkdir()
+        (self.repo / "state" / "ledger").mkdir()
+        (self.repo / "README").write_text("seed\n", encoding="utf-8")
+        # Mirror the real repo: derived aggregates are git-ignored.
+        (self.repo / ".gitignore").write_text(
+            "state/experiment_ledger.jsonl\n"
+            "state/research_tree.json\n"
+            "state/val_exposure.json\n"
+            "state/INDEX.md\n",
+            encoding="utf-8",
+        )
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "seed")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _git(self, *args):
+        return subprocess.run(
+            ["git", *args],
+            cwd=str(self.repo),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+
+    def _default_branch(self):
+        return self._git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+
+    def _write_record_and_commit(self, branch, rid, base):
+        self._git("checkout", "-q", base)
+        self._git("checkout", "-q", "-b", branch)
+        rec = make_record(rid, parents=["baseline"], branch=branch)
+        (self.repo / "state" / "ledger").mkdir(parents=True, exist_ok=True)
+        shard = self.repo / "state" / "ledger" / f"{rid}.json"
+        shard.write_text(json.dumps(rec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        # Only commit the immutable record shard. Derived aggregates are
+        # git-ignored in real repos; committing them here would make them
+        # "would be overwritten by checkout" on sibling branches.
+        self._git("add", str(shard))
+        self._git("commit", "-q", "-m", f"add {rid}")
+
+    def _assert_no_conflict_markers(self):
+        for shard in (self.repo / "state" / "ledger").glob("*.json"):
+            text = shard.read_text(encoding="utf-8")
+            self.assertNotIn("<<<<<<<", text)
+            self.assertNotIn(">>>>>>>", text)
+            self.assertNotIn("=======", text)
+
+    def _regenerate_and_assert_both(self, id_a, id_b):
+        regenerate_state.regenerate(self.repo / "state")
+        tree = json.loads((self.repo / "state" / "research_tree.json").read_text())
+        self.assertIn(id_a, tree["nodes"])
+        self.assertIn(id_b, tree["nodes"])
+        jsonl = (self.repo / "state" / "experiment_ledger.jsonl").read_text()
+        self.assertIn(id_a, jsonl)
+        self.assertIn(id_b, jsonl)
+
+    def test_divergent_branch_merge_zero_conflicts(self):
+        base = self._default_branch()
+        id_a = "20260518-100000-aaa00a"
+        id_b = "20260518-100000-bbb00b"
+        self._write_record_and_commit("branch-a", id_a, base)
+        self._write_record_and_commit("branch-b", id_b, base)
+
+        # --- git merge ---
+        self._git("checkout", "-q", "branch-a")
+        merge = subprocess.run(
+            ["git", "merge", "--no-edit", "branch-b"],
+            cwd=str(self.repo),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(merge.returncode, 0, merge.stderr + merge.stdout)
+        self._assert_no_conflict_markers()
+        self.assertTrue((self.repo / "state" / "ledger" / f"{id_a}.json").exists())
+        self.assertTrue((self.repo / "state" / "ledger" / f"{id_b}.json").exists())
+        self._regenerate_and_assert_both(id_a, id_b)
+
+        # --- git rebase ---
+        id_c = "20260518-100000-ccc00c"
+        id_d = "20260518-100000-ddd00d"
+        self._write_record_and_commit("rebase-a", id_c, base)
+        self._write_record_and_commit("rebase-b", id_d, base)
+        self._git("checkout", "-q", "rebase-b")
+        rebase = subprocess.run(
+            ["git", "rebase", "rebase-a"],
+            cwd=str(self.repo),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(rebase.returncode, 0, rebase.stderr + rebase.stdout)
+        self._assert_no_conflict_markers()
+        self.assertTrue((self.repo / "state" / "ledger" / f"{id_c}.json").exists())
+        self.assertTrue((self.repo / "state" / "ledger" / f"{id_d}.json").exists())
+        self._regenerate_and_assert_both(id_c, id_d)
+
+        # --- git cherry-pick ---
+        id_e = "20260518-100000-eee00e"
+        id_f = "20260518-100000-fff00f"
+        self._write_record_and_commit("cp-a", id_e, base)
+        self._write_record_and_commit("cp-b", id_f, base)
+        cp_b_sha = self._git("rev-parse", "cp-b").stdout.strip()
+        self._git("checkout", "-q", "cp-a")
+        cherry = subprocess.run(
+            ["git", "cherry-pick", cp_b_sha],
+            cwd=str(self.repo),
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual(cherry.returncode, 0, cherry.stderr + cherry.stdout)
+        self._assert_no_conflict_markers()
+        self.assertTrue((self.repo / "state" / "ledger" / f"{id_e}.json").exists())
+        self.assertTrue((self.repo / "state" / "ledger" / f"{id_f}.json").exists())
+        self._regenerate_and_assert_both(id_e, id_f)
+
+    def test_same_second_different_hex_no_collision(self):
+        now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
+        a = log_experiment.make_id(now, "slug")
+        b = log_experiment.make_id(now, "slug")
+        self.assertNotEqual(a, b)
+        self.assertEqual(a.split("-")[:2], b.split("-")[:2])
+
+
+if __name__ == "__main__":
+    unittest.main()

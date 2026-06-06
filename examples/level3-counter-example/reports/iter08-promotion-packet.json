@@ -45,7 +45,7 @@
   "maturity_level": 3,
   "not_deployable": true,
   "packet_id": "20260518-233753-pkt",
-  "protocol_version": "0.4",
+  "protocol_version": "0.5",
   "rejection_reasons": [
     "val exposure 52 >= budget 50; \u00a717.6 requires holdout refresh before further promotion"
   ],

@@ -1,0 +1,40 @@
+{
+  "protocol_version": "0.5",
+  "id": "20260518-170000-bbb006-stack-rejected",
+  "timestamp": "2026-05-18T17:00:00Z",
+  "branch": "architecture+loss_objective",
+  "hypothesis": "Combining attention pool with ordinal hybrid loss should produce additive gains",
+  "parent_ids": [
+    "20260518-160000-bbb005-regrade"
+  ],
+  "git_sha_before": "bbb003",
+  "git_sha_after": "bbb003",
+  "data_snapshot": "data-snap-2026-05-15",
+  "single_non_baseline_switch": "encoder_type=attention_pool, loss_type=ordinal_ce_hybrid (STACK — TWO switches)",
+  "metrics": {},
+  "guardrails": {},
+  "cost": {
+    "gpu_hours": 0,
+    "wall_clock_hours": 0.3,
+    "llm_tokens": 22000,
+    "tool_calls": 9
+  },
+  "status": "informative_failure",
+  "failure_reason": "protocol_violation_caught_by_skeptic: Proposal flips TWO non-baseline switches simultaneously. Per §11.1.1 this is a stack, not a candidate. Per §16.1.2, promotion requires factorial ablation grid before a stack can be considered. Skeptic returned proposal to Research Director for factorial planning; no experiment was run.",
+  "evidence_level": "n/a",
+  "enforcement_mode": "ci_enforced",
+  "maturity_level": 3,
+  "not_deployable": false,
+  "scout_mode": "live",
+  "val_queries_incurred_by_this_run": 0,
+  "val_queries_total_at_start": 14,
+  "val_queries_total_at_end": 14,
+  "artifacts": {},
+  "lessons": [
+    "§11.1.1 enforcement: agent must propose single-switch candidates OR explicitly request factorial planning.",
+    "Effective Skeptic review depends on Level-2 separation; same-session Level-0 would have likely missed this."
+  ],
+  "next_actions": [
+    "Plan factorial 2×2 grid (iter-7)"
+  ]
+}

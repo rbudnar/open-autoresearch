@@ -1,0 +1,63 @@
+{
+  "protocol_version": "0.5",
+  "id": "20260518-130000-aaa003",
+  "timestamp": "2026-05-18T13:00:00Z",
+  "branch": "architecture",
+  "hypothesis": "Attention pooling over the input sequence should improve NLL on long sequences without unacceptable latency cost",
+  "parent_ids": [
+    "20260518-100000-aaa001"
+  ],
+  "git_sha_before": "abc111",
+  "git_sha_after": "ghi333",
+  "data_snapshot": "data-snap-2026-05-15",
+  "single_non_baseline_switch": "encoder_type=attention_pool",
+  "metrics": {
+    "validation_nll": 0.823,
+    "accuracy": 0.8
+  },
+  "guardrails": {
+    "inference_latency_ms": 19.7
+  },
+  "seed_variance": {
+    "validation_nll_seed_std": 0.01,
+    "accuracy_seed_std": 0.004
+  },
+  "delta_vs_baseline": {
+    "validation_nll": -0.024,
+    "validation_nll_95_ci": [
+      -0.03,
+      -0.018
+    ],
+    "accuracy": 0.02,
+    "inference_latency_ms": 1.3,
+    "inference_latency_ms_95_ci_upper": 1.6
+  },
+  "cost": {
+    "gpu_hours": 3.0,
+    "wall_clock_hours": 3.2,
+    "llm_tokens": 61000,
+    "tool_calls": 25
+  },
+  "status": "level1_branch_winner",
+  "evidence_level": "standard",
+  "enforcement_mode": "none",
+  "maturity_level": 1,
+  "not_deployable": true,
+  "scout_mode": "offline",
+  "val_queries_incurred_by_this_run": 3,
+  "val_queries_total_at_start": 6,
+  "val_queries_total_at_end": 9,
+  "artifacts": {
+    "checkpoint": "checkpoints/aaa003.pt",
+    "predictions": "preds/aaa003.parquet"
+  },
+  "lessons": [
+    "Attention pooling drives the largest NLL gain seen so far; latency cost (~1.3ms) is well within the 10% relative budget.",
+    "No causal attribution possible at Level 1 — graduate to Level 3 before any promotion attempt."
+  ],
+  "next_actions": [
+    "Graduate to Level 3",
+    "Add Skeptic role",
+    "Run single_component_swap ablation (lesion: attention weights -> uniform)"
+  ]
+}

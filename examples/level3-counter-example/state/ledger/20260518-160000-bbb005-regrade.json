@@ -1,0 +1,66 @@
+{
+  "protocol_version": "0.5",
+  "id": "20260518-160000-bbb005-regrade",
+  "timestamp": "2026-05-18T16:00:00Z",
+  "branch": "architecture",
+  "hypothesis": "After evaluator refresh, does iter-3's attention pool improvement persist?",
+  "parent_ids": [
+    "20260518-130000-bbb003",
+    "20260518-150000-bbb004-invalidation"
+  ],
+  "git_sha_before": "bbb003",
+  "git_sha_after": "bbb003",
+  "data_snapshot": "data-snap-2026-05-15",
+  "single_non_baseline_switch": "encoder_type=attention_pool",
+  "metrics": {
+    "validation_nll": 0.825,
+    "accuracy": 0.8
+  },
+  "guardrails": {
+    "inference_latency_ms": 19.7
+  },
+  "seed_variance": {
+    "validation_nll_seed_std": 0.01,
+    "accuracy_seed_std": 0.004
+  },
+  "delta_vs_baseline": {
+    "validation_nll": -0.022,
+    "validation_nll_95_ci": [
+      -0.028,
+      -0.016
+    ],
+    "accuracy": 0.02,
+    "inference_latency_ms": 1.3,
+    "inference_latency_ms_95_ci_upper": 1.6
+  },
+  "cost": {
+    "gpu_hours": 9.1,
+    "wall_clock_hours": 3.2,
+    "llm_tokens": 36000,
+    "tool_calls": 16
+  },
+  "status": "branch_winner",
+  "evidence_level": "standard",
+  "enforcement_mode": "ci_enforced",
+  "maturity_level": 3,
+  "not_deployable": false,
+  "scout_mode": "live",
+  "val_queries_incurred_by_this_run": 3,
+  "val_queries_total_at_start": 11,
+  "val_queries_total_at_end": 14,
+  "baseline_rerun_under_new_evaluator": {
+    "validation_nll": 0.847,
+    "inference_latency_ms": 18.4,
+    "matches_original_within_seed_variance": true
+  },
+  "artifacts": {
+    "checkpoint": "checkpoints/bbb005.pt"
+  },
+  "lessons": [
+    "Iter-3 effect persists under the updated evaluator (NLL Δ = -0.022 vs the prior -0.024; within seed variance band).",
+    "Re-grades after evaluator refresh are double-charged to val exposure — cost-tier seed counts should be revisited mid-campaign if multiple refreshes happen."
+  ],
+  "next_actions": [
+    "Plan ablation"
+  ]
+}

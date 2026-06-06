@@ -1,0 +1,2 @@
+# budget_ledger.jsonl is append-only; union-merge so concurrent branches keep all lines.
+state/budget_ledger.jsonl merge=union

@@ -1,0 +1,136 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-autoresearch/schema/experiment_record.schema.json",
+  "title": "Experiment Record (PROTOCOL.md §14.1, Protocol 0.5 sharded ledger)",
+  "description": "One immutable JSON file per experiment at state/ledger/<id>.json. A correction is a NEW record referencing the prior id in parent_ids; records are never mutated. additionalProperties is intentionally true: consumers (e.g. ActivityEncoder) carry additive fields like maturity_level, not_deployable, artifacts.mlflow, factorial_cells, and schema-validity is necessary but not sufficient for verifier-completeness.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "protocol_version",
+    "id",
+    "timestamp",
+    "branch",
+    "hypothesis",
+    "parent_ids",
+    "status",
+    "git_sha_before",
+    "git_sha_after",
+    "metrics"
+  ],
+  "properties": {
+    "protocol_version": {
+      "type": "string",
+      "description": "Protocol version stamp; e.g. \"0.5\"."
+    },
+    "id": {
+      "type": "string",
+      "description": "YYYYMMDD-HHMMSS-<6hex>[-<slug>]; unique per record and the ledger filename stem.",
+      "pattern": "^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}(-[a-z0-9-]+)?$"
+    },
+    "timestamp": {
+      "type": "string",
+      "description": "ISO-8601 UTC timestamp of record creation."
+    },
+    "branch": {
+      "type": "string",
+      "description": "Research branch / experiment lineage label."
+    },
+    "hypothesis": {
+      "type": "string",
+      "description": "What this experiment tests."
+    },
+    "parent_ids": {
+      "type": "array",
+      "description": "ids of parent records, or empty for a root. The sentinel \"baseline\" is also accepted by validate_ledger.py.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "status": {
+      "type": "string",
+      "description": "Free-form status label (e.g. baseline, promising, branch_winner, failed, invalidated, informative_failure, rejected)."
+    },
+    "git_sha_before": {
+      "type": "string"
+    },
+    "git_sha_after": {
+      "type": "string"
+    },
+    "metrics": {
+      "type": "object",
+      "description": "Measured metrics for this run; may be empty for preflight/admin records.",
+      "additionalProperties": true
+    },
+    "data_snapshot": {
+      "type": ["string", "null"]
+    },
+    "single_non_baseline_switch": {
+      "type": ["string", "null"]
+    },
+    "guardrails": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "seed_variance": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "cost": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "evidence_level": {
+      "type": "string"
+    },
+    "enforcement_mode": {
+      "type": "string"
+    },
+    "scout_mode": {
+      "type": "string"
+    },
+    "lessons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "next_actions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "node_title": {
+      "type": "string",
+      "description": "OPTIONAL curated per-node title used to derive research_tree.json node content."
+    },
+    "node_lessons": {
+      "type": "array",
+      "description": "OPTIONAL curated per-node narrative lessons used to derive research_tree.json node content.",
+      "items": {
+        "type": "string"
+      }
+    },
+    "maturity_level": {
+      "type": "integer",
+      "description": "Additive consumer field (ActivityEncoder / level3 records)."
+    },
+    "not_deployable": {
+      "type": "boolean"
+    },
+    "val_queries_incurred_by_this_run": {
+      "type": "integer",
+      "description": "Primary val-exposure derivation input (PROTOCOL §17.6)."
+    },
+    "val_queries_total_at_start": {
+      "type": "integer"
+    },
+    "val_queries_total_at_end": {
+      "type": "integer"
+    }
+  }
+}

@@ -1,0 +1,60 @@
+{
+  "protocol_version": "0.5",
+  "id": "20260518-110000-aaa002",
+  "timestamp": "2026-05-18T11:00:00Z",
+  "branch": "loss_objective",
+  "hypothesis": "Ordinal-aware loss should improve NLL by capturing the ordering structure of targets",
+  "parent_ids": [
+    "20260518-100000-aaa001"
+  ],
+  "git_sha_before": "abc111",
+  "git_sha_after": "def222",
+  "data_snapshot": "data-snap-2026-05-15",
+  "single_non_baseline_switch": "loss_type=ordinal_ce_hybrid",
+  "metrics": {
+    "validation_nll": 0.838,
+    "accuracy": 0.78
+  },
+  "guardrails": {
+    "inference_latency_ms": 18.5
+  },
+  "seed_variance": {
+    "validation_nll_seed_std": 0.012,
+    "accuracy_seed_std": 0.005
+  },
+  "delta_vs_baseline": {
+    "validation_nll": -0.009,
+    "validation_nll_95_ci": [
+      -0.014,
+      -0.003
+    ],
+    "accuracy": 0.0,
+    "inference_latency_ms": 0.1
+  },
+  "cost": {
+    "gpu_hours": 2.9,
+    "wall_clock_hours": 3.1,
+    "llm_tokens": 58000,
+    "tool_calls": 22
+  },
+  "status": "promising",
+  "evidence_level": "standard",
+  "enforcement_mode": "none",
+  "maturity_level": 1,
+  "not_deployable": true,
+  "scout_mode": "offline",
+  "val_queries_incurred_by_this_run": 3,
+  "val_queries_total_at_start": 3,
+  "val_queries_total_at_end": 6,
+  "artifacts": {
+    "checkpoint": "checkpoints/aaa002.pt",
+    "predictions": "preds/aaa002.parquet"
+  },
+  "lessons": [
+    "Ordinal hybrid loss produces a modest, statistically reliable NLL improvement.",
+    "Level 1 cannot promote — ablation needed to confirm the loss term (vs e.g. its regularization side-effect) drives the gain."
+  ],
+  "next_actions": [
+    "Carry forward as 'promising'; revisit at Level 3."
+  ]
+}

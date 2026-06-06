@@ -1,0 +1,60 @@
+# validate-ledger.yml — the sharded experiment ledger (Protocol 0.5) is a
+# first-class, mechanically-validated surface. Every example's state/ledger/
+# must be schema-valid with unique ids and resolvable parent_ids, and the
+# reference ledger tooling must keep its unit + integration tests green.
+#
+# Stdlib-only: no `pip install`. The whole point of the reference scripts is
+# that any consumer (Python or not) can run/validate the contract without deps.
+
+name: validate-ledger
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'PROTOCOL.md'
+      - 'template/scripts/**'
+      - 'template/schema/**'
+      - 'examples/**'
+      - '.github/workflows/validate-ledger.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-example-ledgers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: validate_ledger.py over every example state/ledger/
+        run: |
+          set -e
+          shopt -s nullglob
+          found=0
+          for d in examples/*/state/ledger; do
+            found=1
+            echo "=== validating $d ==="
+            python3 template/scripts/validate_ledger.py --ledger-dir "$d"
+          done
+          if [ "$found" = "0" ]; then
+            echo "::error::no examples/*/state/ledger directories found"
+            exit 1
+          fi
+          echo "OK: all example ledgers valid"
+
+  ledger-tooling-unittests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run reference ledger test suites (stdlib unittest)
+        run: |
+          python3 -m unittest \
+            template.scripts.tests.test_ledger \
+            template.scripts.tests.test_verifier_shard_load

@@ -1,0 +1,40 @@
+{
+  "protocol_version": "0.5",
+  "id": "20260518-100000-bbb001",
+  "timestamp": "2026-05-18T10:00:00Z",
+  "branch": "loss_objective",
+  "hypothesis": "Aggressive ordinal hybrid loss with coefficient=0.9 should improve NLL further than the 0.5 default",
+  "parent_ids": [
+    "20260518-090000-bbb000"
+  ],
+  "git_sha_before": "aaa000",
+  "git_sha_after": "bbb001",
+  "data_snapshot": "data-snap-2026-05-15",
+  "single_non_baseline_switch": "loss_type=ordinal_ce_hybrid_aggressive(coef=0.9)",
+  "metrics": {},
+  "guardrails": {},
+  "cost": {
+    "gpu_hours": 0.1,
+    "wall_clock_hours": 0.2,
+    "llm_tokens": 38000,
+    "tool_calls": 12
+  },
+  "status": "failed",
+  "failure_reason": "preflight_fail_fast: Stage-A tiny-overfit test loss diverged at step 12 (NaN gradient at coefficient=0.9). Per §17.1.1 preflight, full Stage-C budget NOT consumed.",
+  "evidence_level": "n/a",
+  "enforcement_mode": "ci_enforced",
+  "maturity_level": 3,
+  "not_deployable": false,
+  "scout_mode": "live",
+  "val_queries_incurred_by_this_run": 0,
+  "val_queries_total_at_start": 5,
+  "val_queries_total_at_end": 5,
+  "artifacts": {},
+  "lessons": [
+    "Ordinal hybrid coefficient is sensitive at the upper end; tiny-overfit catches divergence before consuming the budget.",
+    "Future ordinal-hybrid sweeps should grid-search coefficient between 0.1 and 0.7, NOT extend to 0.9."
+  ],
+  "next_actions": [
+    "Carry forward as known_failures: coefficient ≥ 0.9 is unstable."
+  ]
+}

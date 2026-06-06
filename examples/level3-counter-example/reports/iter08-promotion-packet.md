@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.4"
+protocol_version: "0.5"
 packet_id: "20260518-233753-pkt"
 request_id: "20260518-220000-bbb008"
 status: "rejected"

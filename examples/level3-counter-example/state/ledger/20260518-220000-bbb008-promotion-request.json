@@ -1,0 +1,48 @@
+{
+  "protocol_version": "0.5",
+  "id": "20260518-220000-bbb008-promotion-request",
+  "timestamp": "2026-05-18T22:00:00Z",
+  "branch": "architecture",
+  "hypothesis": "Promote attention_pool based on iter-5 + iter-7 evidence",
+  "parent_ids": [
+    "20260518-160000-bbb005-regrade",
+    "20260518-190000-bbb007-factorial"
+  ],
+  "git_sha_before": "bbb003",
+  "git_sha_after": "bbb003",
+  "data_snapshot": "data-snap-2026-05-15",
+  "single_non_baseline_switch": "encoder_type=attention_pool",
+  "metrics": {},
+  "guardrails": {},
+  "cost": {
+    "gpu_hours": 18.2,
+    "wall_clock_hours": 6.4,
+    "llm_tokens": 78000,
+    "tool_calls": 34
+  },
+  "status": "rejected",
+  "rejection_reason": "verifier_rejected_promotion_request: Per §10.5 rule 6 (val exposure not exhausted): queries=52 ≥ budget=50. Cumulative val exposure passed the configured budget during the iter-7 factorial (which added 12 queries) and an additional 2 seeds for the §16.1.1 lesion test ablation. Verifier signed packet with status: rejected. To proceed, a holdout refresh (§17.6.3) is required, which is a §3.1 escalation requiring human review.",
+  "evidence_level": "standard",
+  "enforcement_mode": "ci_enforced",
+  "maturity_level": 3,
+  "not_deployable": false,
+  "scout_mode": "live",
+  "val_queries_incurred_by_this_run": 26,
+  "val_queries_total_at_start": 50,
+  "val_queries_total_at_end": 52,
+  "artifacts": {
+    "lesion_test_results": "validation_nll with attention_weights replaced by uniform = 0.846 (within seed variance of baseline); confirms attention mechanism (not surrounding scaffolding) drives the gain",
+    "promotion_request": "proposals/iter08-promotion-request.json",
+    "promotion_packet": "reports/iter08-promotion-packet.json",
+    "skeptic_review": "reports/iter09-skeptic-review.md"
+  },
+  "lessons": [
+    "The §17.6 budget was set too tight for a campaign that included a factorial. Plan campaigns by counting expected total queries up front: baseline (5) + candidates (3 each) + reruns + factorials × cells × seeds + ablations × seeds.",
+    "An honest 'rejected' from the verifier is the protocol working as intended. The agent does not get to override its own promotion."
+  ],
+  "next_actions": [
+    "Request holdout refresh from human reviewer per §17.6.3",
+    "If refresh approved, re-emit promotion_request with reset exposure counter",
+    "Document the budget-planning lesson in playbook"
+  ]
+}

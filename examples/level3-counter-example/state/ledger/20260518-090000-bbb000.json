@@ -1,0 +1,48 @@
+{
+  "protocol_version": "0.5",
+  "id": "20260518-090000-bbb000",
+  "timestamp": "2026-05-18T09:00:00Z",
+  "branch": "baseline",
+  "hypothesis": "Establish baseline at Level 3 promotion seed count (5 seeds)",
+  "parent_ids": [],
+  "git_sha_before": "aaa000",
+  "git_sha_after": "aaa000",
+  "data_snapshot": "data-snap-2026-05-15",
+  "single_non_baseline_switch": null,
+  "metrics": {
+    "validation_nll": 0.847,
+    "accuracy": 0.78
+  },
+  "guardrails": {
+    "inference_latency_ms": 18.4
+  },
+  "seed_variance": {
+    "validation_nll_seed_std": 0.011,
+    "accuracy_seed_std": 0.004
+  },
+  "cost": {
+    "gpu_hours": 14.0,
+    "wall_clock_hours": 3.2,
+    "llm_tokens": 52000,
+    "tool_calls": 18
+  },
+  "status": "baseline",
+  "evidence_level": "standard",
+  "enforcement_mode": "ci_enforced",
+  "maturity_level": 3,
+  "not_deployable": false,
+  "scout_mode": "live",
+  "val_queries_incurred_by_this_run": 5,
+  "val_queries_total_at_start": 0,
+  "val_queries_total_at_end": 5,
+  "artifacts": {
+    "checkpoint": "checkpoints/baseline-bbb000.pt"
+  },
+  "lessons": [
+    "Baseline tail-class NLL is the obvious weakness."
+  ],
+  "next_actions": [
+    "Loss objective branch",
+    "Architecture branch"
+  ]
+}

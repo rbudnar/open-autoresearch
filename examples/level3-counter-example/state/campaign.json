@@ -1,0 +1,13 @@
+{
+  "branch_policy": "single-writer ledger shards; aggregates derived",
+  "campaign_id": "level3-counter-example-2026-05-18",
+  "host_branch": "main",
+  "maturity_level": 3,
+  "protocol_version": "0.5",
+  "root": {
+    "status": "no_trustworthy_improvement_found",
+    "title": "Level-3 counter-example arc (no promotion)"
+  },
+  "scratch_branch": "autoresearch/level3-counter-example",
+  "val_set_version": 1
+}

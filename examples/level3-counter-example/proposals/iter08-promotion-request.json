@@ -1,5 +1,5 @@
 {
-  "protocol_version": "0.4",
+  "protocol_version": "0.5",
   "request_id": "20260518-220000-bbb008",
   "candidate_proposal_id": "20260518-130000-bbb003",
   "campaign_id": "level3-counter-example-2026-05-18",
@@ -8,18 +8,18 @@
   "references": {
     "baseline_run": {
       "ledger_id": "20260518-090000-bbb000",
-      "content_sha256": "d984ec6bfe47918defb61bcca9907d43502baec7860a05693554ca1fdfdb2ce2"
+      "content_sha256": "d15b7e20582e74491c53b02feeea048b27f92a4fe02740a3fe76fdfcdaff1cea"
     },
     "candidate_runs": [
-      {"ledger_id": "20260518-160000-bbb005-regrade", "content_sha256": "48c1ad78e86c991645ce24231e2cec43fd989b8d4eed889083ce06a58ffefef1"}
+      {"ledger_id": "20260518-160000-bbb005-regrade", "content_sha256": "58421205b71a976e2771866c4293ad7bb44da962e98af1530d0f8b8a8a3cfbd3"}
     ],
     "baseline_rerun": {
       "ledger_id": "20260518-160000-bbb005-regrade",
-      "content_sha256": "48c1ad78e86c991645ce24231e2cec43fd989b8d4eed889083ce06a58ffefef1"
+      "content_sha256": "58421205b71a976e2771866c4293ad7bb44da962e98af1530d0f8b8a8a3cfbd3"
     },
     "ablation_runs": [
-      {"ledger_id": "20260518-190000-bbb007-factorial", "content_sha256": "8b4baa28053df328fd348dd31ba091f2a8a779bde172485da4f7bf1597d79437"},
-      {"ledger_id": "20260518-220000-bbb008-promotion-request", "content_sha256": "60b666c5ff94de7dd61d35e89db31f2c388a55ef6b6679fab25cc685c7ce9f2c"}
+      {"ledger_id": "20260518-190000-bbb007-factorial", "content_sha256": "a754c9b385ac17d512df2405148aa1f7b8010c8629933ffb036a806ec51930c7"},
+      {"ledger_id": "20260518-220000-bbb008-promotion-request", "content_sha256": "d3888e126a09c504ba2983d3d13534398ac6983281d8b959e5ea9360709d3da1"}
     ],
     "skeptic_review": {
       "path": "reports/iter09-skeptic-review.md",

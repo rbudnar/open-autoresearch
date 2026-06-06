@@ -1,7 +1,0 @@
-{
-  "protocol_version": "0.4",
-  "val_set_version": 1,
-  "queries": 9,
-  "last_incremented_by_iteration": "20260518-130000-aaa003",
-  "notes": "3 Stage-C runs × 3 seeds each = 9 queries. Stage-B used a separate proxy slice (5% of train) so no additional val exposure. Budget = 100; 9% used."
-}

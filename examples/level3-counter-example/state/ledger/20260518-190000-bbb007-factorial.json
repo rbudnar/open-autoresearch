@@ -1,0 +1,88 @@
+{
+  "protocol_version": "0.5",
+  "id": "20260518-190000-bbb007-factorial",
+  "timestamp": "2026-05-18T19:00:00Z",
+  "branch": "architecture+loss_objective_factorial",
+  "hypothesis": "Per §16.1.2 factorial: does ordinal_ce_hybrid contribute beyond attention_pool?",
+  "parent_ids": [
+    "20260518-160000-bbb005-regrade"
+  ],
+  "git_sha_before": "bbb003",
+  "git_sha_after": "bbb007",
+  "data_snapshot": "data-snap-2026-05-15",
+  "single_non_baseline_switch": "factorial_grid: encoder_type ∈ {baseline_mean_pool, attention_pool} × loss_type ∈ {cross_entropy, ordinal_ce_hybrid}",
+  "metrics": {},
+  "factorial_cells": {
+    "(mean_pool, ce)": {
+      "validation_nll": 0.847,
+      "validation_nll_seed_std": 0.011,
+      "latency_ms": 18.4
+    },
+    "(mean_pool, ordinal_hybrid)": {
+      "validation_nll": 0.838,
+      "validation_nll_seed_std": 0.012,
+      "latency_ms": 18.5
+    },
+    "(attention_pool, ce)": {
+      "validation_nll": 0.825,
+      "validation_nll_seed_std": 0.01,
+      "latency_ms": 19.7
+    },
+    "(attention_pool, ordinal_hybrid)": {
+      "validation_nll": 0.822,
+      "validation_nll_seed_std": 0.011,
+      "latency_ms": 19.8
+    }
+  },
+  "main_effects": {
+    "attention_pool_vs_mean_pool": {
+      "delta": -0.019,
+      "95_ci": [
+        -0.024,
+        -0.014
+      ]
+    },
+    "ordinal_hybrid_vs_ce": {
+      "delta": -0.006,
+      "95_ci": [
+        -0.012,
+        -0.0
+      ]
+    }
+  },
+  "interaction": {
+    "delta": 0.001,
+    "95_ci": [
+      -0.005,
+      0.007
+    ],
+    "interpretation": "no detectable interaction (CI straddles 0)"
+  },
+  "cost": {
+    "gpu_hours": 36.4,
+    "wall_clock_hours": 12.8,
+    "llm_tokens": 94000,
+    "tool_calls": 42
+  },
+  "status": "branch_winner",
+  "evidence_level": "standard",
+  "enforcement_mode": "ci_enforced",
+  "maturity_level": 3,
+  "not_deployable": false,
+  "scout_mode": "live",
+  "val_queries_incurred_by_this_run": 12,
+  "val_queries_total_at_start": 14,
+  "val_queries_total_at_end": 26,
+  "artifacts": {
+    "factorial_report": "reports/iter07-factorial-ablation.md"
+  },
+  "lessons": [
+    "Attention pool drives 76% of the combined gain; ordinal_hybrid contributes a small, just-significant 24%; no interaction.",
+    "Decision: promote attention pool alone. Carry ordinal_hybrid as a 'promising' branch for future campaigns.",
+    "Cost was 36.4 GPU-hours — twice a typical candidate. Factorials are expensive; consider whether the marginal information was worth it."
+  ],
+  "next_actions": [
+    "Plan §16.1.1 lesion test on attention_pool (attention weights → uniform)",
+    "Emit promotion request for attention_pool alone"
+  ]
+}
