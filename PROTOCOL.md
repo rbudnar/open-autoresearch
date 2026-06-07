@@ -788,7 +788,7 @@ The verifier MUST:
 3. Set `enforcement: "in_band_only"` and `not_deployable: true` if `enforcement_mode == "none"`.
 4. Cap status at `low_evidence_promoted` (never `promoted`) if `enforcement == "in_band_only"`.
 5. Reject if `claims.ablation.change_type == "stack"` AND `claims.ablation.factorial_grid_completed != true`.
-6. Reject if `val_set_exposure_at_request.queries >= exposure_budget` (`holdout_refresh_due`).
+6. Reject if `val_set_exposure_at_request.queries >= exposure_budget` (`holdout_refresh_due`). Also reject if the claimed `queries` is **less than** the ledger-derived exposure (the sum of `resolve_val_queries` over the referenced ledger's shard records) — an agent must not under-report exposure to slip under the budget.
 7. Reject if `behavioral_equivalence_test_passed_for_evaluator != true`.
 8. Reject if `maturity_level_used < 3`.
 9. Reject if `role_separation_achieved.implementation_worker_vs_skeptic` is below `level_2`.
@@ -1308,7 +1308,7 @@ A **query** is **any read of the locked validation split that produces a metric 
 
 The rule of thumb: **if any read of the held-out val data could influence a candidate's promotion decision, it counts.** Stage-B exists to be cheap; the protocol's preferred design is Stage-B on a separate proxy slice, with the locked val reserved for Stage C + reruns.
 
-Where the counter lives: `state/val_exposure.json`, which in v0.5 is **DERIVED (git-ignored)** — `regenerate_state.py` recomputes it as the sum of each record's per-run val-query input (§4.1). The derived output carries **only** the derived counter `queries` (plus carried-through `val_set_version`/budget metadata from `campaign.json`); the v0.4 hand-prose fields `notes` and `last_incremented_by_iteration` are dropped because they cannot be regenerated once the source is derived.
+Where the counter lives: `state/val_exposure.json`, which in v0.5 is **DERIVED (git-ignored)** — `regenerate_state.py` recomputes it from the record set (§4.1). The derived output carries exactly these derived fields: `queries` (the sum of each record's per-run val-query input), and — when `metrics.yaml` declares `val_set_exposure_budget` — `exposure_budget` (read through from `metrics.yaml`) and `holdout_refresh_due` (the boolean `queries >= exposure_budget`). It also carries through `protocol_version`/`val_set_version`. The v0.4 hand-prose fields `notes` and `last_incremented_by_iteration` are dropped because they cannot be regenerated once the source is derived. If `metrics.yaml` is absent or its budget is unset, `exposure_budget` and `holdout_refresh_due` are omitted.
 
 **Val-query field-resolution rule (NORMATIVE).** A record's per-run contribution to the counter is the **first present** of:
 

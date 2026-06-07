@@ -124,8 +124,8 @@ def sanitize_slug(raw: str) -> str:
 # only, so non-Python repos can run these scripts). This is a small structural
 # validator covering exactly the constructs used by
 # experiment_record.schema.json (draft 2020-12 subset): type, required,
-# properties, items, pattern, enum, additionalProperties. It is NOT a complete
-# draft-2020-12 implementation.
+# properties, items, pattern, const, enum, additionalProperties. It is NOT a
+# complete draft-2020-12 implementation.
 
 _JSON_TYPE_CHECKS = {
     "object": lambda v: isinstance(v, dict),
@@ -173,6 +173,11 @@ def validate_against_schema(
         )
         # If the top-level type is wrong, deeper checks are noise.
         return errors
+
+    if "const" in schema:
+        const = schema["const"]
+        if instance != const:
+            errors.append(f"{path}: value {instance!r} != const {const!r}")
 
     enum = schema.get("enum")
     if enum is not None and instance not in enum:

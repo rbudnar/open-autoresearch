@@ -5,3 +5,8 @@ state/experiment_ledger.jsonl
 state/research_tree.json
 state/val_exposure.json
 state/INDEX.md
+
+# Crash-safety: regenerate_state.py writes derived files via mkstemp(prefix=".tmp-")
+# in state/ before os.replace. A crash mid-write can leave one behind; never commit it.
+state/.tmp-*
+.tmp-*

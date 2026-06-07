@@ -87,6 +87,14 @@ def validate(ledger_dir: Path, schema_path: Path) -> tuple[bool, list[str]]:
                 )
             else:
                 seen_ids[rid] = path
+            # The filename stem MUST equal the internal id: the shard path is the
+            # addressable name of the record, and regenerate_state / the verifier
+            # key shards by id. A stem!=id mismatch means the file could be loaded
+            # under one name but rehashed/referenced under another.
+            if path.stem != rid:
+                record_errors.append(
+                    f"filename stem {path.stem!r} != internal id {rid!r}"
+                )
 
         # parent_ids resolution.
         parent_ids = obj.get("parent_ids") if isinstance(obj, dict) else None
@@ -105,6 +113,50 @@ def validate(ledger_dir: Path, schema_path: Path) -> tuple[bool, list[str]]:
             lines.append(f"FAIL {path.name}: " + "; ".join(record_errors))
         else:
             lines.append(f"PASS {path.name}")
+
+    # parent_ids CYCLE detection. A cyclic parent graph is not a valid DAG: it
+    # has no roots, so regenerate_state would emit roots:[] and the lineage is
+    # uninterpretable. Build the id -> parent_ids adjacency (real ids only, drop
+    # the baseline sentinel) and DFS for a back edge.
+    graph: dict[str, list[str]] = {}
+    for path, obj in records:
+        if isinstance(obj, dict):
+            rid = obj.get("id")
+            if isinstance(rid, str):
+                parents = obj.get("parent_ids") or []
+                graph[rid] = [
+                    p
+                    for p in parents
+                    if isinstance(p, str) and p != BASELINE_SENTINEL and p in all_ids
+                ]
+
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color: dict[str, int] = {rid: WHITE for rid in graph}
+    cycle_nodes: list[str] = []
+
+    def _visit(node: str, stack: list[str]) -> bool:
+        color[node] = GRAY
+        stack.append(node)
+        for parent in graph.get(node, []):
+            if color.get(parent) == GRAY:
+                idx = stack.index(parent)
+                cycle_nodes.extend(stack[idx:] + [parent])
+                return True
+            if color.get(parent) == WHITE and _visit(parent, stack):
+                return True
+        stack.pop()
+        color[node] = BLACK
+        return False
+
+    for rid in sorted(graph):
+        if color[rid] == WHITE and _visit(rid, []):
+            break
+
+    if cycle_nodes:
+        ok_overall = False
+        lines.append(
+            "FAIL parent_ids cycle detected: " + " -> ".join(cycle_nodes)
+        )
 
     total = len(records)
     failed = sum(1 for line in lines if line.startswith("FAIL"))

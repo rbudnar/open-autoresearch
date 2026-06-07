@@ -10,7 +10,9 @@ Outputs (all under state/):
   - experiment_ledger.jsonl  records sorted by id, one canonical line each
   - research_tree.json       topology (parent_ids) + node content (records'
                              node_title/node_lessons) + campaign metadata
-  - val_exposure.json        derived counter ONLY (queries); no hand prose
+  - val_exposure.json        derived: queries (+ exposure_budget and
+                             holdout_refresh_due when metrics.yaml is present);
+                             no hand prose
   - INDEX.md                 human/agent-facing digest table
 
 Usage
@@ -89,16 +91,53 @@ def build_ledger_jsonl(records: list[dict[str, Any]]) -> bytes:
     return b"".join(parts)
 
 
+def read_exposure_budget(state_dir: Path) -> int | None:
+    """Read the top-level ``val_set_exposure_budget`` (§17.6) from metrics.yaml.
+
+    Stdlib-only (no PyYAML dependency, matching the rest of the ledger tools):
+    scans the sibling ``config/metrics.yaml`` (else ``metrics.yaml.example``) for
+    the first top-level (unindented) ``val_set_exposure_budget: <int>`` line.
+    Returns ``None`` if no metrics file exists, the key is absent, or its value
+    is not an integer (e.g. an unfilled ``<FILL_ME>`` placeholder).
+    """
+    config_dir = state_dir.parent / "config"
+    for name in ("metrics.yaml", "metrics.yaml.example"):
+        path = config_dir / name
+        if not path.is_file():
+            continue
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            # Top-level key only: no leading whitespace, no comment line.
+            if raw.startswith("val_set_exposure_budget:"):
+                value = raw.split(":", 1)[1].split("#", 1)[0].strip()
+                try:
+                    return int(value)
+                except ValueError:
+                    return None
+        return None
+    return None
+
+
 def build_val_exposure(
-    records: list[dict[str, Any]], campaign: dict[str, Any]
+    records: list[dict[str, Any]],
+    campaign: dict[str, Any],
+    exposure_budget: int | None = None,
 ) -> dict[str, Any]:
-    """Derived counter ONLY. No notes / last_incremented_by_iteration (F-rule)."""
+    """Derived val-exposure aggregate (PROTOCOL §17.6).
+
+    Derived fields: ``queries`` (sum of per-record val-query inputs), and — when
+    a budget is available from metrics.yaml — ``exposure_budget`` and the boolean
+    ``holdout_refresh_due`` (queries >= exposure_budget). No hand prose / no
+    ``notes`` / ``last_incremented_by_iteration`` (F-rule: derived only).
+    """
     total = sum(resolve_val_queries(rec) for rec in records)
     out: dict[str, Any] = {
         "protocol_version": campaign.get("protocol_version", _detect_pv(records)),
         "val_set_version": campaign.get("val_set_version", 1),
         "queries": total,
     }
+    if exposure_budget is not None:
+        out["exposure_budget"] = exposure_budget
+        out["holdout_refresh_due"] = total >= exposure_budget
     return out
 
 
@@ -204,7 +243,8 @@ def regenerate(state_dir: Path) -> dict[str, int]:
     campaign = load_campaign(state_dir)
 
     ledger_bytes = build_ledger_jsonl(records)
-    val_exposure = build_val_exposure(records, campaign)
+    exposure_budget = read_exposure_budget(state_dir)
+    val_exposure = build_val_exposure(records, campaign, exposure_budget)
     tree = build_research_tree(records, campaign)
     index_md = build_index_md(records, campaign, val_exposure["queries"])
 

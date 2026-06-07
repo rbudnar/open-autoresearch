@@ -19,7 +19,7 @@
     },
     "ablation_runs": [
       {"ledger_id": "20260518-190000-bbb007-factorial", "content_sha256": "a754c9b385ac17d512df2405148aa1f7b8010c8629933ffb036a806ec51930c7"},
-      {"ledger_id": "20260518-220000-bbb008-promotion-request", "content_sha256": "d3888e126a09c504ba2983d3d13534398ac6983281d8b959e5ea9360709d3da1"}
+      {"ledger_id": "20260518-220000-bbb008-promotion-request", "content_sha256": "af006b9575c0779cc3ed8562a5269caf279e469ae1d74159d8223f8f2429e7fa"}
     ],
     "skeptic_review": {
       "path": "reports/iter09-skeptic-review.md",

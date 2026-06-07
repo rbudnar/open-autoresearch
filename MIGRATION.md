@@ -12,8 +12,7 @@ Each major / minor protocol bump may require host-project changes. This file wal
 
    ```bash
    python3 autoresearch/scripts/migrate_ledger_v04_to_v05.py \
-       --ledger autoresearch/state/experiment_ledger.jsonl \
-       --out-dir autoresearch/state/ledger
+       --state-dir autoresearch/state/
    ```
 
    It splits each jsonl line into a field-preserving `state/ledger/<id>.json` shard (no field allow-list — additive consumer fields like `maturity_level`, `not_deployable`, nested `artifacts.mlflow` are preserved), stamps each record `protocol_version: "0.5"`, then regenerates the derived aggregates. It sets the per-record val-query inputs so the **derived** `val_exposure.json` counter REPRODUCES the prior committed counter, and **asserts equality or fails loudly** — if it aborts, the source counter and the per-record inputs disagree and must be reconciled by hand. It refuses to clobber existing shards unless `--force`.
@@ -23,8 +22,8 @@ Each major / minor protocol bump may require host-project changes. This file wal
 3. **Regenerate the derived aggregates** and confirm they reproduce the prior committed tree/counter:
 
    ```bash
-   python3 autoresearch/scripts/regenerate_state.py   # or `make ledger`
-   python3 autoresearch/scripts/validate_ledger.py    # every record schema-valid, ids unique, parent_ids resolve
+   python3 autoresearch/scripts/regenerate_state.py --state-dir autoresearch/state/   # or `make ledger`
+   python3 autoresearch/scripts/validate_ledger.py --ledger-dir autoresearch/state/ledger/   # every record schema-valid, ids unique, parent_ids resolve
    ```
 
 4. **Git-ignore the derived files** and stop tracking them:

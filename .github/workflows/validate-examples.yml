@@ -57,9 +57,11 @@ jobs:
         run: |
           cd examples/level3-counter-example
           mkdir -p /tmp/oar-ci-out
-          # Derived aggregates are git-ignored; examples use CI-regenerate (not
-          # committed derived files). Rebuild them from the state/ledger/ shards
-          # before the verifier reads anything.
+          # Smoke-check that regenerate_state.py rebuilds the git-ignored derived
+          # aggregates cleanly from the state/ledger/ shards. This is a SEPARATE
+          # check from the verifier run below: the verifier consumes ONLY the
+          # state/ledger/ shards + config/metrics.yaml + config/enforcement.yaml,
+          # never the derived aggregates this step produces.
           python ../../template/scripts/regenerate_state.py --state-dir state/
           # The verifier is *expected* to exit 1 here (the request is the
           # counter-example and must be rejected). Under `bash -e`, that exit

@@ -8,9 +8,11 @@ Steps:
   2. Stamp protocol_version -> "0.5".
   3. Write one state/ledger/<id>.json per record (pretty, field-preserving).
      Refuse to clobber existing shards unless --force.
-  4. Reconcile val-exposure: if a prior committed state/val_exposure.json exists,
-     set the per-record val-query inputs so the derived counter REPRODUCES the
-     prior committed value, then assert equality (fail loudly otherwise).
+  4. Verify val-exposure: if a prior committed state/val_exposure.json exists,
+     assert that the honest per-record val-query sum REPRODUCES the prior
+     committed counter. This is a read-only safety valve — it NEVER mutates a
+     record. On mismatch it aborts and tells the operator to reconcile the
+     per-record inputs by hand.
   5. Build an initial state/campaign.json from any existing research_tree.json
      metadata.
   6. Regenerate all derived aggregates.
@@ -58,33 +60,34 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
 def reconcile_val_exposure(
     records: list[dict[str, Any]], prior_committed: int | None
 ) -> None:
-    """Set per-record val-query inputs so the derived counter == prior committed.
+    """Verify the honest per-record val-query sum reproduces the prior counter.
 
-    If the per-record sum already equals the prior committed value (or there is
-    no prior committed value), nothing changes. Otherwise the *difference* is
-    folded into the last record's ``val_queries_incurred_by_this_run`` so the
-    documented committed counter is reproduced. Asserts equality at the end.
+    This is a *read-only* safety valve: it NEVER mutates a record. If the honest
+    per-record sum of ``resolve_val_queries`` already equals the prior committed
+    counter (or there is no prior committed counter), it returns silently.
+
+    If they DISAGREE, it raises ``SystemExit`` with a clear message telling the
+    operator to reconcile the per-record inputs by hand. The old behavior — fold
+    the entire ``prior - sum`` delta into the last record's
+    ``val_queries_incurred_by_this_run`` — silently corrupted that record's
+    exposure accounting (and made the closing equality check pass by
+    construction so it never fired). A migration must preserve the honest
+    per-record exposure inputs, not paper over a discrepancy.
     """
     if prior_committed is None:
         return
     current_sum = sum(resolve_val_queries(r) for r in records)
     if current_sum == prior_committed:
         return
-    if not records:
-        raise SystemExit(
-            f"cannot reconcile val exposure to {prior_committed} with no records"
-        )
-    delta = prior_committed - current_sum
-    last = records[-1]
-    base = resolve_val_queries(last)
-    last["val_queries_incurred_by_this_run"] = base + delta
-
-    new_sum = sum(resolve_val_queries(r) for r in records)
-    if new_sum != prior_committed:
-        raise SystemExit(
-            f"val-exposure reconciliation FAILED: derived={new_sum} != "
-            f"prior committed={prior_committed}"
-        )
+    raise SystemExit(
+        "val-exposure reconciliation FAILED: the honest per-record sum of "
+        f"resolve_val_queries ({current_sum}) does not match the prior "
+        f"committed state/val_exposure.json counter ({prior_committed}). The "
+        "migrator will NOT silently fold the difference into any record. "
+        "Reconcile the per-record val_queries_incurred_by_this_run (or "
+        "metrics.validation_set_queries) inputs by hand so they honestly sum "
+        f"to {prior_committed}, then re-run the migration."
+    )
 
 
 def build_campaign(state_dir: Path) -> dict[str, Any]:

@@ -56,10 +56,10 @@ except ImportError:
 # regenerate_state.py and log_experiment.py so the §10.5 hash basis is byte-
 # identical across all tools. scripts/ sits one level up from scripts/verifier/.
 try:
-    from _ledger_common import _canonical_record_bytes
+    from _ledger_common import _canonical_record_bytes, resolve_val_queries
 except ImportError:  # pragma: no cover - path shim for direct invocation
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from _ledger_common import _canonical_record_bytes
+    from _ledger_common import _canonical_record_bytes, resolve_val_queries
 
 
 # --- Constants ----------------------------------------------------------------
@@ -305,6 +305,19 @@ def rule_6_val_exposure_not_exhausted(
         return False, (
             f"val_set_exposure_at_request requires int queries + budget "
             f"(got queries={queries!r}, budget={budget!r})"
+        )
+    # Anti-spoof cross-check (§17.6): an agent must not under-report val exposure
+    # to dodge the budget. Compute the ledger-derived exposure (sum of each
+    # shard's resolve_val_queries) and REJECT if the claimed exposure is LESS
+    # than what the ledger records actually incurred.
+    ledger_derived = sum(
+        resolve_val_queries(rec["entry"]) for rec in ctx.ledger.values()
+    )
+    if queries < ledger_derived:
+        return False, (
+            f"val exposure claim {queries} < ledger-derived total "
+            f"{ledger_derived}; §17.6 the request under-reports exposure "
+            f"(claimed less than the sum of per-record val queries)"
         )
     if queries >= budget:
         return False, (

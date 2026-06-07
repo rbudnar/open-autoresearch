@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.4"
+protocol_version: "0.5"
 proposal_id: "<YYYYMMDD-HHMMSS-6hex-slug>"
 branch: "<architecture | loss_objective | data_sampling | features | optimization | calibration | systems_efficiency>"
 parent_proposal_id: "<id or baseline>"

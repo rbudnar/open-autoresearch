@@ -149,6 +149,61 @@ class TestVerifierReproducesLevel3Decision(unittest.TestCase):
             )
 
 
+class TestExposureAntiSpoof(unittest.TestCase):
+    """rule_6 rejects a request that UNDER-reports val exposure vs the ledger.
+
+    An agent could claim a low queries count to slip under the budget. The
+    verifier computes the ledger-derived exposure (sum of resolve_val_queries
+    over the shards = 52 for level3) and rejects any claim below it.
+    """
+
+    def test_understated_exposure_rejected(self):
+        request = json.loads(REQUEST_JSON.read_text(encoding="utf-8"))
+        # Claim 0 queries while the ledger records 52 — a spoof to dodge budget.
+        request["claims"]["val_set_exposure_at_request"][
+            "queries_against_val_this_campaign"
+        ] = 0
+        with tempfile.TemporaryDirectory(prefix="l3-spoof-") as tmp:
+            spoof_request = Path(tmp) / "spoof-request.json"
+            spoof_request.write_text(json.dumps(request), encoding="utf-8")
+            out_dir = Path(tmp) / "out"
+            out_dir.mkdir()
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(VERIFIER),
+                    "--request",
+                    str(spoof_request),
+                    "--ledger",
+                    str(LEDGER_DIR),
+                    "--metrics",
+                    str(L3 / "config" / "metrics.yaml"),
+                    "--enforcement",
+                    str(L3 / "config" / "enforcement.yaml"),
+                    "--out-dir",
+                    str(out_dir),
+                    "--verifier-identity",
+                    "unittest-spoof",
+                    "--unsigned",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(
+                proc.returncode,
+                1,
+                f"spoofed request should be rejected. stdout={proc.stdout!r} "
+                f"stderr={proc.stderr!r}",
+            )
+            packets = list(out_dir.glob("*-promotion-packet.json"))
+            self.assertTrue(packets, "packet json not written")
+            packet = json.loads(packets[0].read_text(encoding="utf-8"))
+            self.assertEqual(packet["status"], "rejected")
+            rule6 = packet["criteria_check"]["6_val_exposure_not_exhausted"]
+            self.assertFalse(rule6["pass"])
+            self.assertIn("under-reports", (rule6["note"] or "").lower())
+
+
 class TestSkepticVerdictParsing(unittest.TestCase):
     """rule_8 verdict extraction is stdlib-only and robust to quoting (no PyYAML).
 

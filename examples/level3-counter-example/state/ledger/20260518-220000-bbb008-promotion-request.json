@@ -21,14 +21,14 @@
     "tool_calls": 34
   },
   "status": "rejected",
-  "rejection_reason": "verifier_rejected_promotion_request: Per §10.5 rule 6 (val exposure not exhausted): queries=52 ≥ budget=50. Cumulative val exposure passed the configured budget during the iter-7 factorial (which added 12 queries) and an additional 2 seeds for the §16.1.1 lesion test ablation. Verifier signed packet with status: rejected. To proceed, a holdout refresh (§17.6.3) is required, which is a §3.1 escalation requiring human review.",
+  "rejection_reason": "verifier_rejected_promotion_request: Per §10.5 rule 6 (val exposure not exhausted): queries=52 ≥ budget=50. Cumulative val exposure passed the configured budget during this §16.1.1 lesion-test run, which itself incurred 26 queries (a multi-seed lesion sweep on top of the 26 already accumulated through the iter-7 factorial). Verifier signed packet with status: rejected. To proceed, a holdout refresh (§17.6.3) is required, which is a §3.1 escalation requiring human review.",
   "evidence_level": "standard",
   "enforcement_mode": "ci_enforced",
   "maturity_level": 3,
   "not_deployable": false,
   "scout_mode": "live",
   "val_queries_incurred_by_this_run": 26,
-  "val_queries_total_at_start": 50,
+  "val_queries_total_at_start": 26,
   "val_queries_total_at_end": 52,
   "artifacts": {
     "lesion_test_results": "validation_nll with attention_weights replaced by uniform = 0.846 (within seed variance of baseline); confirms attention mechanism (not surrounding scaffolding) drives the gain",

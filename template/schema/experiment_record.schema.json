@@ -20,7 +20,8 @@
   "properties": {
     "protocol_version": {
       "type": "string",
-      "description": "Protocol version stamp; e.g. \"0.5\"."
+      "const": "0.5",
+      "description": "Protocol version stamp; MUST be the literal \"0.5\" for Protocol 0.5 records."
     },
     "id": {
       "type": "string",

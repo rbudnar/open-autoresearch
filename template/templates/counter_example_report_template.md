@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.4"
+protocol_version: "0.5"
 report_id: "<YYYYMMDD-HHMMSS-6hex-slug>"
 campaign_id: "<id>"
 iterations_covered:

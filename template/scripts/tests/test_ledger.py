@@ -239,6 +239,40 @@ class TestRegenerate(TempStateMixin):
         self.assertNotIn("notes", ve)
         self.assertNotIn("last_incremented_by_iteration", ve)
 
+    def test_val_exposure_budget_and_refresh_due(self):
+        # When a sibling config/metrics.yaml carries val_set_exposure_budget,
+        # regenerate emits exposure_budget + holdout_refresh_due (queries>=budget).
+        (self.state.parent / "config").mkdir(parents=True, exist_ok=True)
+        (self.state.parent / "config" / "metrics.yaml").write_text(
+            "val_set_exposure_budget: 7\n", encoding="utf-8"
+        )
+        write_shard(self.ledger, make_record("20260518-090000-aaa000", val=5))
+        write_shard(self.ledger, make_record("20260518-100000-aaa001", val=3, parents=["20260518-090000-aaa000"]))
+        regenerate_state.regenerate(self.state)
+        ve = json.loads((self.state / "val_exposure.json").read_text())
+        self.assertEqual(ve["queries"], 8)
+        self.assertEqual(ve["exposure_budget"], 7)
+        self.assertTrue(ve["holdout_refresh_due"])  # 8 >= 7
+
+    def test_val_exposure_refresh_not_due_under_budget(self):
+        (self.state.parent / "config").mkdir(parents=True, exist_ok=True)
+        (self.state.parent / "config" / "metrics.yaml").write_text(
+            "val_set_exposure_budget: 100\n", encoding="utf-8"
+        )
+        write_shard(self.ledger, make_record("20260518-090000-aaa000", val=5))
+        regenerate_state.regenerate(self.state)
+        ve = json.loads((self.state / "val_exposure.json").read_text())
+        self.assertEqual(ve["exposure_budget"], 100)
+        self.assertFalse(ve["holdout_refresh_due"])  # 5 < 100
+
+    def test_val_exposure_no_budget_omits_fields(self):
+        # No metrics.yaml -> exposure_budget / holdout_refresh_due are omitted.
+        write_shard(self.ledger, make_record("20260518-090000-aaa000", val=5))
+        regenerate_state.regenerate(self.state)
+        ve = json.loads((self.state / "val_exposure.json").read_text())
+        self.assertNotIn("exposure_budget", ve)
+        self.assertNotIn("holdout_refresh_due", ve)
+
     def test_idempotence(self):
         write_shard(self.ledger, make_record("20260518-090000-aaa000", val=5))
         write_shard(self.ledger, make_record("20260518-100000-aaa001", val=3, parents=["20260518-090000-aaa000"]))
@@ -312,6 +346,30 @@ class TestValidateLedger(TempStateMixin):
         ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
         self.assertFalse(ok)
 
+    def test_stem_must_equal_id(self):
+        # Shard written under a filename whose stem != the internal id.
+        rec = make_record("20260518-090000-aaa000", parents=["baseline"])
+        (self.ledger / "wrong-name.json").write_text(
+            json.dumps(rec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+        self.assertTrue(
+            any("stem" in line and "internal id" in line for line in lines),
+            lines,
+        )
+
+    def test_parent_ids_cycle_rejected(self):
+        # Two records that point at each other: a 2-record cycle. Today this
+        # passes orphan-resolution (both ids exist) but is not a valid DAG.
+        a = make_record("20260518-090000-aaa000", parents=["20260518-100000-aaa001"])
+        b = make_record("20260518-100000-aaa001", parents=["20260518-090000-aaa000"])
+        write_shard(self.ledger, a)
+        write_shard(self.ledger, b)
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+        self.assertTrue(any("cycle" in line for line in lines), lines)
+
 
 # --- migration round-trip ----------------------------------------------------
 
@@ -368,10 +426,11 @@ class TestMigration(TempStateMixin):
             expected["protocol_version"] = "0.5"
             self.assertEqual(shard, expected)
 
-    def test_val_reconciliation_reproduces_prior_committed(self):
-        # per-record sum = 28 but prior committed = 52 (the level3 scenario)
+    def test_val_reconciliation_honest_sum_passes(self):
+        # Per-record val inputs HONESTLY sum to the prior committed counter (52):
+        # the safety valve returns silently and does not mutate any record.
         self.ledger.rmdir()
-        vals = [5, 0, 3, 3, 0, 3, 0, 12, 2]  # sums to 28
+        vals = [5, 0, 3, 3, 0, 3, 0, 12, 26]  # sums to 52
         records = []
         prev = None
         for i, v in enumerate(vals):
@@ -389,6 +448,33 @@ class TestMigration(TempStateMixin):
         self.assertEqual(stats["val_query_sum"], 52)
         ve = json.loads((self.state / "val_exposure.json").read_text())
         self.assertEqual(ve["queries"], 52)
+        # No record was mutated: the last shard's val input is its honest 26.
+        last = json.loads(
+            (self.state / "ledger" / f"{records[-1]['id']}.json").read_text()
+        )
+        self.assertEqual(last["val_queries_incurred_by_this_run"], 26)
+
+    def test_val_reconciliation_mismatch_aborts_without_mutating(self):
+        # Per-record sum (28) != prior committed (52): the migrator MUST abort
+        # with a clear message and MUST NOT fold the delta into the last record.
+        self.ledger.rmdir()
+        vals = [5, 0, 3, 3, 0, 3, 0, 12, 2]  # sums to 28
+        records = []
+        prev = None
+        for i, v in enumerate(vals):
+            rid = f"20260518-{i:02d}0000-bbb{i:03d}"
+            r = make_record(rid, parents=([prev] if prev else ["baseline"]), val=v)
+            r["protocol_version"] = "0.4"
+            records.append(r)
+            prev = rid
+        self._write_v04_jsonl(records)
+        (self.state / "val_exposure.json").write_text(
+            json.dumps({"protocol_version": "0.4", "val_set_version": 1, "queries": 52}),
+            encoding="utf-8",
+        )
+        with self.assertRaises(SystemExit) as cm:
+            migrate_mod.migrate(self.state, force=False)
+        self.assertIn("reconcile", str(cm.exception).lower())
 
     def test_refuses_clobber_without_force(self):
         self.ledger.rmdir()
