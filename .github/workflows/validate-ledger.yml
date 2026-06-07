@@ -3,8 +3,11 @@
 # must be schema-valid with unique ids and resolvable parent_ids, and the
 # reference ledger tooling must keep its unit + integration tests green.
 #
-# Stdlib-only: no `pip install`. The whole point of the reference scripts is
-# that any consumer (Python or not) can run/validate the contract without deps.
+# The ledger reference scripts are stdlib-only — that's the point: any consumer
+# (Python or not) can run/validate the contract without deps. The only exception
+# is the §10.5 verifier (verify_request.py), which parses YAML config and so
+# needs PyYAML (installed only for the verifier test step, mirroring
+# validate-examples).
 
 name: validate-ledger
 
@@ -53,8 +56,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Run reference ledger test suites (stdlib unittest)
+      # The ledger reference scripts (_ledger_common, log_experiment,
+      # regenerate_state, validate_ledger, migrate_*) are stdlib-only — prove it
+      # by running their suite with NO third-party deps installed.
+      - name: Reference ledger tooling — stdlib-only (no deps)
+        run: python3 -m unittest template.scripts.tests.test_ledger
+      # The §10.5 verifier (verify_request.py) parses YAML config and needs
+      # PyYAML, exactly like the validate-examples verifier jobs. Its tests
+      # subprocess the verifier, so install PyYAML for this step only.
+      - name: Verifier shard-load tests (verifier needs PyYAML)
         run: |
-          python3 -m unittest \
-            template.scripts.tests.test_ledger \
-            template.scripts.tests.test_verifier_shard_load
+          pip install pyyaml
+          python3 -m unittest template.scripts.tests.test_verifier_shard_load
