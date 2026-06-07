@@ -339,6 +339,14 @@ class TestValidateLedger(TempStateMixin):
         self.assertFalse(ok)
         self.assertTrue(any("malformed" in line for line in lines))
 
+    def test_non_utf8_shard_reported_not_crash(self):
+        # A non-UTF8 shard raises UnicodeDecodeError (a ValueError, not OSError);
+        # load_records must report it as malformed rather than crash.
+        (self.ledger / "nonutf8.json").write_bytes(b'{"id": "\xff\xfe bad bytes"}')
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+        self.assertTrue(any("malformed" in line for line in lines))
+
     def test_schema_invalid_record(self):
         bad = make_record("20260518-090000-aaa000")
         del bad["metrics"]

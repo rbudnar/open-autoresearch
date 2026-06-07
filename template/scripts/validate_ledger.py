@@ -44,7 +44,9 @@ def load_records(ledger_dir: Path) -> list[tuple[Path, Any]]:
         try:
             with path.open("r", encoding="utf-8") as f:
                 records.append((path, json.load(f)))
-        except (json.JSONDecodeError, OSError):
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError):
+            # UnicodeDecodeError (a ValueError, not an OSError) covers a non-UTF8
+            # shard — report it as a malformed record rather than crashing.
             records.append((path, None))
     return records
 
