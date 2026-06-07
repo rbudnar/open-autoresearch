@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.4"
+protocol_version: "0.5"
 brief_id: "<YYYYMMDD-slug>"
 branch: "<architecture | loss_objective | data_sampling | features | optimization | calibration | systems_efficiency>"
 mode: "<live | offline>"

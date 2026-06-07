@@ -1,9 +1,0 @@
-{
-  "protocol_version": "0.4",
-  "val_set_version": 1,
-  "queries": 52,
-  "last_incremented_by_iteration": "20260518-220000-bbb008-promotion-request",
-  "exposure_budget": 50,
-  "holdout_refresh_due": true,
-  "notes": "OVER BUDGET. Cumulative queries: iter-0 baseline (5) + iter-2 cosine_restarts (3) + iter-3 attention_pool (3) + iter-5 re-grade attention_pool + baseline rerun (3 + 3 = 6 — re-grade is double-charged) + iter-7 factorial (4 cells × 3 seeds = 12) + iter-8 lesion test (2 seeds) = 5+3+3+6+12+2 + iter-1 fail-fast (0; preflight only) + iter-4 invalidation (0) + iter-6 stack rejection (0) = 31 + 14 + 7 = 52. Holdout refresh required per §17.6.3 before any further promotion attempt."
-}

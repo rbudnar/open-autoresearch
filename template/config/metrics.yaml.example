@@ -4,7 +4,7 @@
 # Driven by PROTOCOL.md §6.1, §13.2.1, §17.1.1, §17.6, §17.7.
 # Replace every <FILL_ME> with a real value before the first iteration.
 
-protocol_version: "0.4"
+protocol_version: "0.5"
 
 # --- Cost tier (§6.1) ----------------------------------------------------------
 # Time one full baseline run. Pick the tier whose row matches.

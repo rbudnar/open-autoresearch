@@ -5,7 +5,7 @@
 # Without one, all anti-cheating controls in §17.1 are advisory only and
 # promotion packets carry `enforcement: in-band-only`, `not_deployable: true`.
 
-protocol_version: "0.4"
+protocol_version: "0.5"
 
 # REQUIRED. Pick exactly one mechanism. See PROTOCOL.md §3.1.1 for trust levels.
 #   ci_enforced       — main-branch protection + CODEOWNERS on the host repo.

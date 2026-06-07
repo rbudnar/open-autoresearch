@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.4"
+protocol_version: "0.5"
 review_id: "<YYYYMMDD-HHMMSS-6hex>"
 candidate_proposal_id: "<id>"
 candidate_ledger_entries:

@@ -13,7 +13,7 @@
 # the human is technical and wants to fill them in batch. Across groups, prefer
 # one group at a time so the human can think about the topic before moving on.
 
-protocol_version: "0.4"
+protocol_version: "0.5"
 
 # Drift between this questionnaire's `maps_to` fields and the actual key paths
 # in `template/config/*.yaml.example` is caught by
@@ -28,7 +28,7 @@ protocol_version: "0.4"
 # ---------------------------------------------------------------------------
 answer_template: |
   # autoresearch/bootstrap-answers.yaml
-  protocol_version: "0.4"
+  protocol_version: "0.5"
   bootstrapped_at: "<ISO-8601 timestamp>"
   bootstrapped_by: "<integrating-agent name and version, e.g. claude-code-4.7>"
   answers:

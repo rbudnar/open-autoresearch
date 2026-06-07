@@ -5,7 +5,7 @@
 # not in protected_paths is implicitly editable; protected_paths takes
 # precedence. Keep this file together with protected_paths for clarity.
 
-protocol_version: "0.4"
+protocol_version: "0.5"
 
 editable_paths:
   - models/**

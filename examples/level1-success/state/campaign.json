@@ -1,0 +1,13 @@
+{
+  "branch_policy": "single-writer ledger shards; aggregates derived",
+  "campaign_id": "level1-success-2026-05-18",
+  "host_branch": "main",
+  "maturity_level": 1,
+  "protocol_version": "0.5",
+  "root": {
+    "status": "baseline",
+    "title": "Level-1 success arc (toy MLP, synthetic regression)"
+  },
+  "scratch_branch": "autoresearch/level1-success",
+  "val_set_version": 1
+}

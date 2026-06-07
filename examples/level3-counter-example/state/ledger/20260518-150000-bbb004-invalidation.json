@@ -1,0 +1,43 @@
+{
+  "protocol_version": "0.5",
+  "id": "20260518-150000-bbb004-invalidation",
+  "timestamp": "2026-05-18T15:00:00Z",
+  "branch": "evaluator_audit",
+  "hypothesis": "N/A — this is an §17.1.1 behavioral-equivalence failure that invalidates prior runs",
+  "parent_ids": [
+    "20260518-130000-bbb003"
+  ],
+  "git_sha_before": "bbb003",
+  "git_sha_after": "bbb003",
+  "data_snapshot": "data-snap-2026-05-15",
+  "single_non_baseline_switch": null,
+  "metrics": {},
+  "guardrails": {},
+  "cost": {
+    "gpu_hours": 0,
+    "wall_clock_hours": 0.5,
+    "llm_tokens": 18000,
+    "tool_calls": 8
+  },
+  "status": "invalidated",
+  "invalidation_reason": "behavioral_equivalence_test_failed: a clarity refactor of evaluation/metric_defs.py changed the rounding mode from 'round-half-even' to 'round-half-up'. Behavioral-equivalence test caught the drift on the next preflight; per §17.1.1 the human review judged the change semantic (not byte-equivalent), updated the golden fixtures (archived old goldens under evaluation/fixtures/archive/20260518/), and retroactively invalidated iter-3's metrics pending re-grade. Iter-3 is NOT a failed result; the evaluator change invalidates the comparison.",
+  "evidence_level": "n/a",
+  "enforcement_mode": "ci_enforced",
+  "maturity_level": 3,
+  "not_deployable": false,
+  "scout_mode": "live",
+  "val_queries_incurred_by_this_run": 0,
+  "val_queries_total_at_start": 11,
+  "val_queries_total_at_end": 11,
+  "artifacts": {
+    "old_goldens": "evaluation/fixtures/archive/20260518/",
+    "new_goldens": "evaluation/fixtures/"
+  },
+  "lessons": [
+    "Evaluator refactors require behavioral-equivalence check BEFORE merge to the protected branch.",
+    "Golden-fixture updates are a quarterly-frequency event; we just did one — track for §17.1.1 'multiple updates per quarter' warning."
+  ],
+  "next_actions": [
+    "Re-grade iter-3 candidate under updated evaluator (iter-5)"
+  ]
+}

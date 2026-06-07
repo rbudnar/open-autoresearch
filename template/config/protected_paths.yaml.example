@@ -6,7 +6,7 @@
 # here are honor-system; the verifier (§10.5) caps any resulting promotion at
 # low_evidence_promoted with not_deployable: true.
 
-protocol_version: "0.4"
+protocol_version: "0.5"
 
 protected_paths:
   # Data splits — content hashes pinned by §6.3.1 MANIFEST.

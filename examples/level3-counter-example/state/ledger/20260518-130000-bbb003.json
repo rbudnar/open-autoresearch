@@ -1,0 +1,61 @@
+{
+  "protocol_version": "0.5",
+  "id": "20260518-130000-bbb003",
+  "timestamp": "2026-05-18T13:00:00Z",
+  "branch": "architecture",
+  "hypothesis": "Attention pooling should improve NLL within the latency budget",
+  "parent_ids": [
+    "20260518-090000-bbb000"
+  ],
+  "git_sha_before": "aaa000",
+  "git_sha_after": "bbb003",
+  "data_snapshot": "data-snap-2026-05-15",
+  "single_non_baseline_switch": "encoder_type=attention_pool",
+  "metrics": {
+    "validation_nll": 0.823,
+    "accuracy": 0.8
+  },
+  "guardrails": {
+    "inference_latency_ms": 19.7
+  },
+  "seed_variance": {
+    "validation_nll_seed_std": 0.01,
+    "accuracy_seed_std": 0.004
+  },
+  "delta_vs_baseline": {
+    "validation_nll": -0.024,
+    "validation_nll_95_ci": [
+      -0.03,
+      -0.018
+    ],
+    "accuracy": 0.02,
+    "inference_latency_ms": 1.3,
+    "inference_latency_ms_95_ci_upper": 1.6
+  },
+  "cost": {
+    "gpu_hours": 9.1,
+    "wall_clock_hours": 3.2,
+    "llm_tokens": 54000,
+    "tool_calls": 22
+  },
+  "status": "branch_winner",
+  "evidence_level": "standard",
+  "enforcement_mode": "ci_enforced",
+  "maturity_level": 3,
+  "not_deployable": false,
+  "scout_mode": "live",
+  "val_queries_incurred_by_this_run": 3,
+  "val_queries_total_at_start": 8,
+  "val_queries_total_at_end": 11,
+  "artifacts": {
+    "checkpoint": "checkpoints/bbb003.pt"
+  },
+  "lessons": [
+    "Attention pool is the strongest architecture branch on this task.",
+    "Subject to confirmation by an ablation (next iteration)."
+  ],
+  "next_actions": [
+    "Run §16.1.1 single_component_swap ablation",
+    "Plan Skeptic review"
+  ]
+}

@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.4"
+protocol_version: "0.5"
 request_id: "20260518-220000-bbb008"
 candidate_proposal_id: "20260518-130000-bbb003"
 campaign_id: "level3-counter-example-2026-05-18"

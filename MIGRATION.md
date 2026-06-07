@@ -2,6 +2,51 @@
 
 Each major / minor protocol bump may require host-project changes. This file walks through each transition.
 
+## v0.4 → v0.5
+
+**Scope:** The experiment ledger moves from a single append-only `state/experiment_ledger.jsonl` to a **directory of immutable per-record files** `state/ledger/<id>.json` (the new source of truth). Four files become DERIVED and git-ignored. A new committed `state/campaign.json` holds campaign metadata. The §10.5 promotion-request hashes are recomputed against the pinned canonical serializer.
+
+### Required changes
+
+1. **Run the migrator.** From the host project root:
+
+   ```bash
+   python3 autoresearch/scripts/migrate_ledger_v04_to_v05.py \
+       --state-dir autoresearch/state/
+   ```
+
+   It splits each jsonl line into a field-preserving `state/ledger/<id>.json` shard (no field allow-list — additive consumer fields like `maturity_level`, `not_deployable`, nested `artifacts.mlflow` are preserved), stamps each record `protocol_version: "0.5"`, then regenerates the derived aggregates. It sets the per-record val-query inputs so the **derived** `val_exposure.json` counter REPRODUCES the prior committed counter, and **asserts equality or fails loudly** — if it aborts, the source counter and the per-record inputs disagree and must be reconciled by hand. It refuses to clobber existing shards unless `--force`.
+
+2. **Create `state/campaign.json`** (committed, single-writer): `campaign_id`, `host_branch`, `scratch_branch`, `maturity_level`, `branch_policy`, and the root-node title/status. This is the home for campaign-level and curated metadata that has no source in any single record (§15). Without it, `research_tree.json` cannot regenerate its root/branch-policy content.
+
+3. **Regenerate the derived aggregates** and confirm they reproduce the prior committed tree/counter:
+
+   ```bash
+   python3 autoresearch/scripts/regenerate_state.py --state-dir autoresearch/state/   # or `make ledger`
+   python3 autoresearch/scripts/validate_ledger.py --ledger-dir autoresearch/state/ledger/   # every record schema-valid, ids unique, parent_ids resolve
+   ```
+
+4. **Git-ignore the derived files** and stop tracking them:
+
+   ```bash
+   git rm --cached autoresearch/state/experiment_ledger.jsonl \
+                   autoresearch/state/research_tree.json \
+                   autoresearch/state/val_exposure.json \
+                   autoresearch/state/INDEX.md
+   ```
+
+   Add those four `state/*` paths to `.gitignore` (see `template/.gitignore`). Add `state/budget_ledger.jsonl merge=union` to `.gitattributes`. Keep `state/ledger/*.json` **tracked**.
+
+5. **Recompute promotion-request hashes.** Any committed `promotion_request.{json,md}` carries `content_sha256` references over ledger record bytes. Because the `0.4 → 0.5` stamp changes the hashed bytes (and trailing-zero float loss can change them independently), every ledger-id-based `content_sha256` MUST be recomputed against the pinned canonical serializer (`_ledger_common._canonical_record_bytes`: compact, insertion order, `ensure_ascii=False`, no trailing newline) applied to the stamped-0.5 record. Path-based hashes (e.g. a `skeptic_review` reference by file path) do NOT change. The §10.5 verifier reads the `state/ledger/` shard directory and re-hashes via the same shared helper, so the recomputed values must match exactly.
+
+6. **Repoint runtime readers.** Anything that named `experiment_ledger.jsonl` as the source of truth (e.g. a `tracking_policy.yaml` `ledger_policy.source_of_truth`) must point at the `state/ledger/` directory, and any `protocol_version` it asserts bumps `0.4 → 0.5`. Readers regenerate aggregates before reading them (a fresh clone has no derived files until `make ledger` runs); do not rely on file mtime for staleness.
+
+7. **Bump the version stamp.** `autoresearch/PROTOCOL_VERSION` (and `template/PROTOCOL_VERSION`) `0.4 → 0.5`; the PROTOCOL.md header is `0.5`. Update any test/CI assertions that pinned `0.4`.
+
+### Vendoring note
+
+Consumers vendor `schema/` and `scripts/` as a flat copy of the template (no submodule). Record the upstream commit SHA the copy came from (a `VENDOR.lock` is the conventional place) so CI can detect drift between the vendored copy and upstream.
+
 ## v0.3 → v0.4
 
 **Scope:** Polish pass after a second dual-voice review of v0.3. No conceptual redesign; many tightenings.

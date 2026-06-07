@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.4"
+protocol_version: "0.5"
 request_id: "<YYYYMMDD-HHMMSS-6hex>"
 candidate_proposal_id: "<id>"
 campaign_id: "<id>"
