@@ -124,9 +124,7 @@ def write_record(state_dir: Path, record: dict[str, Any]) -> Path:
     ledger_dir.mkdir(parents=True, exist_ok=True)
     out_path = ledger_dir / f"{record['id']}.json"
     if out_path.exists():
-        raise SystemExit(
-            f"REFUSING to overwrite existing record: {out_path}"
-        )
+        raise SystemExit(f"REFUSING to overwrite existing record: {out_path}")
     # Pretty per-file form for human readability; the canonical compact form is
     # only the jsonl line + hash basis.
     out_path.write_text(

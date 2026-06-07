@@ -168,8 +168,7 @@ def validate_against_schema(
     type_spec = schema.get("type")
     if type_spec is not None and not _check_type(instance, type_spec):
         errors.append(
-            f"{path}: expected type {type_spec!r}, got "
-            f"{type(instance).__name__}"
+            f"{path}: expected type {type_spec!r}, got " f"{type(instance).__name__}"
         )
         # If the top-level type is wrong, deeper checks are noise.
         return errors
@@ -196,9 +195,7 @@ def validate_against_schema(
         for key, subschema in props.items():
             if key in instance:
                 errors.extend(
-                    validate_against_schema(
-                        instance[key], subschema, f"{path}.{key}"
-                    )
+                    validate_against_schema(instance[key], subschema, f"{path}.{key}")
                 )
         additional = schema.get("additionalProperties", True)
         if additional is False:

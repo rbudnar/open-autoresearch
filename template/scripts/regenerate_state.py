@@ -42,7 +42,9 @@ BASELINE_SENTINEL = "baseline"
 def atomic_write_bytes(path: Path, data: bytes) -> None:
     """Write ``data`` to ``path`` atomically via temp file + os.replace."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp-", suffix=path.name)
+    fd, tmp_name = tempfile.mkstemp(
+        dir=str(path.parent), prefix=".tmp-", suffix=path.name
+    )
     try:
         with os.fdopen(fd, "wb") as f:
             f.write(data)
@@ -170,7 +172,9 @@ def build_research_tree(
             title = rec.get("branch", "")
         lessons = rec.get("node_lessons")
         if not isinstance(lessons, list):
-            lessons = rec.get("lessons", []) if isinstance(rec.get("lessons"), list) else []
+            lessons = (
+                rec.get("lessons", []) if isinstance(rec.get("lessons"), list) else []
+            )
         nodes[rid] = {
             "id": rid,
             "title": title,

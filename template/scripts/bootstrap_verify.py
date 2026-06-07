@@ -60,7 +60,12 @@ REQUIRED_CONFIG_FILES = [
     "editable_paths.yaml",
 ]
 
-REQUIRED_ANSWER_KEYS = ["protocol_version", "bootstrapped_at", "bootstrapped_by", "answers"]
+REQUIRED_ANSWER_KEYS = [
+    "protocol_version",
+    "bootstrapped_at",
+    "bootstrapped_by",
+    "answers",
+]
 
 REQUIRED_MANIFEST_TOP_KEYS = [
     "snapshot_id",
@@ -107,9 +112,7 @@ def check_config_files_materialized(host_root: Path) -> list[tuple[bool, str]]:
         if p.is_file():
             results.append(report(True, f"config materialized: {f}"))
         else:
-            results.append(
-                report(False, f"config materialized: {f}", f"missing: {p}")
-            )
+            results.append(report(False, f"config materialized: {f}", f"missing: {p}"))
     return results
 
 
@@ -433,7 +436,9 @@ def main() -> int:
     all_results.extend(check_no_fill_me(host_root))
     all_results.append(check_bootstrap_answers(host_root))
     all_results.extend(check_manifest(host_root))
-    all_results.extend(check_fixtures(host_root, allow_partial=maybe_partial(host_root)))
+    all_results.extend(
+        check_fixtures(host_root, allow_partial=maybe_partial(host_root))
+    )
     all_results.extend(check_protocol_version(host_root))
 
     n_pass = sum(1 for ok, _ in all_results if ok)

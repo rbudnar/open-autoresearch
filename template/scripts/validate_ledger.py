@@ -32,8 +32,10 @@ except ImportError:  # pragma: no cover - path shim for direct invocation
 BASELINE_SENTINEL = "baseline"
 
 # schema/ sits one level up from scripts/ in the template layout.
-DEFAULT_SCHEMA = Path(__file__).resolve().parent.parent / "schema" / (
-    "experiment_record.schema.json"
+DEFAULT_SCHEMA = (
+    Path(__file__).resolve().parent.parent
+    / "schema"
+    / ("experiment_record.schema.json")
 )
 
 
@@ -156,9 +158,7 @@ def validate(ledger_dir: Path, schema_path: Path) -> tuple[bool, list[str]]:
 
     if cycle_nodes:
         ok_overall = False
-        lines.append(
-            "FAIL parent_ids cycle detected: " + " -> ".join(cycle_nodes)
-        )
+        lines.append("FAIL parent_ids cycle detected: " + " -> ".join(cycle_nodes))
 
     total = len(records)
     failed = sum(1 for line in lines if line.startswith("FAIL"))

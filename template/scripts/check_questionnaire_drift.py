@@ -84,9 +84,7 @@ def load_questionnaire(path: Path) -> dict[str, Any]:
     with open(path) as f:
         data = yaml.safe_load(f)
     if not isinstance(data, dict) or "groups" not in data:
-        raise SystemExit(
-            f"{path}: not a valid questionnaire (missing 'groups' key)"
-        )
+        raise SystemExit(f"{path}: not a valid questionnaire (missing 'groups' key)")
     return data  # type: ignore[no-any-return]
 
 
@@ -319,9 +317,7 @@ def main() -> int:
     if not forward and not reverse:
         n_q = len(questions)
         n_files = len(list(config_dir.glob("*.yaml.example")))
-        print(
-            f"OK: {n_q} questions ↔ {n_files} .example config files, no drift."
-        )
+        print(f"OK: {n_q} questions ↔ {n_files} .example config files, no drift.")
         return 0
 
     print(f"DRIFT DETECTED: {len(forward)} forward + {len(reverse)} reverse")

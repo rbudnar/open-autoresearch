@@ -49,7 +49,9 @@ def make_record(rid, parents=None, branch="b", status="ok", val=0, metrics=None)
 def write_shard(ledger_dir: Path, record: dict) -> Path:
     ledger_dir.mkdir(parents=True, exist_ok=True)
     p = ledger_dir / f"{record['id']}.json"
-    p.write_text(json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    p.write_text(
+        json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
     return p
 
 
@@ -91,14 +93,19 @@ class TestResolveValQueries(unittest.TestCase):
     def test_prefers_direct_field(self):
         self.assertEqual(
             _ledger_common.resolve_val_queries(
-                {"val_queries_incurred_by_this_run": 7, "metrics": {"validation_set_queries": 99}}
+                {
+                    "val_queries_incurred_by_this_run": 7,
+                    "metrics": {"validation_set_queries": 99},
+                }
             ),
             7,
         )
 
     def test_falls_back_to_metrics(self):
         self.assertEqual(
-            _ledger_common.resolve_val_queries({"metrics": {"validation_set_queries": 4}}),
+            _ledger_common.resolve_val_queries(
+                {"metrics": {"validation_set_queries": 4}}
+            ),
             4,
         )
 
@@ -108,7 +115,9 @@ class TestResolveValQueries(unittest.TestCase):
 
     def test_bool_is_not_a_count(self):
         self.assertEqual(
-            _ledger_common.resolve_val_queries({"val_queries_incurred_by_this_run": True}),
+            _ledger_common.resolve_val_queries(
+                {"val_queries_incurred_by_this_run": True}
+            ),
             0,
         )
 
@@ -205,9 +214,18 @@ class TestLogExperiment(TempStateMixin):
 
 class TestRegenerate(TempStateMixin):
     def test_tree_reconstruction_from_parent_ids(self):
-        write_shard(self.ledger, make_record("20260518-090000-aaa000", parents=[], branch="baseline"))
-        write_shard(self.ledger, make_record("20260518-100000-aaa001", parents=["20260518-090000-aaa000"]))
-        write_shard(self.ledger, make_record("20260518-110000-aaa002", parents=["20260518-090000-aaa000"]))
+        write_shard(
+            self.ledger,
+            make_record("20260518-090000-aaa000", parents=[], branch="baseline"),
+        )
+        write_shard(
+            self.ledger,
+            make_record("20260518-100000-aaa001", parents=["20260518-090000-aaa000"]),
+        )
+        write_shard(
+            self.ledger,
+            make_record("20260518-110000-aaa002", parents=["20260518-090000-aaa000"]),
+        )
         regenerate_state.regenerate(self.state)
         tree = json.loads((self.state / "research_tree.json").read_text())
         self.assertEqual(tree["roots"], ["20260518-090000-aaa000"])
@@ -218,18 +236,36 @@ class TestRegenerate(TempStateMixin):
         self.assertEqual(len(tree["nodes"]), 3)
 
     def test_baseline_sentinel_is_root(self):
-        write_shard(self.ledger, make_record("20260518-090000-aaa000", parents=["baseline"]))
+        write_shard(
+            self.ledger, make_record("20260518-090000-aaa000", parents=["baseline"])
+        )
         regenerate_state.regenerate(self.state)
         tree = json.loads((self.state / "research_tree.json").read_text())
         self.assertEqual(tree["roots"], ["20260518-090000-aaa000"])
 
     def test_val_counter_sum(self):
         write_shard(self.ledger, make_record("20260518-090000-aaa000", val=5))
-        write_shard(self.ledger, make_record("20260518-100000-aaa001", val=3, parents=["20260518-090000-aaa000"]))
+        write_shard(
+            self.ledger,
+            make_record(
+                "20260518-100000-aaa001", val=3, parents=["20260518-090000-aaa000"]
+            ),
+        )
         # one record uses metrics fallback
-        write_shard(self.ledger, make_record("20260518-110000-aaa002", parents=["20260518-090000-aaa000"], metrics={"validation_set_queries": 4}))
+        write_shard(
+            self.ledger,
+            make_record(
+                "20260518-110000-aaa002",
+                parents=["20260518-090000-aaa000"],
+                metrics={"validation_set_queries": 4},
+            ),
+        )
         # overwrite to drop the direct field for the fallback record
-        rec = make_record("20260518-110000-aaa002", parents=["20260518-090000-aaa000"], metrics={"validation_set_queries": 4})
+        rec = make_record(
+            "20260518-110000-aaa002",
+            parents=["20260518-090000-aaa000"],
+            metrics={"validation_set_queries": 4},
+        )
         del rec["val_queries_incurred_by_this_run"]
         write_shard(self.ledger, rec)
         regenerate_state.regenerate(self.state)
@@ -247,7 +283,12 @@ class TestRegenerate(TempStateMixin):
             "val_set_exposure_budget: 7\n", encoding="utf-8"
         )
         write_shard(self.ledger, make_record("20260518-090000-aaa000", val=5))
-        write_shard(self.ledger, make_record("20260518-100000-aaa001", val=3, parents=["20260518-090000-aaa000"]))
+        write_shard(
+            self.ledger,
+            make_record(
+                "20260518-100000-aaa001", val=3, parents=["20260518-090000-aaa000"]
+            ),
+        )
         regenerate_state.regenerate(self.state)
         ve = json.loads((self.state / "val_exposure.json").read_text())
         self.assertEqual(ve["queries"], 8)
@@ -275,7 +316,12 @@ class TestRegenerate(TempStateMixin):
 
     def test_idempotence(self):
         write_shard(self.ledger, make_record("20260518-090000-aaa000", val=5))
-        write_shard(self.ledger, make_record("20260518-100000-aaa001", val=3, parents=["20260518-090000-aaa000"]))
+        write_shard(
+            self.ledger,
+            make_record(
+                "20260518-100000-aaa001", val=3, parents=["20260518-090000-aaa000"]
+            ),
+        )
         regenerate_state.regenerate(self.state)
         snap1 = {p.name: p.read_bytes() for p in self.state.glob("*") if p.is_file()}
         regenerate_state.regenerate(self.state)
@@ -305,7 +351,9 @@ class TestRegenerate(TempStateMixin):
         regenerate_state.regenerate(self.state)
         lines = (self.state / "experiment_ledger.jsonl").read_bytes().splitlines()
         self.assertEqual(len(lines), 1)
-        self.assertEqual(lines[0], _ledger_common._canonical_record_bytes(json.loads(lines[0])))
+        self.assertEqual(
+            lines[0], _ledger_common._canonical_record_bytes(json.loads(lines[0]))
+        )
 
 
 # --- validate_ledger ---------------------------------------------------------
@@ -313,8 +361,13 @@ class TestRegenerate(TempStateMixin):
 
 class TestValidateLedger(TempStateMixin):
     def test_valid_set_passes(self):
-        write_shard(self.ledger, make_record("20260518-090000-aaa000", parents=["baseline"]))
-        write_shard(self.ledger, make_record("20260518-100000-aaa001", parents=["20260518-090000-aaa000"]))
+        write_shard(
+            self.ledger, make_record("20260518-090000-aaa000", parents=["baseline"])
+        )
+        write_shard(
+            self.ledger,
+            make_record("20260518-100000-aaa001", parents=["20260518-090000-aaa000"]),
+        )
         ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
         self.assertTrue(ok, lines)
 
@@ -328,7 +381,10 @@ class TestValidateLedger(TempStateMixin):
         self.assertTrue(any("duplicate" in line for line in lines))
 
     def test_orphan_parent(self):
-        write_shard(self.ledger, make_record("20260518-100000-aaa001", parents=["does-not-exist"]))
+        write_shard(
+            self.ledger,
+            make_record("20260518-100000-aaa001", parents=["does-not-exist"]),
+        )
         ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
         self.assertFalse(ok)
         self.assertTrue(any("orphan" in line for line in lines))
@@ -429,7 +485,9 @@ class TestMigration(TempStateMixin):
         # Deep-equal every field EXCEPT protocol_version (stamped) and any
         # val-query reconciliation (none here since no prior committed counter).
         for orig in (r1, r2):
-            shard = json.loads((self.state / "ledger" / f"{orig['id']}.json").read_text())
+            shard = json.loads(
+                (self.state / "ledger" / f"{orig['id']}.json").read_text()
+            )
             expected = dict(orig)
             expected["protocol_version"] = "0.5"
             self.assertEqual(shard, expected)
@@ -449,7 +507,9 @@ class TestMigration(TempStateMixin):
             prev = rid
         self._write_v04_jsonl(records)
         (self.state / "val_exposure.json").write_text(
-            json.dumps({"protocol_version": "0.4", "val_set_version": 1, "queries": 52}),
+            json.dumps(
+                {"protocol_version": "0.4", "val_set_version": 1, "queries": 52}
+            ),
             encoding="utf-8",
         )
         stats = migrate_mod.migrate(self.state, force=False)
@@ -477,7 +537,9 @@ class TestMigration(TempStateMixin):
             prev = rid
         self._write_v04_jsonl(records)
         (self.state / "val_exposure.json").write_text(
-            json.dumps({"protocol_version": "0.4", "val_set_version": 1, "queries": 52}),
+            json.dumps(
+                {"protocol_version": "0.4", "val_set_version": 1, "queries": 52}
+            ),
             encoding="utf-8",
         )
         with self.assertRaises(SystemExit) as cm:
@@ -553,7 +615,9 @@ class TestConcurrencyMerge(unittest.TestCase):
         rec = make_record(rid, parents=["baseline"], branch=branch)
         (self.repo / "state" / "ledger").mkdir(parents=True, exist_ok=True)
         shard = self.repo / "state" / "ledger" / f"{rid}.json"
-        shard.write_text(json.dumps(rec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        shard.write_text(
+            json.dumps(rec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+        )
         # Only commit the immutable record shard. Derived aggregates are
         # git-ignored in real repos; committing them here would make them
         # "would be overwritten by checkout" on sibling branches.

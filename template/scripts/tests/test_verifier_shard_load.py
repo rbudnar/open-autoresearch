@@ -44,9 +44,7 @@ VERIFIER = SCRIPTS_DIR / "verifier" / "verify_request.py"
 def _shard_hash(ledger_id: str) -> str:
     shard = LEDGER_DIR / f"{ledger_id}.json"
     entry = json.loads(shard.read_text(encoding="utf-8"))
-    return hashlib.sha256(
-        _ledger_common._canonical_record_bytes(entry)
-    ).hexdigest()
+    return hashlib.sha256(_ledger_common._canonical_record_bytes(entry)).hexdigest()
 
 
 class TestReferencedHashesMatchGolden(unittest.TestCase):
@@ -127,10 +125,7 @@ class TestVerifierReproducesLevel3Decision(unittest.TestCase):
                 f"verifier should exit 1 (rejected). stdout={proc.stdout!r} "
                 f"stderr={proc.stderr!r}",
             )
-            packet_path = (
-                Path(out_dir)
-                / "20260518-220000-bbb008-promotion-packet.json"
-            )
+            packet_path = Path(out_dir) / "20260518-220000-bbb008-promotion-packet.json"
             self.assertTrue(packet_path.exists(), "packet json not written")
             packet = json.loads(packet_path.read_text(encoding="utf-8"))
             self.assertEqual(packet["status"], "rejected")
