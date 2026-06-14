@@ -21,6 +21,7 @@ on:
       - 'MIGRATION.md'
       - 'CHANGELOG.md'
       - 'template/PROTOCOL_VERSION'
+      - 'template/schema/**'
       - 'template/config/**'
       - 'template/scripts/**'
       - 'template/templates/**'
@@ -55,6 +56,7 @@ jobs:
             'MIGRATION.md' \
             'CHANGELOG.md' \
             'template/PROTOCOL_VERSION' \
+            'template/schema/*' \
             'template/config/*' \
             'template/scripts/*' \
             'template/templates/*' \

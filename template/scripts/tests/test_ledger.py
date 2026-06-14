@@ -38,6 +38,27 @@ def make_record(rid, parents=None, branch="b", status="ok", val=0, metrics=None)
         "branch": branch,
         "hypothesis": "h",
         "parent_ids": list(parents or []),
+        "source_commit": "aaa",
+        "source_branch": "b",
+        "resolvable_from_main": False,
+        "status": status,
+        "metrics": metrics if metrics is not None else {},
+        "val_queries_incurred_by_this_run": val,
+    }
+
+
+def make_legacy_record(rid, parents=None, branch="b", status="ok", val=0, metrics=None):
+    """A pre-provenance-redesign record carrying only the deprecated git_sha_*
+    fields (no source_commit triple). Used to prove back-compat: legacy shards
+    must still validate after git_sha_* is demoted to optional. Also stands in
+    for the v0.4-era shape in migration/reconciliation tests."""
+    return {
+        "protocol_version": "0.5",
+        "id": rid,
+        "timestamp": "2026-05-18T10:00:00Z",
+        "branch": branch,
+        "hypothesis": "h",
+        "parent_ids": list(parents or []),
         "git_sha_before": "aaa",
         "git_sha_after": "bbb",
         "status": status,
@@ -156,6 +177,8 @@ class TestLogExperiment(TempStateMixin):
             schema=SCHEMA_PATH,
             protocol_version_file=self.tmp / "PV",
             repo_dir=self.tmp,
+            source_commit="",
+            source_branch="",
             git_sha_before="",
             git_sha_after="",
             regenerate=False,
@@ -172,9 +195,37 @@ class TestLogExperiment(TempStateMixin):
         self.assertEqual(rec["timestamp"], "2026-05-18T10:00:00Z")
         self.assertTrue(rec["id"].startswith("20260518-100000-"))
         self.assertTrue(rec["id"].endswith("-my-slug"))
-        # git_sha auto-filled (git rev-parse fails in empty dir -> "unknown")
-        self.assertTrue(rec["git_sha_before"])
-        self.assertTrue(rec["git_sha_after"])
+        # Provenance triple auto-filled. repo_dir is a tmp non-repo, so the git
+        # helpers fail closed: source_commit/source_branch -> "unknown",
+        # resolvable_from_main -> False (deterministic, no remote dependency).
+        self.assertTrue(rec["source_commit"])
+        self.assertTrue(rec["source_branch"])
+        self.assertIsInstance(rec["resolvable_from_main"], bool)
+        self.assertFalse(rec["resolvable_from_main"])
+        # New records never emit the deprecated fields.
+        self.assertNotIn("git_sha_before", rec)
+        self.assertNotIn("git_sha_after", rec)
+
+    def test_deprecated_git_sha_flag_populates_source_commit(self):
+        # Back-compat: host scripts still passing --git-sha-after must keep
+        # working — the value flows into source_commit, never re-emitted as
+        # git_sha_*. New record stays schema-valid.
+        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
+        rec = log_experiment.build_record(
+            self._args(git_sha_after="deadbeef"), now
+        )
+        self.assertEqual(rec["source_commit"], "deadbeef")
+        self.assertNotIn("git_sha_after", rec)
+        schema = _ledger_common.load_schema(SCHEMA_PATH)
+        self.assertEqual(_ledger_common.validate_against_schema(rec, schema), [])
+
+    def test_legacy_git_sha_record_still_validates(self):
+        # A pre-redesign record (git_sha_* only, no triple) must remain
+        # schema-valid after git_sha_* is demoted to optional (back-compat).
+        schema = _ledger_common.load_schema(SCHEMA_PATH)
+        legacy = make_legacy_record("20260518-100000-aaa001", parents=["baseline"])
+        self.assertEqual(_ledger_common.validate_against_schema(legacy, schema), [])
 
     def test_refuses_overwrite(self):
         (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
@@ -501,7 +552,9 @@ class TestMigration(TempStateMixin):
         prev = None
         for i, v in enumerate(vals):
             rid = f"20260518-{i:02d}0000-bbb{i:03d}"
-            r = make_record(rid, parents=([prev] if prev else ["baseline"]), val=v)
+            r = make_legacy_record(
+                rid, parents=([prev] if prev else ["baseline"]), val=v
+            )
             r["protocol_version"] = "0.4"
             records.append(r)
             prev = rid
@@ -531,7 +584,9 @@ class TestMigration(TempStateMixin):
         prev = None
         for i, v in enumerate(vals):
             rid = f"20260518-{i:02d}0000-bbb{i:03d}"
-            r = make_record(rid, parents=([prev] if prev else ["baseline"]), val=v)
+            r = make_legacy_record(
+                rid, parents=([prev] if prev else ["baseline"]), val=v
+            )
             r["protocol_version"] = "0.4"
             records.append(r)
             prev = rid
@@ -548,7 +603,7 @@ class TestMigration(TempStateMixin):
 
     def test_refuses_clobber_without_force(self):
         self.ledger.rmdir()
-        r = make_record("20260518-090000-aaa000", parents=["baseline"])
+        r = make_legacy_record("20260518-090000-aaa000", parents=["baseline"])
         r["protocol_version"] = "0.4"
         self._write_v04_jsonl([r])
         migrate_mod.migrate(self.state, force=False)
@@ -557,7 +612,7 @@ class TestMigration(TempStateMixin):
 
     def test_idempotent_with_force(self):
         self.ledger.rmdir()
-        r = make_record("20260518-090000-aaa000", parents=["baseline"], val=2)
+        r = make_legacy_record("20260518-090000-aaa000", parents=["baseline"], val=2)
         r["protocol_version"] = "0.4"
         self._write_v04_jsonl([r])
         migrate_mod.migrate(self.state, force=False)

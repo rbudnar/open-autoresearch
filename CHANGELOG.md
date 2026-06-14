@@ -5,6 +5,7 @@ The repo's version tracks the shipped protocol version. Each protocol bump trigg
 ## Unreleased
 
 - Initial public release in preparation.
+- **Provenance (content-addressed, Level 1).** Experiment records now carry `source_commit` + `source_branch` + `resolvable_from_main` instead of requiring resolvable `git_sha_before`/`git_sha_after`. The commit is a non-authoritative breadcrumb; auditability is the structured record. `git_sha_*` are demoted to deprecated-optional (legacy records stay valid; `log_experiment.py` no longer emits them but still accepts the old `--git-sha-*` flags as aliases). Protocol stays 0.5 (back-compat). Design + roadmap: `docs/proposals/2026-06-13-provenance-redesign.md`, decision `docs/adr/0001-content-addressed-provenance.md`. Origin: ActivityEncoder PR #93 dangling-commit blocker. Levels 2-3 (run-time code/data/env capture + reproduce tool) are future work.
 
 ## v0.4.0 — 2026-05-18
 

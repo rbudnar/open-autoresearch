@@ -5,7 +5,14 @@ Stdlib only. Auto-fills:
   - protocol_version  (from template/PROTOCOL_VERSION)
   - id                (UTC YYYYMMDD-HHMMSS + secrets.token_hex(3) + sanitized slug)
   - timestamp         (UTC ISO-8601)
-  - git_sha_before / git_sha_after (git rev-parse HEAD; same value at log time)
+  - source_commit / source_branch / resolvable_from_main (content-addressed
+    provenance Level-1: a NON-AUTHORITATIVE breadcrumb of the commit + branch
+    HEAD pointed at, plus whether it is reachable from main. Never a
+    reproducibility promise; see docs/proposals/2026-06-13-provenance-redesign.md.)
+
+The deprecated --git-sha-before / --git-sha-after flags are still accepted for
+back-compat with host scripts; when given they populate source_commit. New
+records never emit git_sha_*.
 
 Validates the assembled record against the JSON Schema using the stdlib
 structural validator (no pip 'jsonschema'). REFUSES to overwrite an existing
@@ -62,10 +69,14 @@ def read_protocol_version(path: Path) -> str:
     return "0.5"
 
 
-def git_head_sha(repo_dir: Path) -> str:
+def _git(repo_dir: Path, *args: str) -> str | None:
+    """Run a git command in ``repo_dir``; return stripped stdout, or None on
+    failure (non-zero exit or git absent). Always scoped to ``repo_dir`` so a
+    tmp non-repo (e.g. in tests) fails closed instead of reading the caller's
+    checkout."""
     try:
         out = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            ["git", *args],
             cwd=str(repo_dir),
             capture_output=True,
             text=True,
@@ -73,7 +84,34 @@ def git_head_sha(repo_dir: Path) -> str:
         )
         return out.stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return "unknown"
+        return None
+
+
+def git_head_sha(repo_dir: Path) -> str:
+    return _git(repo_dir, "rev-parse", "HEAD") or "unknown"
+
+
+def git_current_branch(repo_dir: Path) -> str:
+    return _git(repo_dir, "rev-parse", "--abbrev-ref", "HEAD") or "unknown"
+
+
+def is_resolvable_from_main(repo_dir: Path, sha: str) -> bool:
+    """True only if ``sha`` is an ancestor of a main ref.
+
+    Content-addressed-provenance Level-1: the commit pointer is a breadcrumb, so
+    we never *resolve* commits to gate validity — we only RECORD whether it is
+    reachable from main so unauditability is visible. Fails closed to False when
+    no main ref exists, git is unavailable, or ``repo_dir`` is not a repo (the
+    honest default for off-main/ephemeral-branch experiments)."""
+    if not sha or sha == "unknown":
+        return False
+    for ref in ("origin/main", "main"):
+        if _git(repo_dir, "rev-parse", "--verify", "--quiet", ref) is None:
+            continue
+        # merge-base --is-ancestor exits 0 (-> "") when sha is an ancestor,
+        # non-zero (-> None) otherwise. A found-but-not-ancestor ref is decisive.
+        return _git(repo_dir, "merge-base", "--is-ancestor", sha, ref) is not None
+    return False
 
 
 def make_id(now: dt.datetime, slug: str) -> str:
@@ -86,7 +124,17 @@ def make_id(now: dt.datetime, slug: str) -> str:
 
 def build_record(args: argparse.Namespace, now: dt.datetime) -> dict[str, Any]:
     protocol_version = read_protocol_version(Path(args.protocol_version_file))
-    git_sha = git_head_sha(Path(args.repo_dir))
+    repo_dir = Path(args.repo_dir)
+    # Precedence: explicit --source-commit, then the deprecated --git-sha-*
+    # aliases (back-compat for host scripts), then git HEAD.
+    source_commit = (
+        args.source_commit
+        or args.git_sha_after
+        or args.git_sha_before
+        or git_head_sha(repo_dir)
+    )
+    source_branch = args.source_branch or git_current_branch(repo_dir)
+    resolvable_from_main = is_resolvable_from_main(repo_dir, source_commit)
 
     record_id = make_id(now, args.slug or args.branch or "")
 
@@ -105,8 +153,9 @@ def build_record(args: argparse.Namespace, now: dt.datetime) -> dict[str, Any]:
         "branch": args.branch,
         "hypothesis": args.hypothesis,
         "parent_ids": list(args.parent or []),
-        "git_sha_before": args.git_sha_before or git_sha,
-        "git_sha_after": args.git_sha_after or git_sha,
+        "source_commit": source_commit,
+        "source_branch": source_branch,
+        "resolvable_from_main": resolvable_from_main,
         "status": args.status,
         "metrics": metrics,
     }
@@ -152,8 +201,19 @@ def main(argv: list[str]) -> int:
         default=DEFAULT_PROTOCOL_VERSION_FILE,
     )
     parser.add_argument("--repo-dir", type=Path, default=Path("."))
-    parser.add_argument("--git-sha-before", default="")
-    parser.add_argument("--git-sha-after", default="")
+    parser.add_argument(
+        "--source-commit",
+        default="",
+        help="Override the breadcrumb commit (default: git rev-parse HEAD).",
+    )
+    parser.add_argument(
+        "--source-branch",
+        default="",
+        help="Override the branch label (default: git current branch).",
+    )
+    # DEPRECATED back-compat aliases (host scripts): populate source_commit.
+    parser.add_argument("--git-sha-before", default="", help=argparse.SUPPRESS)
+    parser.add_argument("--git-sha-after", default="", help=argparse.SUPPRESS)
     parser.add_argument("--regenerate", action="store_true")
     args = parser.parse_args(argv)
 
