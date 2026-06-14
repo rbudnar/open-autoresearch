@@ -39,7 +39,7 @@ def make_record(rid, parents=None, branch="b", status="ok", val=0, metrics=None)
         "hypothesis": "h",
         "parent_ids": list(parents or []),
         "source_commit": "aaa",
-        "source_branch": "b",
+        "source_branch": branch,
         "resolvable_from_main": False,
         "status": status,
         "metrics": metrics if metrics is not None else {},
@@ -226,6 +226,18 @@ class TestLogExperiment(TempStateMixin):
         schema = _ledger_common.load_schema(SCHEMA_PATH)
         legacy = make_legacy_record("20260518-100000-aaa001", parents=["baseline"])
         self.assertEqual(_ledger_common.validate_against_schema(legacy, schema), [])
+
+    def test_record_without_any_provenance_is_rejected(self):
+        # anyOf contract: a record carrying neither source_commit nor the legacy
+        # git_sha_* pair must fail validation — every record carries provenance.
+        schema = _ledger_common.load_schema(SCHEMA_PATH)
+        rec = make_record("20260518-100000-aaa001", parents=["baseline"])
+        del rec["source_commit"]
+        errors = _ledger_common.validate_against_schema(rec, schema)
+        self.assertTrue(
+            any("allowed schemas" in e for e in errors),
+            f"expected an anyOf provenance error, got: {errors}",
+        )
 
     def test_refuses_overwrite(self):
         (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
@@ -759,6 +771,61 @@ class TestConcurrencyMerge(unittest.TestCase):
         b = log_experiment.make_id(now, "slug")
         self.assertNotEqual(a, b)
         self.assertEqual(a.split("-")[:2], b.split("-")[:2])
+
+
+class TestProvenanceHelpers(unittest.TestCase):
+    """Positive + negative coverage for the git provenance helpers in a real
+    repo (the build_record tests only exercise the fail-closed non-repo path)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="ledger-prov-"))
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        self._git("init", "-q")
+        self._git("branch", "-M", "main")  # robust across git default-branch config
+        self._git("config", "user.email", "t@example.com")
+        self._git("config", "user.name", "Test")
+        self._git("config", "commit.gpgsign", "false")
+        (self.repo / "f").write_text("x\n", encoding="utf-8")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "c0")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _git(self, *args):
+        return subprocess.run(
+            ["git", *args], cwd=str(self.repo), capture_output=True, text=True, check=True
+        )
+
+    def test_resolvable_true_for_commit_on_main(self):
+        sha = self._git("rev-parse", "HEAD").stdout.strip()
+        self.assertTrue(log_experiment.is_resolvable_from_main(self.repo, sha))
+        self.assertEqual(log_experiment.git_current_branch(self.repo), "main")
+
+    def test_resolvable_false_for_offmain_commit(self):
+        self._git("checkout", "-q", "-b", "feature")
+        (self.repo / "g").write_text("y\n", encoding="utf-8")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "c1")
+        sha = self._git("rev-parse", "HEAD").stdout.strip()
+        self.assertFalse(log_experiment.is_resolvable_from_main(self.repo, sha))
+        self.assertEqual(log_experiment.git_current_branch(self.repo), "feature")
+
+    def test_helpers_fail_closed_in_non_repo(self):
+        # self.tmp is NOT a repo (only self.tmp/repo is). GIT_CEILING_DIRECTORIES
+        # must stop discovery from walking up, so a non-repo dir fails closed
+        # even when nested inside a real repo (deterministic regardless of TMPDIR).
+        self.assertEqual(log_experiment.git_head_sha(self.tmp), "unknown")
+        self.assertEqual(log_experiment.git_current_branch(self.tmp), "unknown")
+        self.assertFalse(
+            log_experiment.is_resolvable_from_main(self.tmp, "deadbeef")
+        )
+
+    def test_detached_head_reports_unknown_branch(self):
+        sha = self._git("rev-parse", "HEAD").stdout.strip()
+        self._git("checkout", "-q", sha)  # detached HEAD
+        self.assertEqual(log_experiment.git_current_branch(self.repo), "unknown")
 
 
 if __name__ == "__main__":

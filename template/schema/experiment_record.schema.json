@@ -15,6 +15,16 @@
     "status",
     "metrics"
   ],
+  "anyOf": [
+    {
+      "description": "New (Level-1 content-addressed) provenance shape.",
+      "required": ["source_commit"]
+    },
+    {
+      "description": "Legacy/pre-redesign shape (deprecated; back-compat only).",
+      "required": ["git_sha_before", "git_sha_after"]
+    }
+  ],
   "properties": {
     "protocol_version": {
       "type": "string",
