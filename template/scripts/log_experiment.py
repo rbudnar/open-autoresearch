@@ -76,9 +76,7 @@ def read_protocol_version(path: Path) -> str:
 
 def _git(repo_dir: Path, *args: str) -> str | None:
     """Run a git command from ``repo_dir``; return stripped stdout, or None on
-    failure (non-zero exit, git absent/unreadable, or timeout). Does NOT itself
-    bound discovery — callers gate on :func:`_is_repo_root` so a non-repo
-    ``repo_dir`` cannot stamp a surrounding repo's state."""
+    failure (non-zero exit, git absent/unreadable, or timeout)."""
     try:
         out = subprocess.run(
             ["git", *args],
@@ -93,34 +91,18 @@ def _git(repo_dir: Path, *args: str) -> str | None:
         return None
 
 
-def _is_repo_root(repo_dir: Path) -> bool:
-    """True only if ``repo_dir`` is itself the root of a git worktree.
-
-    git discovery walks UP the tree (``cwd`` alone does not stop it, and
-    ``GIT_CEILING_DIRECTORIES`` does not exclude ``cwd`` itself), so a non-repo
-    ``repo_dir`` nested inside a checkout would otherwise report the PARENT
-    repo's HEAD/branch — silently wrong provenance. Requiring
-    ``--show-toplevel`` to resolve to exactly ``repo_dir`` fails closed for a
-    non-repo dir or a subdirectory of a repo, regardless of where it lives
-    (e.g. a ``TMPDIR`` inside this repo)."""
-    top = _git(repo_dir, "rev-parse", "--show-toplevel")
-    if top is None:
-        return False
-    try:
-        return Path(top).resolve() == repo_dir.resolve()
-    except OSError:
-        return False
-
-
 def git_head_sha(repo_dir: Path) -> str:
-    if not _is_repo_root(repo_dir):
-        return "unknown"
+    """HEAD of the git worktree CONTAINING ``repo_dir`` (git discovers it by
+    walking up from ``repo_dir``), or "unknown" if ``repo_dir`` is inside no
+    worktree. Running from a copied scaffold subdir (e.g. ``<host>/autoresearch``,
+    the documented layout) therefore records the host repo's commit — not
+    "unknown" — while a path outside any repo fails closed."""
     return _git(repo_dir, "rev-parse", "HEAD") or "unknown"
 
 
 def git_current_branch(repo_dir: Path) -> str:
-    if not _is_repo_root(repo_dir):
-        return "unknown"
+    """Branch of the worktree containing ``repo_dir`` (see :func:`git_head_sha`);
+    "unknown" outside any worktree or on a detached HEAD."""
     branch = _git(repo_dir, "rev-parse", "--abbrev-ref", "HEAD")
     # Detached HEAD (CI checkouts, bisect, etc.) yields the literal "HEAD" —
     # that is not a branch, so report it honestly as unknown.
@@ -137,11 +119,9 @@ def is_resolvable_from_main(repo_dir: Path, sha: str) -> bool:
     reachable from main so unauditability is visible. Checks every candidate ref
     (so a stale ``origin/main`` does not mask a local ``main`` that contains the
     commit) and fails closed to False when no main ref exists, the commit is on
-    no main ref, git is unavailable, or ``repo_dir`` is not a repo (the honest
-    default for off-main/ephemeral-branch experiments)."""
+    no main ref, git is unavailable, or ``repo_dir`` is inside no worktree (the
+    honest default for off-main/ephemeral-branch experiments)."""
     if not sha or sha == "unknown":
-        return False
-    if not _is_repo_root(repo_dir):
         return False
     for ref in ("origin/main", "main"):
         if _git(repo_dir, "rev-parse", "--verify", "--quiet", ref) is None:

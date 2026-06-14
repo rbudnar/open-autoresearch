@@ -835,17 +835,18 @@ class TestProvenanceHelpers(unittest.TestCase):
             log_experiment.is_resolvable_from_main(self.tmp, "deadbeef")
         )
 
-    def test_helpers_fail_closed_in_subdir_of_repo(self):
-        # The load-bearing case: a NON-repo dir nested INSIDE a real git repo
-        # must NOT stamp the surrounding repo's HEAD/branch. git discovery walks
-        # up, so the _is_repo_root (--show-toplevel == repo_dir) gate is what
-        # makes this fail closed. (cwd / GIT_CEILING_DIRECTORIES alone do not.)
-        sub = self.repo / "state" / "nested-non-repo"
+    def test_provenance_resolves_from_subdir_of_repo(self):
+        # The documented scaffold layout copies the template to
+        # <host>/autoresearch/ and runs log_experiment from there — a SUBDIR of
+        # the host worktree. Provenance must resolve to the host repo's
+        # HEAD/branch (git discovers the enclosing worktree), NOT degrade to
+        # "unknown"; otherwise every scaffold-relative record loses provenance.
+        sub = self.repo / "state" / "autoresearch"
         sub.mkdir(parents=True)
-        self.assertEqual(log_experiment.git_head_sha(sub), "unknown")
-        self.assertEqual(log_experiment.git_current_branch(sub), "unknown")
-        real_sha = self._git("rev-parse", "HEAD").stdout.strip()
-        self.assertFalse(log_experiment.is_resolvable_from_main(sub, real_sha))
+        head = self._git("rev-parse", "HEAD").stdout.strip()
+        self.assertEqual(log_experiment.git_head_sha(sub), head)
+        self.assertEqual(log_experiment.git_current_branch(sub), "main")
+        self.assertTrue(log_experiment.is_resolvable_from_main(sub, head))
 
     def test_detached_head_reports_unknown_branch(self):
         sha = self._git("rev-parse", "HEAD").stdout.strip()
