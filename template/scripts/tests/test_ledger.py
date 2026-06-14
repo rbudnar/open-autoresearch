@@ -233,10 +233,25 @@ class TestLogExperiment(TempStateMixin):
         schema = _ledger_common.load_schema(SCHEMA_PATH)
         rec = make_record("20260518-100000-aaa001", parents=["baseline"])
         del rec["source_commit"]
+        del rec["source_branch"]
+        del rec["resolvable_from_main"]
         errors = _ledger_common.validate_against_schema(rec, schema)
         self.assertTrue(
             any("allowed schemas" in e for e in errors),
             f"expected an anyOf provenance error, got: {errors}",
+        )
+
+    def test_partial_triple_is_rejected(self):
+        # The new-shape anyOf branch requires the FULL triple, so a record with
+        # source_commit but missing the visible reachability bit is invalid —
+        # direct writers can't drop source_branch/resolvable_from_main.
+        schema = _ledger_common.load_schema(SCHEMA_PATH)
+        rec = make_record("20260518-100000-aaa001", parents=["baseline"])
+        del rec["resolvable_from_main"]
+        errors = _ledger_common.validate_against_schema(rec, schema)
+        self.assertTrue(
+            any("allowed schemas" in e for e in errors),
+            f"expected a partial-triple anyOf error, got: {errors}",
         )
 
     def test_refuses_overwrite(self):
@@ -813,14 +828,24 @@ class TestProvenanceHelpers(unittest.TestCase):
         self.assertEqual(log_experiment.git_current_branch(self.repo), "feature")
 
     def test_helpers_fail_closed_in_non_repo(self):
-        # self.tmp is NOT a repo (only self.tmp/repo is). GIT_CEILING_DIRECTORIES
-        # must stop discovery from walking up, so a non-repo dir fails closed
-        # even when nested inside a real repo (deterministic regardless of TMPDIR).
+        # self.tmp is NOT a repo (only self.tmp/repo is); fails closed.
         self.assertEqual(log_experiment.git_head_sha(self.tmp), "unknown")
         self.assertEqual(log_experiment.git_current_branch(self.tmp), "unknown")
         self.assertFalse(
             log_experiment.is_resolvable_from_main(self.tmp, "deadbeef")
         )
+
+    def test_helpers_fail_closed_in_subdir_of_repo(self):
+        # The load-bearing case: a NON-repo dir nested INSIDE a real git repo
+        # must NOT stamp the surrounding repo's HEAD/branch. git discovery walks
+        # up, so the _is_repo_root (--show-toplevel == repo_dir) gate is what
+        # makes this fail closed. (cwd / GIT_CEILING_DIRECTORIES alone do not.)
+        sub = self.repo / "state" / "nested-non-repo"
+        sub.mkdir(parents=True)
+        self.assertEqual(log_experiment.git_head_sha(sub), "unknown")
+        self.assertEqual(log_experiment.git_current_branch(sub), "unknown")
+        real_sha = self._git("rev-parse", "HEAD").stdout.strip()
+        self.assertFalse(log_experiment.is_resolvable_from_main(sub, real_sha))
 
     def test_detached_head_reports_unknown_branch(self):
         sha = self._git("rev-parse", "HEAD").stdout.strip()

@@ -46,6 +46,10 @@ Adopt **Level 1** of the content-addressed provenance model in the template:
 6. `template/schema/**` is added to `CODEOWNERS` and `protect-protocol.yml` so the
    record contract is governance-gated directly, not only transitively via
    `PROTOCOL.md`.
+7. Provenance presence is **enforced**: a schema `anyOf` requires either the full
+   triple or the legacy `git_sha_*` pair (no provenance-less or partial-triple
+   records), and the in-repo example campaigns are migrated to the triple so the whole
+   repo models one shape.
 
 ## Drivers
 
@@ -55,39 +59,48 @@ Adopt **Level 1** of the content-addressed provenance model in the template:
 - The template is vendored by host repos, so CLI back-compat matters (kept the old
   flags as aliases) — this intentionally diverges from PR #93, which removed them
   because it had no external callers.
-- `content_sha256` immutability: example ledger shards are content-addressed and
-  referenced by hash in a promotion packet, so they are **not** re-stamped.
+- `content_sha256` integrity: example ledger shards are content-addressed and
+  referenced by hash in a promotion packet, so re-stamping them requires recomputing
+  those references in lock-step (done — see the Alternatives update below).
 
 ## Alternatives considered
 
 - **Bump to Protocol 0.6 + migration.** Clean semantic signal, but orphans the shipped
   0.5 consumer, breaks back-compat, trips `protocol-version-consistency`, and pulls the
   Level-2/3 migration deliverable forward. Rejected.
-- **Re-stamp the example campaigns to the new shape.** Strongest "model the protocol,"
-  but mutates a content-addressed hash chain (every shard's `content_sha256` would have
-  to be recomputed in `iter08-promotion-request.json` or `verify_request.py`'s
-  `rule_2_references_rehash` reports mismatches and reddens `validate-ledger.yml`).
-  High recompute-error surface for a teaching nicety already covered by the §14.1
-  example + tests; loses the back-compat exemplar. Deferred.
-- **Add Guard-D validator enforcement now** (warn on `git_sha_*`-only / triple-missing).
-  Listed under Level 1 in the proposal, but a warn-on-`git_sha_*` check fires on the
-  repo's own legacy example campaigns. Deferred so it can land with the example
-  migration.
+- **Bump to Protocol 0.6 + migration** — rejected (orphans the shipped 0.5 consumer;
+  trips `protocol-version-consistency`; pulls the Level-2/3 migration forward).
+
+> **Update (same PR): the two items below were initially deferred, then adopted once
+> the migration proved mechanical and fully gate-verified — the repo is now internally
+> consistent rather than half-new/half-legacy.**
+
+- **Re-stamp the example campaigns to the new shape — ADOPTED.** All 12 example shards
+  carry the triple; the 5 ledger-record `content_sha256` references in
+  `iter08-promotion-request.json` were recomputed from the shared
+  `_canonical_record_bytes`. The feared risk (a stale hash reddening
+  `verify_request.py`'s `rule_2_references_rehash` / `validate-ledger.yml`) is guarded by
+  the verifier itself: `test_verifier_shard_load` asserts rule_2 passes, and the level3
+  campaign still rejects on val-exposure with rule_2 green.
+- **Enforce a complete provenance shape — ADOPTED (a cleaner form of Guard-D).** Rather
+  than a warn-on-`git_sha_*` check (which would fire on legacy records), the schema now
+  carries an `anyOf` requiring EITHER the full `source_commit`/`source_branch`/
+  `resolvable_from_main` triple OR the legacy `git_sha_before`+`git_sha_after` pair (with
+  `anyOf` support added to the stdlib validator). A provenance-less or partial-triple
+  record is invalid; legacy records still validate via the legacy branch.
 
 ## Consequences
 
 - Honest provenance with zero CI-blocker risk; legacy records and downstream consumers
-  keep validating.
-- The copy surface (PROTOCOL.md §14.1) and the test fixtures model the new shape; the
-  dated example campaigns remain legacy back-compat exemplars by design (two
-  conventions coexist for legacy records, intentionally).
+  keep validating (legacy `anyOf` branch).
+- The copy surface (PROTOCOL.md §14.1), the test fixtures, AND the example campaigns all
+  model the new shape — one convention in-repo. Back-compat is proven by an explicit
+  `make_legacy_record` test, not by leaving the examples on the deprecated shape.
+- Every landed record is guaranteed to carry a provenance breadcrumb (schema `anyOf`).
 - The schema contract is now properly governance-gated.
 
 ## Follow-ups (future work, not this change)
 
-- Guard-D validator enforcement + example-campaign migration (land together).
 - Level 2: run-start code capture + canonical serialization + content-addressed
   (git-LFS) store + fail-closed two-tier validator.
 - Level 3: data/env fingerprints + one-command `reproduce`.
-- Fix the unrelated stale `autoresearch/PROTOCOL_VERSION = 0.4` reference in
-  `docs/adoption-levels.md` (pre-existing, provenance-unrelated).

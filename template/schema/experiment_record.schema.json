@@ -17,8 +17,8 @@
   ],
   "anyOf": [
     {
-      "description": "New (Level-1 content-addressed) provenance shape.",
-      "required": ["source_commit"]
+      "description": "New (Level-1 content-addressed) provenance shape — the full triple, so the visible reachability bit is never silently dropped.",
+      "required": ["source_commit", "source_branch", "resolvable_from_main"]
     },
     {
       "description": "Legacy/pre-redesign shape (deprecated; back-compat only).",

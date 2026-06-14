@@ -7,8 +7,9 @@
   "parent_ids": [
     "20260518-130000-bbb003"
   ],
-  "git_sha_before": "bbb003",
-  "git_sha_after": "bbb003",
+  "source_commit": "bbb003",
+  "source_branch": "evaluator_audit",
+  "resolvable_from_main": false,
   "data_snapshot": "data-snap-2026-05-15",
   "single_non_baseline_switch": null,
   "metrics": {},

@@ -8,18 +8,18 @@
   "references": {
     "baseline_run": {
       "ledger_id": "20260518-090000-bbb000",
-      "content_sha256": "d15b7e20582e74491c53b02feeea048b27f92a4fe02740a3fe76fdfcdaff1cea"
+      "content_sha256": "b7a04d6a9e0c5af8334a9e0ad9a9eb96b6543eaf962718b6c54f4ccef2431881"
     },
     "candidate_runs": [
-      {"ledger_id": "20260518-160000-bbb005-regrade", "content_sha256": "58421205b71a976e2771866c4293ad7bb44da962e98af1530d0f8b8a8a3cfbd3"}
+      {"ledger_id": "20260518-160000-bbb005-regrade", "content_sha256": "3e40d519441dccb687582fb336eb1ea7c8324ba8d7b62fe85bcded4130ede922"}
     ],
     "baseline_rerun": {
       "ledger_id": "20260518-160000-bbb005-regrade",
-      "content_sha256": "58421205b71a976e2771866c4293ad7bb44da962e98af1530d0f8b8a8a3cfbd3"
+      "content_sha256": "3e40d519441dccb687582fb336eb1ea7c8324ba8d7b62fe85bcded4130ede922"
     },
     "ablation_runs": [
-      {"ledger_id": "20260518-190000-bbb007-factorial", "content_sha256": "a754c9b385ac17d512df2405148aa1f7b8010c8629933ffb036a806ec51930c7"},
-      {"ledger_id": "20260518-220000-bbb008-promotion-request", "content_sha256": "af006b9575c0779cc3ed8562a5269caf279e469ae1d74159d8223f8f2429e7fa"}
+      {"ledger_id": "20260518-190000-bbb007-factorial", "content_sha256": "94d386c28b79e3359f71776146a97d39d24dea9fddf311721ae3b62721bf0723"},
+      {"ledger_id": "20260518-220000-bbb008-promotion-request", "content_sha256": "997ad275e94254f877d21833ae4a9cdcf02f6be89da7861df59caec802a876af"}
     ],
     "skeptic_review": {
       "path": "reports/iter09-skeptic-review.md",

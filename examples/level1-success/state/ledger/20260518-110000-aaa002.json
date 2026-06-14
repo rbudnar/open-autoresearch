@@ -7,8 +7,9 @@
   "parent_ids": [
     "20260518-100000-aaa001"
   ],
-  "git_sha_before": "abc111",
-  "git_sha_after": "def222",
+  "source_commit": "def222",
+  "source_branch": "loss_objective",
+  "resolvable_from_main": false,
   "data_snapshot": "data-snap-2026-05-15",
   "single_non_baseline_switch": "loss_type=ordinal_ce_hybrid",
   "metrics": {
