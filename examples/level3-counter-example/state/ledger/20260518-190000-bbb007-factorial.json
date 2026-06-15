@@ -7,8 +7,9 @@
   "parent_ids": [
     "20260518-160000-bbb005-regrade"
   ],
-  "git_sha_before": "bbb003",
-  "git_sha_after": "bbb007",
+  "source_commit": "bbb007",
+  "source_branch": "architecture+loss_objective_factorial",
+  "resolvable_from_main": false,
   "data_snapshot": "data-snap-2026-05-15",
   "single_non_baseline_switch": "factorial_grid: encoder_type ∈ {baseline_mean_pool, attention_pool} × loss_type ∈ {cross_entropy, ordinal_ce_hybrid}",
   "metrics": {},

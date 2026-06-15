@@ -475,7 +475,7 @@ trust_level: high
 
 Before the first candidate run:
 1. Run baseline under the evaluator.
-2. Save metrics, artifacts, hardware/software versions, seeds, git SHA, data snapshot ID, runtime/cost.
+2. Save metrics, artifacts, hardware/software versions, seeds, source commit (provenance breadcrumb, §14.1), data snapshot ID, runtime/cost.
 3. Capture reproducibility metadata (§17.5.1): torch version, CUDA, cuDNN, `torch.use_deterministic_algorithms` state, AMP/dtype, dataloader workers, OS.
 4. Create baseline report with known weaknesses and subgroup failures.
 
@@ -1051,6 +1051,8 @@ That is: compact separators, **insertion order** (NO `sort_keys`), `ensure_ascii
 
 Optional curated per-node fields `node_title` and `node_lessons` may be added to a record; they feed the derived research tree (§15) and are distinct from the per-iteration `lessons` field.
 
+**Provenance (content-addressed, Level 1).** A record carries `source_commit` (the commit HEAD pointed at when the experiment ran), `source_branch`, and `resolvable_from_main` (true only if `source_commit` is an ancestor of `main`). The commit is a **non-authoritative breadcrumb**, not a reproducibility guarantee: campaigns run on off-main, often ephemeral branches and squash-merge destroys the SHA, so most records carry `resolvable_from_main: false`. Auditability is the structured record itself (hypothesis / params / metrics / lineage), which is durable on `main`. The deprecated `git_sha_before` / `git_sha_after` fields are superseded by this triple and accepted only for back-compat with pre-redesign (legacy v0.4–v0.5) records; `log_experiment.py` no longer emits them (writer back-compat is preserved via the deprecated `--git-sha-*` flags, but readers must migrate to `source_commit`). Every record must still carry provenance — the schema requires either the full `source_commit` / `source_branch` / `resolvable_from_main` triple or the legacy `git_sha_before` / `git_sha_after` pair (a `source_commit`-only record is rejected). The content-addressed Level 2/3 roadmap (run-time code/data/env capture + a reproduce tool) lives in `docs/proposals/2026-06-13-provenance-redesign.md` and `docs/adr/0001-content-addressed-provenance.md`.
+
 Each record (with filled example for §14.1 to avoid `{}` placeholders being copied verbatim):
 
 ```json
@@ -1061,8 +1063,9 @@ Each record (with filled example for §14.1 to avoid `{}` placeholders being cop
   "branch": "loss_objective",
   "hypothesis": "Ordinal-aware loss should improve rare-class recall.",
   "parent_ids": ["20260518-100012-x4q1p9"],
-  "git_sha_before": "abc123...",
-  "git_sha_after": "def456...",
+  "source_commit": "def456...",
+  "source_branch": "loss_objective",
+  "resolvable_from_main": false,
   "data_snapshot": "data-snap-2026-05-15",
   "single_non_baseline_switch": "loss_type=ordinal_ce_hybrid",
   "metrics": {"validation_nll": 0.842, "rps": 0.41, "accuracy": 0.78, "ece": 0.067},

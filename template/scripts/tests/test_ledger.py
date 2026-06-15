@@ -38,6 +38,27 @@ def make_record(rid, parents=None, branch="b", status="ok", val=0, metrics=None)
         "branch": branch,
         "hypothesis": "h",
         "parent_ids": list(parents or []),
+        "source_commit": "aaa",
+        "source_branch": branch,
+        "resolvable_from_main": False,
+        "status": status,
+        "metrics": metrics if metrics is not None else {},
+        "val_queries_incurred_by_this_run": val,
+    }
+
+
+def make_legacy_record(rid, parents=None, branch="b", status="ok", val=0, metrics=None):
+    """A pre-provenance-redesign record carrying only the deprecated git_sha_*
+    fields (no source_commit triple). Used to prove back-compat: legacy shards
+    must still validate after git_sha_* is demoted to optional. Also stands in
+    for the v0.4-era shape in migration/reconciliation tests."""
+    return {
+        "protocol_version": "0.5",
+        "id": rid,
+        "timestamp": "2026-05-18T10:00:00Z",
+        "branch": branch,
+        "hypothesis": "h",
+        "parent_ids": list(parents or []),
         "git_sha_before": "aaa",
         "git_sha_after": "bbb",
         "status": status,
@@ -156,6 +177,8 @@ class TestLogExperiment(TempStateMixin):
             schema=SCHEMA_PATH,
             protocol_version_file=self.tmp / "PV",
             repo_dir=self.tmp,
+            source_commit="",
+            source_branch="",
             git_sha_before="",
             git_sha_after="",
             regenerate=False,
@@ -172,9 +195,64 @@ class TestLogExperiment(TempStateMixin):
         self.assertEqual(rec["timestamp"], "2026-05-18T10:00:00Z")
         self.assertTrue(rec["id"].startswith("20260518-100000-"))
         self.assertTrue(rec["id"].endswith("-my-slug"))
-        # git_sha auto-filled (git rev-parse fails in empty dir -> "unknown")
-        self.assertTrue(rec["git_sha_before"])
-        self.assertTrue(rec["git_sha_after"])
+        # Provenance triple auto-filled. repo_dir is a tmp non-repo, so the git
+        # helpers fail closed: source_commit/source_branch -> "unknown",
+        # resolvable_from_main -> False (deterministic, no remote dependency).
+        self.assertTrue(rec["source_commit"])
+        self.assertTrue(rec["source_branch"])
+        self.assertIsInstance(rec["resolvable_from_main"], bool)
+        self.assertFalse(rec["resolvable_from_main"])
+        # New records never emit the deprecated fields.
+        self.assertNotIn("git_sha_before", rec)
+        self.assertNotIn("git_sha_after", rec)
+
+    def test_deprecated_git_sha_flag_populates_source_commit(self):
+        # Back-compat: host scripts still passing --git-sha-after must keep
+        # working — the value flows into source_commit, never re-emitted as
+        # git_sha_*. New record stays schema-valid.
+        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
+        rec = log_experiment.build_record(
+            self._args(git_sha_after="deadbeef"), now
+        )
+        self.assertEqual(rec["source_commit"], "deadbeef")
+        self.assertNotIn("git_sha_after", rec)
+        schema = _ledger_common.load_schema(SCHEMA_PATH)
+        self.assertEqual(_ledger_common.validate_against_schema(rec, schema), [])
+
+    def test_legacy_git_sha_record_still_validates(self):
+        # A pre-redesign record (git_sha_* only, no triple) must remain
+        # schema-valid after git_sha_* is demoted to optional (back-compat).
+        schema = _ledger_common.load_schema(SCHEMA_PATH)
+        legacy = make_legacy_record("20260518-100000-aaa001", parents=["baseline"])
+        self.assertEqual(_ledger_common.validate_against_schema(legacy, schema), [])
+
+    def test_record_without_any_provenance_is_rejected(self):
+        # anyOf contract: a record carrying neither source_commit nor the legacy
+        # git_sha_* pair must fail validation — every record carries provenance.
+        schema = _ledger_common.load_schema(SCHEMA_PATH)
+        rec = make_record("20260518-100000-aaa001", parents=["baseline"])
+        del rec["source_commit"]
+        del rec["source_branch"]
+        del rec["resolvable_from_main"]
+        errors = _ledger_common.validate_against_schema(rec, schema)
+        self.assertTrue(
+            any("allowed schemas" in e for e in errors),
+            f"expected an anyOf provenance error, got: {errors}",
+        )
+
+    def test_partial_triple_is_rejected(self):
+        # The new-shape anyOf branch requires the FULL triple, so a record with
+        # source_commit but missing the visible reachability bit is invalid —
+        # direct writers can't drop source_branch/resolvable_from_main.
+        schema = _ledger_common.load_schema(SCHEMA_PATH)
+        rec = make_record("20260518-100000-aaa001", parents=["baseline"])
+        del rec["resolvable_from_main"]
+        errors = _ledger_common.validate_against_schema(rec, schema)
+        self.assertTrue(
+            any("allowed schemas" in e for e in errors),
+            f"expected a partial-triple anyOf error, got: {errors}",
+        )
 
     def test_refuses_overwrite(self):
         (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
@@ -501,7 +579,9 @@ class TestMigration(TempStateMixin):
         prev = None
         for i, v in enumerate(vals):
             rid = f"20260518-{i:02d}0000-bbb{i:03d}"
-            r = make_record(rid, parents=([prev] if prev else ["baseline"]), val=v)
+            r = make_legacy_record(
+                rid, parents=([prev] if prev else ["baseline"]), val=v
+            )
             r["protocol_version"] = "0.4"
             records.append(r)
             prev = rid
@@ -531,7 +611,9 @@ class TestMigration(TempStateMixin):
         prev = None
         for i, v in enumerate(vals):
             rid = f"20260518-{i:02d}0000-bbb{i:03d}"
-            r = make_record(rid, parents=([prev] if prev else ["baseline"]), val=v)
+            r = make_legacy_record(
+                rid, parents=([prev] if prev else ["baseline"]), val=v
+            )
             r["protocol_version"] = "0.4"
             records.append(r)
             prev = rid
@@ -548,7 +630,7 @@ class TestMigration(TempStateMixin):
 
     def test_refuses_clobber_without_force(self):
         self.ledger.rmdir()
-        r = make_record("20260518-090000-aaa000", parents=["baseline"])
+        r = make_legacy_record("20260518-090000-aaa000", parents=["baseline"])
         r["protocol_version"] = "0.4"
         self._write_v04_jsonl([r])
         migrate_mod.migrate(self.state, force=False)
@@ -557,7 +639,7 @@ class TestMigration(TempStateMixin):
 
     def test_idempotent_with_force(self):
         self.ledger.rmdir()
-        r = make_record("20260518-090000-aaa000", parents=["baseline"], val=2)
+        r = make_legacy_record("20260518-090000-aaa000", parents=["baseline"], val=2)
         r["protocol_version"] = "0.4"
         self._write_v04_jsonl([r])
         migrate_mod.migrate(self.state, force=False)
@@ -704,6 +786,72 @@ class TestConcurrencyMerge(unittest.TestCase):
         b = log_experiment.make_id(now, "slug")
         self.assertNotEqual(a, b)
         self.assertEqual(a.split("-")[:2], b.split("-")[:2])
+
+
+class TestProvenanceHelpers(unittest.TestCase):
+    """Positive + negative coverage for the git provenance helpers in a real
+    repo (the build_record tests only exercise the fail-closed non-repo path)."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp(prefix="ledger-prov-"))
+        self.repo = self.tmp / "repo"
+        self.repo.mkdir()
+        self._git("init", "-q")
+        self._git("branch", "-M", "main")  # robust across git default-branch config
+        self._git("config", "user.email", "t@example.com")
+        self._git("config", "user.name", "Test")
+        self._git("config", "commit.gpgsign", "false")
+        (self.repo / "f").write_text("x\n", encoding="utf-8")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "c0")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _git(self, *args):
+        return subprocess.run(
+            ["git", *args], cwd=str(self.repo), capture_output=True, text=True, check=True
+        )
+
+    def test_resolvable_true_for_commit_on_main(self):
+        sha = self._git("rev-parse", "HEAD").stdout.strip()
+        self.assertTrue(log_experiment.is_resolvable_from_main(self.repo, sha))
+        self.assertEqual(log_experiment.git_current_branch(self.repo), "main")
+
+    def test_resolvable_false_for_offmain_commit(self):
+        self._git("checkout", "-q", "-b", "feature")
+        (self.repo / "g").write_text("y\n", encoding="utf-8")
+        self._git("add", "-A")
+        self._git("commit", "-q", "-m", "c1")
+        sha = self._git("rev-parse", "HEAD").stdout.strip()
+        self.assertFalse(log_experiment.is_resolvable_from_main(self.repo, sha))
+        self.assertEqual(log_experiment.git_current_branch(self.repo), "feature")
+
+    def test_helpers_fail_closed_in_non_repo(self):
+        # self.tmp is NOT a repo (only self.tmp/repo is); fails closed.
+        self.assertEqual(log_experiment.git_head_sha(self.tmp), "unknown")
+        self.assertEqual(log_experiment.git_current_branch(self.tmp), "unknown")
+        self.assertFalse(
+            log_experiment.is_resolvable_from_main(self.tmp, "deadbeef")
+        )
+
+    def test_provenance_resolves_from_subdir_of_repo(self):
+        # The documented scaffold layout copies the template to
+        # <host>/autoresearch/ and runs log_experiment from there — a SUBDIR of
+        # the host worktree. Provenance must resolve to the host repo's
+        # HEAD/branch (git discovers the enclosing worktree), NOT degrade to
+        # "unknown"; otherwise every scaffold-relative record loses provenance.
+        sub = self.repo / "state" / "autoresearch"
+        sub.mkdir(parents=True)
+        head = self._git("rev-parse", "HEAD").stdout.strip()
+        self.assertEqual(log_experiment.git_head_sha(sub), head)
+        self.assertEqual(log_experiment.git_current_branch(sub), "main")
+        self.assertTrue(log_experiment.is_resolvable_from_main(sub, head))
+
+    def test_detached_head_reports_unknown_branch(self):
+        sha = self._git("rev-parse", "HEAD").stdout.strip()
+        self._git("checkout", "-q", sha)  # detached HEAD
+        self.assertEqual(log_experiment.git_current_branch(self.repo), "unknown")
 
 
 if __name__ == "__main__":

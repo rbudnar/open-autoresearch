@@ -14,6 +14,7 @@
 # Schemas embedded in the protocol — changes to scaffolding that imply protocol
 # changes require maintainer review.
 /template/PROTOCOL_VERSION  @rbudnar
+/template/schema/**         @rbudnar
 /template/config/**         @rbudnar
 /template/templates/**      @rbudnar
 

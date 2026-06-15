@@ -13,9 +13,17 @@
     "hypothesis",
     "parent_ids",
     "status",
-    "git_sha_before",
-    "git_sha_after",
     "metrics"
+  ],
+  "anyOf": [
+    {
+      "description": "New (Level-1 content-addressed) provenance shape — the full triple, so the visible reachability bit is never silently dropped.",
+      "required": ["source_commit", "source_branch", "resolvable_from_main"]
+    },
+    {
+      "description": "Legacy/pre-redesign shape (deprecated; back-compat only).",
+      "required": ["git_sha_before", "git_sha_after"]
+    }
   ],
   "properties": {
     "protocol_version": {
@@ -51,11 +59,25 @@
       "type": "string",
       "description": "Free-form status label (e.g. baseline, promising, branch_winner, failed, invalidated, informative_failure, rejected)."
     },
+    "source_commit": {
+      "type": "string",
+      "description": "Content-addressed-provenance Level-1 breadcrumb: the commit HEAD pointed at when this experiment ran. NON-AUTHORITATIVE — a hint, not a reproducibility guarantee. Off-main experiment branches and squash-merges mean it may never resolve from main; see resolvable_from_main. Auditability is carried by the structured record (hypothesis/params/metrics/lineage), not by this pointer. See docs/proposals/2026-06-13-provenance-redesign.md."
+    },
+    "source_branch": {
+      "type": "string",
+      "description": "The git branch the experiment ran on (e.g. an off-main campaign branch). Records where source_commit lived when captured."
+    },
+    "resolvable_from_main": {
+      "type": "boolean",
+      "description": "True only if source_commit is an ancestor of main. False for off-main/ephemeral-branch experiments; makes the (un)auditability of the commit pointer VISIBLE rather than an implied promise."
+    },
     "git_sha_before": {
-      "type": "string"
+      "type": "string",
+      "description": "DEPRECATED (Protocol 0.5 -> content-addressed provenance). Superseded by source_commit + resolvable_from_main. Accepted for back-compat with pre-existing records; new records MUST NOT emit it."
     },
     "git_sha_after": {
-      "type": "string"
+      "type": "string",
+      "description": "DEPRECATED. See git_sha_before."
     },
     "metrics": {
       "type": "object",
