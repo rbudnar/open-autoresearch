@@ -32,8 +32,10 @@ from pathlib import Path
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
+sys.path.insert(0, str(SCRIPTS_DIR / "verifier"))
 
 import bootstrap_verify as bv  # noqa: E402
+import verify_request as vr  # noqa: E402
 from _ledger_common import load_schema, validate_against_schema  # noqa: E402
 
 REPO_ROOT = SCRIPTS_DIR.parent.parent
@@ -143,6 +145,45 @@ class TestCheckManifestModes(unittest.TestCase):
         results = _run_check_manifest(mixed)
         self.assertFalse(_ok(results))
 
+    def test_frozen_superset_with_declarative_keys_fails_closed(self):
+        # A COMPLETE, valid frozen manifest that ALSO carries declarative-mode
+        # keys must fail closed (mixed manifest), not pass on the frozen half.
+        m = _frozen_manifest()
+        m["split_rule"] = {"split_key": "member_id"}
+        m["seed"] = 7
+        results = _run_check_manifest(m)
+        self.assertFalse(_ok(results))
+        self.assertTrue(
+            any("foreign-mode keys" in line for ok, line in results if not ok),
+            [line for ok, line in results if not ok],
+        )
+
+    def test_missing_protocol_version_fails_closed(self):
+        m = _frozen_manifest()
+        del m["protocol_version"]
+        results = _run_check_manifest(m)
+        self.assertFalse(_ok(results))
+        self.assertTrue(
+            any("protocol_version" in line for ok, line in results if not ok)
+        )
+
+    def test_wrong_protocol_version_fails_closed(self):
+        m = _declarative_manifest()
+        m["protocol_version"] = "0.4"
+        results = _run_check_manifest(m)
+        self.assertFalse(_ok(results))
+        self.assertTrue(
+            any("protocol_version" in line for ok, line in results if not ok)
+        )
+
+    def test_declarative_seed_zero_passes(self):
+        # seed: 0 is a legitimate seed; _is_populated(0) is True. Lock it so a
+        # future "truthy" refactor can't silently reject a zero seed.
+        m = _declarative_manifest()
+        m["seed"] = 0
+        results = _run_check_manifest(m)
+        self.assertTrue(_ok(results), [line for ok, line in results if not ok])
+
     def test_frozen_missing_split_fails(self):
         m = _frozen_manifest()
         del m["test"]
@@ -197,6 +238,27 @@ class TestSplitManifestSchema(unittest.TestCase):
             "seed": 1,
         }
         errors = validate_against_schema(mixed, self.schema)
+        self.assertTrue(any("allowed schemas" in e for e in errors), errors)
+
+    def test_frozen_superset_with_declarative_keys_fails_both_branches(self):
+        # A COMPLETE frozen manifest carrying declarative keys must fail closed:
+        # additionalProperties:false rejects the foreign keys on the frozen
+        # branch, and the declarative branch rejects the frozen-only shape.
+        m = _frozen_manifest()
+        m["split_rule"] = {"split_key": "member_id"}
+        m["seed"] = 7
+        errors = validate_against_schema(m, self.schema)
+        self.assertTrue(any("allowed schemas" in e for e in errors), errors)
+
+    def test_frozen_empty_split_blocks_fail(self):
+        # Regression for the silently-skipped $ref: empty train/val/test blocks
+        # must NOT validate (they did when the split shapes were behind $ref the
+        # stdlib validator ignores).
+        m = _frozen_manifest()
+        m["train"] = {}
+        m["val"] = {}
+        m["test"] = {}
+        errors = validate_against_schema(m, self.schema)
         self.assertTrue(any("allowed schemas" in e for e in errors), errors)
 
 
@@ -320,6 +382,115 @@ class TestComparisonSetIdentity(unittest.TestCase):
         packet, rule11, _ = self._run(None, None)
         self.assertTrue(rule11["pass"])
         self.assertTrue(packet["cross_dataset"])
+
+    def test_partial_membership_flags_cross_dataset(self):
+        # Only `train` recorded — an incomplete membership hash cannot confirm
+        # identical holdout observations, so it must NOT be a comparable identity
+        # even when baseline and candidate carry the same partial value.
+        fp = {"membership_sha256": {"train": "t"}}
+        packet, rule11, _ = self._run(fp, dict(fp))
+        self.assertTrue(rule11["pass"])
+        self.assertTrue(packet["cross_dataset"])
+
+    def test_lone_seed_does_not_assert_same_set(self):
+        # A shared `seed` with no dataset_fingerprint/split_spec_hash proves
+        # nothing about the data — must flag cross_dataset, not match.
+        fp = {"seed": 42}
+        packet, rule11, _ = self._run(fp, dict(fp))
+        self.assertTrue(rule11["pass"])
+        self.assertTrue(packet["cross_dataset"])
+
+    def test_val_set_version_int_vs_str_not_cross_dataset(self):
+        # Same complete lighter identity, val_set_version logged as int vs str
+        # for the same label — must normalize and NOT flag a false mismatch.
+        base = {
+            "dataset_fingerprint": {"version": "v1"},
+            "split_spec_hash": "h",
+            "seed": 7,
+            "val_set_version": 1,
+        }
+        cand = {
+            "dataset_fingerprint": {"version": "v1"},
+            "split_spec_hash": "h",
+            "seed": 7,
+            "val_set_version": "1",
+        }
+        packet, rule11, _ = self._run(base, cand)
+        self.assertTrue(rule11["pass"])
+        self.assertFalse(packet["cross_dataset"])
+
+    def test_tier_mismatch_flags_cross_dataset(self):
+        # Baseline proves membership (strongest tier), candidate only the lighter
+        # fingerprint tuple — different tiers are not comparable → cross_dataset.
+        base = {"membership_sha256": {"train": "t", "val": "v", "test": "s"}}
+        cand = {
+            "dataset_fingerprint": {"version": "v1"},
+            "split_spec_hash": "h",
+            "seed": 7,
+        }
+        packet, rule11, _ = self._run(base, cand)
+        self.assertTrue(rule11["pass"])
+        self.assertTrue(packet["cross_dataset"])
+
+
+class TestRule11WarnNotGate(unittest.TestCase):
+    """Prove rule 11 is WARN-not-gate at the STATUS layer: a flagged
+    cross_dataset comparison still yields a non-rejected status when no other
+    rule fails. The subprocess tests above prove cross_dataset never lands in
+    rejection_reasons; these prove the same at compute_status, without needing a
+    fully-valid end-to-end promotion request."""
+
+    def _ctx(self, baseline_fp, candidate_fp):
+        ledger = {
+            "base": {"entry": _ledger_record("base", baseline_fp)},
+            "cand": {"entry": _ledger_record("cand", candidate_fp)},
+        }
+        request = {
+            "references": {
+                "baseline_run": {"ledger_id": "base"},
+                "candidate_runs": [{"ledger_id": "cand"}],
+            }
+        }
+        return vr.VerifierContext(
+            request=request,
+            request_path=Path("req.json"),
+            ledger=ledger,
+            metrics={},
+            enforcement={},
+            unsigned=True,
+        )
+
+    def test_divergent_identity_does_not_gate_status(self):
+        base = {"membership_sha256": {"train": "t", "val": "v", "test": "s"}}
+        cand = {"membership_sha256": {"train": "T", "val": "V", "test": "S"}}
+        ctx = self._ctx(base, cand)
+        ok, _ = vr.rule_11_comparison_set_identity(ctx)
+        self.assertTrue(ok)  # rule 11 never fails the request
+        self.assertTrue(ctx.cross_dataset)  # but flags the divergence
+        # No rule failures → status is a promotion, not rejected. cross_dataset
+        # is surfaced on the packet but never gates status.
+        status = vr.compute_status(ctx, rule_failures=[], enforcement_label="full")
+        self.assertNotEqual(status, "rejected")
+
+    def test_matching_identity_clears_cross_dataset(self):
+        fp = {"membership_sha256": {"train": "t", "val": "v", "test": "s"}}
+        ctx = self._ctx(fp, dict(fp))
+        ok, _ = vr.rule_11_comparison_set_identity(ctx)
+        self.assertTrue(ok)
+        self.assertFalse(ctx.cross_dataset)
+
+    def test_empty_candidates_flags_cross_dataset(self):
+        fp = {"membership_sha256": {"train": "t", "val": "v", "test": "s"}}
+        ctx = self._ctx(fp, fp)
+        ctx.request["references"]["candidate_runs"] = []
+        ok, _ = vr.rule_11_comparison_set_identity(ctx)
+        self.assertTrue(ok)
+        self.assertTrue(ctx.cross_dataset)  # fail-safe, not a vacuous match
+
+    def test_unrun_rule_defaults_to_conservative_cross_dataset(self):
+        # If rule 11 never runs, the packet must not silently assert comparable.
+        ctx = self._ctx(None, None)
+        self.assertTrue(ctx.cross_dataset)
 
     def test_data_fingerprint_records_are_schema_valid(self):
         # The records rule 11 reads must themselves validate against the record

@@ -484,7 +484,7 @@ Before the first candidate run:
 Before any candidate run, **the train/val/test split definitions must be pinned in `data/splits/MANIFEST.json`, committed, and protected under §3.1.1 enforcement.** `MANIFEST.json` carries a `mode` discriminator and supports two shapes (the `anyOf` of `schema/split_manifest.schema.json`). Whatever mode you pick:
 
 - `data/splits/MANIFEST.json` is listed in `protected_paths.yaml` and protected by the host's §3.1.1 mechanism.
-- Any change to split membership is a holdout refresh (§17.6.3), requires human review, and bumps `val_set_version` in `metrics.yaml`.
+- Any change to split membership is a holdout refresh (§17.6.3), requires human review, and bumps `val_set_version` in `data/splits/MANIFEST.json` (the manifest is the source of truth for `val_set_version`, not `metrics.yaml`).
 - A partial or mixed manifest (frozen keys alongside declarative keys, or a frozen manifest missing a split) **fails closed** — `bootstrap_verify.py` rejects it rather than passing one half of a mode.
 
 #### Mode `frozen` (recommended default)
@@ -507,7 +507,7 @@ Split membership is content-addressed by hashing the materialized split files. T
 
 For row-indexed data where there is no single split file, each split block may additionally carry `row_ids_sha256` — the sha256 of the sorted example-ID list — as an allowed alternative content hash. (`path`/`sha256`/`size_bytes` stay required so the enforced shape is one shape; `row_ids_sha256` is additive.)
 
-Any drift between the live split files and the manifest hashes invalidates the campaign until a holdout refresh is performed (§17.6.3) or the live splits are restored. The `behavioral_equivalence.py` script (§17.1.1) reads `MANIFEST.json` at every iteration and refuses to launch evaluation on a mismatched split.
+Any drift between the live split files and the manifest hashes invalidates the campaign until a holdout refresh is performed (§17.6.3) or the live splits are restored. Enforcing this at run time — re-hashing the live split files against `MANIFEST.json` before each evaluation and refusing to launch on a mismatch — is a RECOMMENDED host-side guard the adopter wires into their campaign loop. The reference `behavioral_equivalence.py` (§17.1.1) checks evaluator fixture equivalence only; it does NOT read `MANIFEST.json` or hash split files, so split-drift enforcement is the host's responsibility, not something this script already provides.
 
 #### Mode `declarative` (for growing / forward-moving datasets)
 
@@ -1381,7 +1381,7 @@ A holdout refresh is a non-trivial event requiring human review per §3.1. Two o
 1. **Rotate splits.** Re-split the dataset under a documented procedure (new seed, same proportions). Old val becomes test; old test becomes train; fresh val from train. Allowed only if the dataset is large enough that re-splitting doesn't break statistical assumptions.
 2. **Refresh holdout from a held-back pool.** Draw a new val slice from data not previously exposed. Requires the host project to have set aside a pool in §6.3 for this purpose.
 
-Either way: increment a `val_set_version` integer in `metrics.yaml`; the §13.2.1 decision rule treats the new val as a fresh resource; campaign continues with `exposure.queries = 0`. The packets of any candidates promoted in the previous val version are tagged with that version for historical traceability.
+Either way: increment the `val_set_version` in `data/splits/MANIFEST.json` (§6.3.1 — the manifest is the source of truth for `val_set_version`, not `metrics.yaml`); the §13.2.1 decision rule treats the new val as a fresh resource; campaign continues with `exposure.queries = 0`. The packets of any candidates promoted in the previous val version are tagged with that version for historical traceability.
 
 **Declarative mode and dataset growth.** Under `mode: declarative` (§6.3.1) the dataset grows over time, so the holdout membership the split rule materializes can change between runs even with the same rule and seed. Treat any change to the held-out membership exactly like a holdout refresh: bump `val_set_version` (and the manifest's `dataset_fingerprint`), which resets exposure accounting and makes the new holdout a fresh §13.2.1 resource. Comparisons that straddle the bump are `cross_dataset` (§13.2.1) and must not be treated as same-set.
 

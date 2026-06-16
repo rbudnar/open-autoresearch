@@ -68,6 +68,20 @@ DEFAULT_SCHEMA = _SCRIPT_DIR.parent / "schema" / "experiment_record.schema.json"
 DEFAULT_PROTOCOL_VERSION_FILE = _SCRIPT_DIR.parent / "PROTOCOL_VERSION"
 
 
+def _parse_json_object_arg(raw: str, flag: str) -> dict[str, Any]:
+    """Parse a CLI JSON-object flag, failing with a clean ``SystemExit`` (not a
+    raw ``JSONDecodeError`` traceback) on malformed input, so all of
+    ``--metrics-json`` / ``--dataset-fingerprint`` / ``--membership-hash`` give
+    the same friendly error for both malformed-JSON and valid-but-non-object."""
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"{flag} must be valid JSON: {exc}")
+    if not isinstance(parsed, dict):
+        raise SystemExit(f"{flag} must be a JSON object")
+    return parsed
+
+
 def read_protocol_version(path: Path) -> str:
     if path.exists():
         return path.read_text(encoding="utf-8").strip()
@@ -160,10 +174,7 @@ def build_record(args: argparse.Namespace, now: dt.datetime) -> dict[str, Any]:
 
     metrics: dict[str, Any] = {}
     if args.metrics_json:
-        parsed = json.loads(args.metrics_json)
-        if not isinstance(parsed, dict):
-            raise SystemExit("--metrics-json must be a JSON object")
-        metrics = parsed
+        metrics = _parse_json_object_arg(args.metrics_json, "--metrics-json")
 
     # Insertion order mirrors PROTOCOL §14.1 for canonical-byte stability.
     record: dict[str, Any] = {
@@ -205,10 +216,9 @@ def _build_data_fingerprint(args: argparse.Namespace) -> "dict[str, Any] | None"
     if args.split_mode:
         fp["mode"] = args.split_mode
     if args.dataset_fingerprint:
-        parsed = json.loads(args.dataset_fingerprint)
-        if not isinstance(parsed, dict):
-            raise SystemExit("--dataset-fingerprint must be a JSON object")
-        fp["dataset_fingerprint"] = parsed
+        fp["dataset_fingerprint"] = _parse_json_object_arg(
+            args.dataset_fingerprint, "--dataset-fingerprint"
+        )
     if args.split_spec_hash:
         fp["split_spec_hash"] = args.split_spec_hash
     if args.split_seed is not None:
@@ -216,10 +226,9 @@ def _build_data_fingerprint(args: argparse.Namespace) -> "dict[str, Any] | None"
     if args.split_val_set_version:
         fp["val_set_version"] = args.split_val_set_version
     if args.membership_hash:
-        parsed_m = json.loads(args.membership_hash)
-        if not isinstance(parsed_m, dict):
-            raise SystemExit("--membership-hash must be a JSON object")
-        fp["membership_sha256"] = parsed_m
+        fp["membership_sha256"] = _parse_json_object_arg(
+            args.membership_hash, "--membership-hash"
+        )
     return fp or None
 
 

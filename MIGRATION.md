@@ -2,20 +2,22 @@
 
 Each major / minor protocol bump may require host-project changes. This file walks through each transition.
 
-## Within v0.5 — declarative data splits + comparison-set identity (no migration)
+## Within v0.5 — declarative data splits + comparison-set identity (no data migration; one-line manifest `mode` add)
 
 The two-mode §6.3.1 split model and the comparison-set identity record field are a
-**backward-compatible** addition. **No migration is required** and the protocol
-stays 0.5:
+**backward-compatible** addition and the protocol stays 0.5. **No data migration is
+required** — records are zero-touch — but existing frozen manifests need one trivial,
+mechanical edit (a single `mode: frozen` line), not a data migration:
 
-- **Existing frozen `MANIFEST.json` files stay valid.** The manifest is now the
-  `anyOf` of a frozen and a declarative shape; the frozen branch is the same
-  enforced shape (`{path, sha256, size_bytes}` per split + `snapshot_id` +
-  `val_set_version` + `frozen_at`/`frozen_by`). The only addition is an explicit
-  `mode: frozen` discriminator — add it to existing manifests so `bootstrap_verify`
-  can select the frozen branch (a manifest with no `mode` now fails closed, by
-  design, since it cannot select a branch). `row_ids_sha256` is newly allowed as an
-  alternative content hash but is not required.
+- **Existing frozen `MANIFEST.json` files need a one-line `mode: frozen` add.** The
+  manifest is now the `anyOf` of a frozen and a declarative shape; the frozen branch
+  is the same enforced shape (`{path, sha256, size_bytes}` per split + `snapshot_id` +
+  `val_set_version` + `frozen_at`/`frozen_by`). The only required change is the
+  explicit `mode: frozen` discriminator — add it so `bootstrap_verify` can select the
+  frozen branch. **A manifest with no `mode` now fails closed, by design** (it cannot
+  select a branch), so this edit is not optional for existing manifests, but it is a
+  one-liner, not a data migration. `row_ids_sha256` is newly allowed as an alternative
+  content hash but is not required.
 - **Existing experiment records stay valid.** The new `data_fingerprint` split
   identity is OPTIONAL and not forced via `anyOf`, so records without it validate
   unchanged. Add it (any tier — from a lighter `dataset_fingerprint`+`seed` to a

@@ -191,7 +191,10 @@ class VerifierContext:
     # Set by rule 11 (comparison-set identity). WARN-not-gate: when the
     # candidate and baseline ran on different split identities this is True and
     # a note is surfaced on the packet; the request is NOT rejected for it.
-    cross_dataset: bool = False
+    # Conservative default: True ("unknown / not confirmed same-set") so that if
+    # rule 11 is ever skipped or raises before build_packet, the packet does not
+    # silently assert a comparison is comparable (fail-safe, not fail-open).
+    cross_dataset: bool = True
     cross_dataset_note: str | None = None
 
 
@@ -427,15 +430,37 @@ def _split_identity(entry: dict[str, Any]) -> "Any | None":
     fp = entry.get("data_fingerprint")
     if not isinstance(fp, dict):
         return None
+    # Strongest tier: a COMPLETE per-split membership hash. A partial membership
+    # (e.g. only ``train``) cannot confirm identical holdout observations, so we
+    # do not treat it as a comparable identity — require all three splits.
     membership = fp.get("membership_sha256")
-    if isinstance(membership, dict) and membership:
-        return ("membership", json.dumps(membership, sort_keys=True))
-    lighter = {
-        k: fp.get(k)
-        for k in ("dataset_fingerprint", "split_spec_hash", "seed", "val_set_version")
-        if fp.get(k) is not None
-    }
-    if lighter:
+    if isinstance(membership, dict) and all(
+        isinstance(membership.get(k), str) and membership.get(k).strip()
+        for k in ("train", "val", "test")
+    ):
+        canonical = {k: membership[k] for k in ("train", "val", "test")}
+        return ("membership", json.dumps(canonical, sort_keys=True))
+    # Lighter tier: requires the COMPLETE tuple (dataset_fingerprint +
+    # split_spec_hash + seed). A partial subset — a lone ``seed`` or a lone
+    # ``val_set_version`` — proves nothing about the dataset or membership and
+    # must NOT be treated as a comparable identity (it would let two runs be
+    # marked same-set on a meaningless shared field, or with different unrecorded
+    # split rules). An incomplete identity returns None, which rule 11 surfaces
+    # as cross_dataset.
+    dataset_fp = fp.get("dataset_fingerprint")
+    spec_hash = fp.get("split_spec_hash")
+    seed = fp.get("seed")
+    if dataset_fp is not None and spec_hash is not None and seed is not None:
+        lighter: dict[str, Any] = {
+            "dataset_fingerprint": dataset_fp,
+            "split_spec_hash": spec_hash,
+            "seed": seed,
+        }
+        # val_set_version may be logged as an int or a string for the same label
+        # (1 vs "1"); normalize to str so it doesn't produce a false mismatch.
+        vsv = fp.get("val_set_version")
+        if vsv is not None:
+            lighter["val_set_version"] = str(vsv)
         return ("fingerprint", json.dumps(lighter, sort_keys=True))
     return None
 
@@ -470,6 +495,18 @@ def rule_11_comparison_set_identity(ctx: VerifierContext) -> tuple[bool, str | N
         _identity_for(ref.get("ledger_id")) if isinstance(ref, dict) else None
         for ref in candidate_runs
     ]
+
+    # No candidates to compare against: we cannot confirm same-set, so fail safe
+    # to cross_dataset rather than vacuously asserting "identical" (rule 9 also
+    # rejects empty candidate_runs, but rule 11 must not assert comparability it
+    # cannot establish).
+    if not candidate_identities:
+        ctx.cross_dataset = True
+        ctx.cross_dataset_note = (
+            "no candidate runs to compare split identity against; cannot confirm "
+            "identical holdout observations. Treat the comparison as cross_dataset."
+        )
+        return True, ctx.cross_dataset_note
 
     # No identity recorded anywhere: we cannot confirm same-set. Flag it as a
     # cross_dataset warning (the §6.3.1 identity record is recommended, not

@@ -58,7 +58,6 @@ from pathlib import Path
 
 import yaml  # type: ignore[import-untyped]
 
-
 REQUIRED_CONFIG_FILES = [
     "metrics.yaml",
     "enforcement.yaml",
@@ -100,6 +99,18 @@ REQUIRED_DATASET_FINGERPRINT_KEYS = [
     "row_count",
     "schema_hash",
 ]
+
+# Mode-exclusive keys: each mode rejects the other mode's keys so a complete
+# manifest of one mode that ALSO carries the other mode's keys fails closed
+# (mirrors `additionalProperties: false` on each anyOf branch of the schema).
+# Shared keys (protocol_version, mode, val_set_version) belong to neither set.
+FROZEN_ONLY_KEYS = {"snapshot_id", "train", "val", "test", "frozen_at", "frozen_by"}
+DECLARATIVE_ONLY_KEYS = {
+    "split_rule",
+    "seed",
+    "dataset_fingerprint",
+    "membership_sha256",
+}
 
 REQUIRED_FIXTURE_KEYS = ["fixture_id", "input", "golden_outputs"]
 
@@ -389,15 +400,32 @@ def check_manifest(host_root: Path) -> list[tuple[bool, str]]:
         return results
     results.append(report(True, "MANIFEST.json exists and parses"))
 
+    # Both schema branches require `protocol_version` const "0.5"; the stdlib
+    # validator can't be relied on here (and isn't run), so check it explicitly.
+    # A missing/wrong version fails closed rather than passing on `mode` alone.
+    version = data.get("protocol_version")
+    if version == EXPECTED_PROTOCOL_VERSION:
+        results.append(report(True, "MANIFEST.json protocol_version"))
+    else:
+        results.append(
+            report(
+                False,
+                "MANIFEST.json protocol_version",
+                f"expected {EXPECTED_PROTOCOL_VERSION!r}, got {version!r}",
+            )
+        )
+
     # `mode` is the anyOf discriminator. Fail-closed when it is missing or not
     # one of the two known modes — a mixed/partial manifest cannot select a
     # branch and so must not pass.
     mode = data.get("mode")
     if mode == "frozen":
         results.append(report(True, "MANIFEST.json mode = frozen"))
+        results.extend(_reject_foreign_mode_keys(data, mode, DECLARATIVE_ONLY_KEYS))
         results.extend(_check_frozen_manifest(data))
     elif mode == "declarative":
         results.append(report(True, "MANIFEST.json mode = declarative"))
+        results.extend(_reject_foreign_mode_keys(data, mode, FROZEN_ONLY_KEYS))
         results.extend(_check_declarative_manifest(data))
     else:
         results.append(
@@ -409,6 +437,26 @@ def check_manifest(host_root: Path) -> list[tuple[bool, str]]:
             )
         )
     return results
+
+
+def _reject_foreign_mode_keys(
+    data: dict, mode: str, foreign_keys: set[str]
+) -> list[tuple[bool, str]]:
+    """Fail closed when a manifest of one mode also carries the OTHER mode's
+    keys (e.g. ``mode: frozen`` plus ``split_rule``). Mirrors the schema's
+    per-branch ``additionalProperties: false`` so the hand-rolled validator
+    rejects a complete-superset mixed manifest, not just an incomplete one."""
+    present = sorted(foreign_keys & set(data))
+    if present:
+        return [
+            report(
+                False,
+                f"MANIFEST.json ({mode}) no foreign-mode keys",
+                f"carries keys from the other mode: {present}; a mixed manifest "
+                f"fails closed",
+            )
+        ]
+    return []
 
 
 def check_fixtures(host_root: Path, allow_partial: bool) -> list[tuple[bool, str]]:

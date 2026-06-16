@@ -2,13 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://open-autoresearch/schema/split_manifest.schema.json",
   "title": "Split Manifest (PROTOCOL.md §6.3.1, Protocol 0.5 two-mode splits)",
-  "description": "data/splits/MANIFEST.json. Two modes via anyOf: `frozen` (current, recommended default — per-split content hashes of materialized files; immutable; strongest anti-cheating) and `declarative` (a split RULE + seed + dataset_fingerprint; no persisted files; for growing/forward-moving datasets). Exactly ONE mode shape is accepted; a partial/mixed manifest (frozen keys mixed with declarative keys, or a frozen manifest missing a required split) fails closed against BOTH branches. `mode` is the discriminator. Mirrors the experiment_record.schema.json anyOf style and the stdlib structural validator in _ledger_common.py.",
+  "description": "data/splits/MANIFEST.json. Two modes via anyOf: `frozen` (current, recommended default — per-split content hashes of materialized files; immutable; strongest anti-cheating) and `declarative` (a split RULE + seed + dataset_fingerprint; no persisted files; for growing/forward-moving datasets). Exactly ONE mode shape is accepted. Each branch sets `additionalProperties: false`, so a partial/mixed manifest (frozen keys mixed with declarative keys, or a frozen manifest missing a required split) fails closed against BOTH branches: foreign-mode keys are rejected as additional properties on the branch they don't belong to, and the missing required keys reject the branch they do. `mode` is the discriminator. The split shapes are inlined (not `$ref`) so the stdlib structural validator in _ledger_common.py — which does NOT implement `$ref` — enforces them; mirrors the experiment_record.schema.json anyOf style.",
   "type": "object",
   "anyOf": [
     {
       "title": "Frozen mode",
       "description": "Per-split content hashes of materialized files. The agent CANNOT regenerate this; any drift between the live split files and these hashes invalidates the campaign until a holdout refresh (§17.6.3). This is the shape bootstrap_verify.py enforces and the recommended default for deployment-grade immutability.",
       "type": "object",
+      "additionalProperties": false,
       "required": [
         "protocol_version",
         "mode",
@@ -31,9 +32,42 @@
           "type": ["integer", "string"],
           "description": "Version label for the validation set (§17.6); bumped on holdout refresh."
         },
-        "train": {"$ref": "#/$defs/frozen_split"},
-        "val": {"$ref": "#/$defs/frozen_split"},
-        "test": {"$ref": "#/$defs/frozen_split"},
+        "train": {
+          "type": "object",
+          "description": "One frozen split: materialized file path + content hash + size. row_ids_sha256 is an allowed alternative content hash when the split is row-indexed rather than a single file.",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "size_bytes"],
+          "properties": {
+            "path": {"type": "string", "description": "Path (relative to host repo root) to the split file."},
+            "sha256": {"type": "string", "description": "SHA-256 of the split file bytes."},
+            "size_bytes": {"type": "integer", "description": "Size of the split file in bytes.", "minimum": 1},
+            "row_ids_sha256": {"type": "string", "description": "OPTIONAL alternative/additional content hash: sha256 of the sorted list of example IDs in this split."}
+          }
+        },
+        "val": {
+          "type": "object",
+          "description": "One frozen split: materialized file path + content hash + size.",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "size_bytes"],
+          "properties": {
+            "path": {"type": "string", "description": "Path (relative to host repo root) to the split file."},
+            "sha256": {"type": "string", "description": "SHA-256 of the split file bytes."},
+            "size_bytes": {"type": "integer", "description": "Size of the split file in bytes.", "minimum": 1},
+            "row_ids_sha256": {"type": "string", "description": "OPTIONAL alternative/additional content hash: sha256 of the sorted list of example IDs in this split."}
+          }
+        },
+        "test": {
+          "type": "object",
+          "description": "One frozen split: materialized file path + content hash + size.",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "size_bytes"],
+          "properties": {
+            "path": {"type": "string", "description": "Path (relative to host repo root) to the split file."},
+            "sha256": {"type": "string", "description": "SHA-256 of the split file bytes."},
+            "size_bytes": {"type": "integer", "description": "Size of the split file in bytes.", "minimum": 1},
+            "row_ids_sha256": {"type": "string", "description": "OPTIONAL alternative/additional content hash: sha256 of the sorted list of example IDs in this split."}
+          }
+        },
         "frozen_at": {"type": "string", "description": "ISO-8601 UTC timestamp the splits were frozen."},
         "frozen_by": {"type": "string", "description": "Human or CI identity that froze the splits."}
       }
@@ -42,6 +76,7 @@
       "title": "Declarative mode",
       "description": "A split RULE evaluated deterministically at run time from a seed against a fingerprinted dataset, instead of frozen files. Weakens the agent-can't-regenerate property (§6.3.1 best practices) — recommend frozen or a non-agent materialization for top-tier/deployment-grade campaigns. Promotes Guard B's data_fingerprint (docs/proposals/2026-06-13-provenance-redesign.md) into §6.3.1 as a split mode.",
       "type": "object",
+      "additionalProperties": false,
       "required": [
         "protocol_version",
         "mode",
@@ -101,36 +136,16 @@
             "schema_hash": {"type": "string", "description": "Hash of the dataset schema (column names + dtypes)."}
           }
         },
-        "membership_hash": {
-          "$ref": "#/$defs/membership_hash",
-          "description": "OPTIONAL strongest-tier proof: per-split sorted-id sha256 materialized at run time. When present, gives byte-level 'same set' proof even without frozen files (§6.3.1 best practices)."
+        "membership_sha256": {
+          "type": "object",
+          "description": "OPTIONAL strongest-tier proof: per-split sorted-id sha256 materialized at run time. When present, gives byte-level 'same set' proof even without frozen files (§6.3.1 best practices). Named to match the experiment record's data_fingerprint.membership_sha256 so the same artifact has one name across surfaces.",
+          "properties": {
+            "train": {"type": "string"},
+            "val": {"type": "string"},
+            "test": {"type": "string"}
+          }
         }
       }
     }
-  ],
-  "$defs": {
-    "frozen_split": {
-      "type": "object",
-      "description": "One frozen split: the materialized file path plus its content hash and size. row_ids_sha256 is an allowed alternative content hash when the split is row-indexed rather than a single file.",
-      "required": ["path", "sha256", "size_bytes"],
-      "properties": {
-        "path": {"type": "string", "description": "Path (relative to host repo root) to the split file."},
-        "sha256": {"type": "string", "description": "SHA-256 of the split file bytes."},
-        "size_bytes": {"type": "integer", "description": "Size of the split file in bytes.", "minimum": 1},
-        "row_ids_sha256": {
-          "type": "string",
-          "description": "OPTIONAL alternative/additional content hash: sha256 of the sorted list of example IDs in this split. Reconciles the §6.3.1 prose example (which used row_ids_sha256) with the file-hash shape bootstrap_verify enforces."
-        }
-      }
-    },
-    "membership_hash": {
-      "type": "object",
-      "description": "Per-split sha256 over the sorted membership ids, computed at run time.",
-      "properties": {
-        "train": {"type": "string"},
-        "val": {"type": "string"},
-        "test": {"type": "string"}
-      }
-    }
-  }
+  ]
 }
