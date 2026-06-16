@@ -15,6 +15,29 @@ Do you have an existing autoresearch/ directory?
 
 Do not skip levels. The §24 promotion ceiling is the only thing that catches "we feel good about this, let's ship" reasoning before it ships.
 
+## Split mode in the evidence model (frozen vs declarative)
+
+Orthogonal to the maturity level, §6.3.1 offers two split modes:
+
+- **`frozen` (recommended default).** Content-hashed split files; immutable; the
+  agent cannot regenerate them. Strongest anti-cheating evidence — use it for any
+  deployment-grade campaign.
+- **`declarative` (first-class, but weaker).** A deterministic split rule + seed +
+  `dataset_fingerprint`, materialized at run time. For datasets that genuinely grow
+  (frozen parquet goes stale immediately). It **weakens** the
+  agent-can't-regenerate property — an agent with the rule, seed, and dataset can
+  re-materialize the split — so for top-tier deployment, prefer frozen or
+  materialize the declarative split with a non-agent (CI/human) process and freeze
+  the result.
+
+Declarative does **not** itself cap the achievable promotion label: when the
+comparison-set identity matches (the baseline and candidate ran the same split,
+recorded via `data_fingerprint` in each record — §14.1), declarative results are
+as promotable as frozen ones. When they diverge, the verifier flags `cross_dataset`
+on the packet and **warns** (§13.2.1 / §18) — it does not auto-reject; you choose
+whether to discount the comparison or justify it. Record split identity at the
+strongest tier you can afford (a per-split membership hash gives byte-level proof).
+
 ## Level 1 — Safe autoresearch (exploration mode)
 
 **Promotion ceiling:** `level1_branch_winner`. Cannot reach `promoted`.
@@ -28,7 +51,9 @@ Do not skip levels. The §24 promotion ceiling is the only thing that catches "w
 - `autoresearch/state/` — empty; agent fills during the campaign
 - `autoresearch/scripts/behavioral_equivalence.py` — copy as-is from template
 - `autoresearch/templates/proposal_template.md`, `result_report_template.md`
-- `data/splits/MANIFEST.json` — split content hashes (§6.3.1)
+- `data/splits/MANIFEST.json` — split definition (§6.3.1): `mode: frozen`
+  (content hashes of the split files — recommended default) or `mode: declarative`
+  (a deterministic split rule + seed + `dataset_fingerprint`, for growing datasets)
 - `evaluation/fixtures/` — at least 3-5 golden fixtures (§17.1.1)
 - `evaluation/metric_defs.py` — your locked metric code
 
