@@ -48,9 +48,21 @@ def _frozen_manifest() -> dict:
         "mode": "frozen",
         "snapshot_id": "snap-2026-06-16",
         "val_set_version": 1,
-        "train": {"path": "data/splits/train.parquet", "sha256": "a" * 64, "size_bytes": 100},
-        "val": {"path": "data/splits/val.parquet", "sha256": "b" * 64, "size_bytes": 50},
-        "test": {"path": "data/splits/test.parquet", "sha256": "c" * 64, "size_bytes": 50},
+        "train": {
+            "path": "data/splits/train.parquet",
+            "sha256": "a" * 64,
+            "size_bytes": 100,
+        },
+        "val": {
+            "path": "data/splits/val.parquet",
+            "sha256": "b" * 64,
+            "size_bytes": 50,
+        },
+        "test": {
+            "path": "data/splits/test.parquet",
+            "sha256": "c" * 64,
+            "size_bytes": 50,
+        },
         "frozen_at": "2026-06-16T00:00:00Z",
         "frozen_by": "ci-job-42",
     }
@@ -242,7 +254,9 @@ class TestComparisonSetIdentity(unittest.TestCase):
             req_path = root / "request.json"
             req_path.write_text(json.dumps(request), encoding="utf-8")
             # Minimal config files the verifier loads.
-            (root / "metrics.yaml").write_text("protocol_version: '0.5'\n", encoding="utf-8")
+            (root / "metrics.yaml").write_text(
+                "protocol_version: '0.5'\n", encoding="utf-8"
+            )
             (root / "enforcement.yaml").write_text(
                 "protocol_version: '0.5'\nmechanism: none\n", encoding="utf-8"
             )
@@ -282,7 +296,11 @@ class TestComparisonSetIdentity(unittest.TestCase):
         self.assertFalse(packet["cross_dataset"])
 
     def test_matching_lighter_fingerprint_not_cross_dataset(self):
-        fp = {"dataset_fingerprint": {"version": "v1"}, "split_spec_hash": "h", "seed": 7}
+        fp = {
+            "dataset_fingerprint": {"version": "v1"},
+            "split_spec_hash": "h",
+            "seed": 7,
+        }
         packet, rule11, _ = self._run(fp, dict(fp))
         self.assertTrue(rule11["pass"])
         self.assertFalse(packet["cross_dataset"])

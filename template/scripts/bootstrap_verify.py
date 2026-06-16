@@ -204,7 +204,9 @@ def _check_frozen_manifest(data: dict) -> list[tuple[bool, str]]:
     missing = [k for k in REQUIRED_FROZEN_TOP_KEYS if k not in data]
     if missing:
         results.append(
-            report(False, "MANIFEST.json (frozen) top-level fields", f"missing: {missing}")
+            report(
+                False, "MANIFEST.json (frozen) top-level fields", f"missing: {missing}"
+            )
         )
     else:
         scalar_keys = [
@@ -265,7 +267,9 @@ def _check_frozen_manifest(data: dict) -> list[tuple[bool, str]]:
                 )
             )
             continue
-        results.append(report(True, f"MANIFEST.json (frozen) {split} schema + populated"))
+        results.append(
+            report(True, f"MANIFEST.json (frozen) {split} schema + populated")
+        )
     return results
 
 

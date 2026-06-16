@@ -451,30 +451,25 @@ def rule_11_comparison_set_identity(ctx: VerifierContext) -> tuple[bool, str | N
     note (and the ``cross_dataset`` flag) is surfaced on the packet so a
     divergent comparison is never silently treated as comparable.
     """
+
+    def _identity_for(ledger_id: Any) -> "Any | None":
+        if not isinstance(ledger_id, str):
+            return None
+        wrapped = ctx.ledger.get(ledger_id)
+        if wrapped is None:
+            return None
+        entry = wrapped.get("entry")
+        return _split_identity(entry) if isinstance(entry, dict) else None
+
     refs = ctx.request.get("references") or {}
     baseline_ref = refs.get("baseline_run") or {}
-    baseline_id = baseline_ref.get("ledger_id")
-    baseline_entry = (
-        ctx.ledger.get(baseline_id)["entry"]
-        if isinstance(baseline_id, str) and baseline_id in ctx.ledger
-        else None
-    )
-    baseline_identity = (
-        _split_identity(baseline_entry) if isinstance(baseline_entry, dict) else None
-    )
+    baseline_identity = _identity_for(baseline_ref.get("ledger_id"))
 
     candidate_runs = refs.get("candidate_runs") or []
-    candidate_identities: list["Any | None"] = []
-    for ref in candidate_runs:
-        cid = ref.get("ledger_id") if isinstance(ref, dict) else None
-        entry = (
-            ctx.ledger.get(cid)["entry"]
-            if isinstance(cid, str) and cid in ctx.ledger
-            else None
-        )
-        candidate_identities.append(
-            _split_identity(entry) if isinstance(entry, dict) else None
-        )
+    candidate_identities: list["Any | None"] = [
+        _identity_for(ref.get("ledger_id")) if isinstance(ref, dict) else None
+        for ref in candidate_runs
+    ]
 
     # No identity recorded anywhere: we cannot confirm same-set. Flag it as a
     # cross_dataset warning (the §6.3.1 identity record is recommended, not
