@@ -185,7 +185,42 @@ def build_record(args: argparse.Namespace, now: dt.datetime) -> dict[str, Any]:
         record["node_title"] = args.node_title
     if args.node_lesson:
         record["node_lessons"] = list(args.node_lesson)
+    data_fingerprint = _build_data_fingerprint(args)
+    if data_fingerprint:
+        record["data_fingerprint"] = data_fingerprint
     return record
+
+
+def _build_data_fingerprint(args: argparse.Namespace) -> "dict[str, Any] | None":
+    """Assemble the OPTIONAL split/dataset identity (§6.3.1 / §14.1).
+
+    Same optional pattern as the provenance breadcrumb: emit ``data_fingerprint``
+    only when the caller supplies at least one identity flag. Depth is
+    project-chosen — the strongest form carries per-split ``membership_sha256``
+    (byte-level proof), the lighter form carries
+    ``dataset_fingerprint``/``split_spec_hash``/``seed``. Both are accepted by
+    the schema (data_fingerprint is optional and NOT in any anyOf).
+    """
+    fp: dict[str, Any] = {}
+    if args.split_mode:
+        fp["mode"] = args.split_mode
+    if args.dataset_fingerprint:
+        parsed = json.loads(args.dataset_fingerprint)
+        if not isinstance(parsed, dict):
+            raise SystemExit("--dataset-fingerprint must be a JSON object")
+        fp["dataset_fingerprint"] = parsed
+    if args.split_spec_hash:
+        fp["split_spec_hash"] = args.split_spec_hash
+    if args.split_seed is not None:
+        fp["seed"] = args.split_seed
+    if args.split_val_set_version:
+        fp["val_set_version"] = args.split_val_set_version
+    if args.membership_hash:
+        parsed_m = json.loads(args.membership_hash)
+        if not isinstance(parsed_m, dict):
+            raise SystemExit("--membership-hash must be a JSON object")
+        fp["membership_sha256"] = parsed_m
+    return fp or None
 
 
 def write_record(state_dir: Path, record: dict[str, Any]) -> Path:
@@ -234,6 +269,49 @@ def main(argv: list[str]) -> int:
     # DEPRECATED back-compat aliases (host scripts): populate source_commit.
     parser.add_argument("--git-sha-before", default="", help=argparse.SUPPRESS)
     parser.add_argument("--git-sha-after", default="", help=argparse.SUPPRESS)
+    # OPTIONAL split/dataset identity (§6.3.1 / §14.1). Emitted as
+    # `data_fingerprint` only when at least one is provided; same opt-in pattern
+    # as the provenance breadcrumb. Lets a baseline/candidate pair record WHICH
+    # split they used so the verifier's rule 11 can flag cross_dataset.
+    parser.add_argument(
+        "--split-mode",
+        default="",
+        choices=["", "frozen", "declarative"],
+        help="Which §6.3.1 split mode produced this run's data.",
+    )
+    parser.add_argument(
+        "--dataset-fingerprint",
+        default="",
+        help=(
+            "JSON object: (source, version, date_window, row_count, schema_hash). "
+            "Lighter same-set proof (assumes deterministic materialization)."
+        ),
+    )
+    parser.add_argument(
+        "--split-spec-hash",
+        default="",
+        help="Hash of the split rule/spec used to materialize the partition.",
+    )
+    parser.add_argument(
+        "--split-seed",
+        type=int,
+        default=None,
+        help="Seed used to materialize a declarative split.",
+    )
+    parser.add_argument(
+        "--split-val-set-version",
+        default="",
+        help="val_set_version this run evaluated against (§17.6).",
+    )
+    parser.add_argument(
+        "--membership-hash",
+        default="",
+        help=(
+            "JSON object of per-split sorted-id sha256 "
+            '(e.g. {"train": "...", "val": "...", "test": "..."}). Strongest '
+            "byte-level same-set proof."
+        ),
+    )
     parser.add_argument("--regenerate", action="store_true")
     args = parser.parse_args(argv)
 

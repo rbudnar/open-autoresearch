@@ -84,6 +84,7 @@ RULE_NAMES = [
     "8_skeptic_verdict_clean",
     "9_statistics_recomputed",
     "10_enforcement_caps_status",
+    "11_comparison_set_identity",
 ]
 
 
@@ -187,6 +188,11 @@ class VerifierContext:
     metrics: dict[str, Any]
     enforcement: dict[str, Any]
     unsigned: bool
+    # Set by rule 11 (comparison-set identity). WARN-not-gate: when the
+    # candidate and baseline ran on different split identities this is True and
+    # a note is surfaced on the packet; the request is NOT rejected for it.
+    cross_dataset: bool = False
+    cross_dataset_note: str | None = None
 
 
 # --- Rule implementations -----------------------------------------------------
@@ -406,6 +412,100 @@ def rule_10_enforcement_caps_status(ctx: VerifierContext) -> tuple[bool, str | N
     return True, None
 
 
+def _split_identity(entry: dict[str, Any]) -> "Any | None":
+    """Return a comparable split-identity key for a ledger record, or None when
+    the record carries no split identity.
+
+    PROTOCOL §6.3.1 / §14.1: the optional ``data_fingerprint`` records WHICH
+    split a run used. The strongest tier is per-split ``membership_sha256``
+    (byte-level proof); the lighter tier is
+    ``dataset_fingerprint`` + ``split_spec_hash`` + ``seed`` (+ ``val_set_version``),
+    which assumes deterministic materialization. We compare whichever tier is
+    present, preferring the membership hash when both runs carry it. The key is
+    JSON-canonicalized so equality is order-insensitive.
+    """
+    fp = entry.get("data_fingerprint")
+    if not isinstance(fp, dict):
+        return None
+    membership = fp.get("membership_sha256")
+    if isinstance(membership, dict) and membership:
+        return ("membership", json.dumps(membership, sort_keys=True))
+    lighter = {
+        k: fp.get(k)
+        for k in ("dataset_fingerprint", "split_spec_hash", "seed", "val_set_version")
+        if fp.get(k) is not None
+    }
+    if lighter:
+        return ("fingerprint", json.dumps(lighter, sort_keys=True))
+    return None
+
+
+def rule_11_comparison_set_identity(ctx: VerifierContext) -> tuple[bool, str | None]:
+    """WARN-not-gate (§13.2.1 same-comparison-set note): compare the baseline's
+    split identity against every candidate's and set ``cross_dataset`` on the
+    packet when they diverge or cannot be confirmed identical.
+
+    This rule NEVER fails the request — per the owner's ratified decision the
+    protocol WARNS and STRONGLY RECOMMENDS identical holdout observations but
+    lets the implementer choose the evidence tier. It returns (True, note); the
+    note (and the ``cross_dataset`` flag) is surfaced on the packet so a
+    divergent comparison is never silently treated as comparable.
+    """
+    refs = ctx.request.get("references") or {}
+    baseline_ref = refs.get("baseline_run") or {}
+    baseline_id = baseline_ref.get("ledger_id")
+    baseline_entry = (
+        ctx.ledger.get(baseline_id)["entry"]
+        if isinstance(baseline_id, str) and baseline_id in ctx.ledger
+        else None
+    )
+    baseline_identity = (
+        _split_identity(baseline_entry) if isinstance(baseline_entry, dict) else None
+    )
+
+    candidate_runs = refs.get("candidate_runs") or []
+    candidate_identities: list["Any | None"] = []
+    for ref in candidate_runs:
+        cid = ref.get("ledger_id") if isinstance(ref, dict) else None
+        entry = (
+            ctx.ledger.get(cid)["entry"]
+            if isinstance(cid, str) and cid in ctx.ledger
+            else None
+        )
+        candidate_identities.append(
+            _split_identity(entry) if isinstance(entry, dict) else None
+        )
+
+    # No identity recorded anywhere: we cannot confirm same-set. Flag it as a
+    # cross_dataset warning (the §6.3.1 identity record is recommended, not
+    # mandated) rather than asserting comparability.
+    if baseline_identity is None and all(c is None for c in candidate_identities):
+        ctx.cross_dataset = True
+        ctx.cross_dataset_note = (
+            "no split identity recorded on baseline or candidate runs; "
+            "cannot confirm identical holdout observations (§6.3.1 recommends "
+            "recording data_fingerprint). Treat the comparison as cross_dataset."
+        )
+        return True, ctx.cross_dataset_note
+
+    mismatched = baseline_identity is None or any(
+        c is None or c != baseline_identity for c in candidate_identities
+    )
+    if mismatched:
+        ctx.cross_dataset = True
+        ctx.cross_dataset_note = (
+            "baseline and candidate split identities differ (or are not all "
+            "recorded); strongly recommend identical holdout observations "
+            "(§13.2.1). Flagged cross_dataset — implementer chooses the evidence "
+            "tier; not auto-rejected."
+        )
+        return True, ctx.cross_dataset_note
+
+    ctx.cross_dataset = False
+    ctx.cross_dataset_note = "baseline and candidate share an identical split identity"
+    return True, ctx.cross_dataset_note
+
+
 RULE_FUNCS = {
     "1_protocol_version_match": rule_1_protocol_version_match,
     "2_references_rehash": rule_2_references_rehash,
@@ -417,6 +517,7 @@ RULE_FUNCS = {
     "8_skeptic_verdict_clean": rule_8_skeptic_verdict_clean,
     "9_statistics_recomputed": rule_9_statistics_recomputed,
     "10_enforcement_caps_status": rule_10_enforcement_caps_status,
+    "11_comparison_set_identity": rule_11_comparison_set_identity,
 }
 
 
@@ -507,6 +608,11 @@ def build_packet(
         "enforcement": enforcement_label,
         "not_deployable": not_deployable,
         "maturity_level": maturity,
+        # Comparison-set identity (§6.3.1 / §13.2.1, rule 11). WARN-not-gate:
+        # surfaced on the packet so a divergent baseline/candidate split is
+        # never silently treated as comparable. Never affects `status`.
+        "cross_dataset": ctx.cross_dataset,
+        "cross_dataset_note": ctx.cross_dataset_note,
         "verifier": {
             "type": verifier_type,
             "identity": verifier_identity,
@@ -551,6 +657,7 @@ def write_packet_files(
         f"enforcement: \"{packet['enforcement']}\"",
         f"not_deployable: {str(packet['not_deployable']).lower()}",
         f"maturity_level: {packet['maturity_level']}",
+        f"cross_dataset: {str(packet['cross_dataset']).lower()}",
         "---",
         "",
         "# Promotion Packet (verifier-written)",
@@ -558,6 +665,12 @@ def write_packet_files(
         f"**Status:** `{packet['status']}`",
         f"**Enforcement:** `{packet['enforcement']}`",
         f"**Not deployable:** `{packet['not_deployable']}`",
+        f"**Cross-dataset (comparison-set warning):** `{packet['cross_dataset']}`"
+        + (
+            f" — {packet['cross_dataset_note']}"
+            if packet.get("cross_dataset_note")
+            else ""
+        ),
         "",
         "## Verifier identity",
         "",
