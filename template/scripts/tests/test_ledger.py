@@ -181,6 +181,12 @@ class TestLogExperiment(TempStateMixin):
             source_branch="",
             git_sha_before="",
             git_sha_after="",
+            split_mode="",
+            dataset_fingerprint="",
+            split_spec_hash="",
+            split_seed=None,
+            split_val_set_version="",
+            membership_hash="",
             regenerate=False,
         )
         for k, v in over.items():
@@ -217,6 +223,46 @@ class TestLogExperiment(TempStateMixin):
         )
         self.assertEqual(rec["source_commit"], "deadbeef")
         self.assertNotIn("git_sha_after", rec)
+        schema = _ledger_common.load_schema(SCHEMA_PATH)
+        self.assertEqual(_ledger_common.validate_against_schema(rec, schema), [])
+
+    def test_data_fingerprint_omitted_by_default(self):
+        # With no split-identity flags, build_record emits no data_fingerprint
+        # key — back-compat: existing call sites are unchanged.
+        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
+        rec = log_experiment.build_record(self._args(), now)
+        self.assertNotIn("data_fingerprint", rec)
+
+    def test_data_fingerprint_stamped_when_flags_given(self):
+        # Optional split-identity flags stamp data_fingerprint; the record stays
+        # schema-valid (the field is optional, not via anyOf).
+        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
+        rec = log_experiment.build_record(
+            self._args(
+                split_mode="declarative",
+                dataset_fingerprint=json.dumps(
+                    {
+                        "source": "gold.activities",
+                        "version": "v1",
+                        "date_window": "w",
+                        "row_count": 100,
+                        "schema_hash": "h",
+                    }
+                ),
+                split_spec_hash="deadbeef",
+                split_seed=42,
+                split_val_set_version="1",
+                membership_hash=json.dumps({"train": "a", "val": "b", "test": "c"}),
+            ),
+            now,
+        )
+        fp = rec["data_fingerprint"]
+        self.assertEqual(fp["mode"], "declarative")
+        self.assertEqual(fp["seed"], 42)
+        self.assertEqual(fp["split_spec_hash"], "deadbeef")
+        self.assertEqual(fp["membership_sha256"], {"train": "a", "val": "b", "test": "c"})
         schema = _ledger_common.load_schema(SCHEMA_PATH)
         self.assertEqual(_ledger_common.validate_against_schema(rec, schema), [])
 
