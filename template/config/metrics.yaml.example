@@ -67,6 +67,10 @@ evaluator_equivalence:
 
 # --- Validation-set exposure budget (§17.6) -----------------------------------
 # Suggested defaults: 100 (L1), 300 (L2-3), 1000 (L4+). Scale with √(val_size).
+# val_set_version lives in data/splits/MANIFEST.json (§6.3.1), not here. Under
+# `mode: declarative`, dataset growth that changes the holdout membership is a
+# holdout refresh: bump val_set_version in the MANIFEST (§17.6.3), which resets
+# this exposure budget and makes the new holdout a fresh §13.2.1 resource.
 val_set_exposure_budget: <FILL_ME>
 
 # --- Campaign budgets (§17.7) -------------------------------------------------
