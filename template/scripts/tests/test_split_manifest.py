@@ -367,6 +367,18 @@ class TestCheckManifestModes(unittest.TestCase):
                     _ok(results), f"missing dataset_fingerprint.{key} must fail"
                 )
 
+    def test_declarative_unknown_fingerprint_key_fails(self):
+        # additionalProperties:false — a misspelled strengthener key must fail
+        # closed, not silently ride along (dropping the canonical key's guard).
+        for typo in ("rowcount", "schemaHash", "schema_hash_typo"):
+            with self.subTest(typo=typo):
+                m = _declarative_manifest()
+                m["dataset_fingerprint"][typo] = 0
+                results = _run_check_manifest(m)
+                self.assertFalse(
+                    _ok(results), f"unknown dataset_fingerprint.{typo} must fail"
+                )
+
     def test_declarative_missing_split_key_fails(self):
         m = _declarative_manifest()
         del m["split_rule"]["split_key"]
@@ -966,6 +978,13 @@ def _degenerate_fingerprints() -> list:
         fp = _full_lighter_fp()
         fp["dataset_fingerprint"]["row_count"] = bad
         cases.append((f"row_count {bad_label}", fp))
+    # Misspelled / unknown strengthener key: additionalProperties:false rejects it
+    # so a typo (rowcount/schemaHash) can't silently ride along and drop the
+    # value's minimum/pattern guard.
+    for bad_label, typo_key in [("rowcount typo", "rowcount"), ("schemaHash typo", "schemaHash")]:
+        fp = _full_lighter_fp()
+        fp["dataset_fingerprint"][typo_key] = 0
+        cases.append((f"dataset_fingerprint unknown key ({bad_label})", fp))
     for bad_label, bad in [
         ("empty string", ""),
         ("blank string", "  "),

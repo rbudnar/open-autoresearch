@@ -461,6 +461,12 @@ _MEMBERSHIP_IDENTITY_SCHEMA = {
 _DATASET_FINGERPRINT_IDENTITY_SCHEMA = {
     "type": "object",
     "required": ["source", "version", "date_window"],
+    # additionalProperties: false — a misspelled strengthener key (rowcount /
+    # schemaHash) must NOT silently ride along; it fails the identity check so the
+    # record is treated as not-comparable (cross_dataset warns) rather than
+    # asserting same-set on a malformed fingerprint. Kept in lock-step with the
+    # manifest schema's dataset_fingerprint (drift-lock test).
+    "additionalProperties": False,
     "properties": {
         "source": _NONEMPTY_STRING,
         "version": _NONEMPTY_STRING,
