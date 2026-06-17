@@ -84,6 +84,56 @@ def load_campaign(state_dir: Path) -> dict[str, Any]:
     return obj if isinstance(obj, dict) else {}
 
 
+def host_root_from_state_dir(state_dir: Path) -> Path:
+    """Resolve the host repo root from the state dir.
+
+    Project-level data splits live at ``<host>/data/splits`` (PROTOCOL §6.3.1),
+    which is NOT the state dir's parent: in a real install the state dir is
+    ``<host>/autoresearch/state`` (the vendored scaffold sits under
+    ``autoresearch/``), so the host root is two levels up. The flat example layout
+    (``<root>/state``, no ``autoresearch/`` wrapper) puts it one level up. The
+    ``autoresearch`` directory name is the documented, deterministic marker (config
+    under ``autoresearch/`` is read the same way at ``state_dir.parent/config``).
+
+    ``state_dir`` is resolved to an absolute path first so the documented relative
+    invocation (``--state-dir state/`` run from ``<host>/autoresearch``) sees the
+    real ``autoresearch`` parent rather than ``Path('state').parent == '.'``.
+    """
+    state_dir = state_dir.resolve()
+    if state_dir.parent.name == "autoresearch":
+        return state_dir.parent.parent
+    return state_dir.parent
+
+
+def read_manifest_val_set_version(state_dir: Path) -> "int | str | None":
+    """The split MANIFEST (``data/splits/MANIFEST.json``, §6.3.1) is the source of
+    truth for ``val_set_version`` (PROTOCOL §17.6.3): a holdout refresh bumps it
+    there. Prefer it over ``campaign.json`` so derived exposure state reflects the
+    refresh instead of a stale runtime mirror. Returns None when there is no
+    manifest / no usable value, so callers use ``campaign.json`` (back-compat).
+    """
+    manifest_path = (
+        host_root_from_state_dir(state_dir) / "data" / "splits" / "MANIFEST.json"
+    )
+    if not manifest_path.is_file():
+        return None
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if isinstance(data, dict):
+        vsv = data.get("val_set_version")
+        if isinstance(vsv, bool):
+            return None
+        if isinstance(vsv, int):
+            return vsv
+        # Align with the schema's non-empty requirement: a blank string label is
+        # not a usable val_set_version, fall back to campaign.json.
+        if isinstance(vsv, str) and vsv.strip():
+            return vsv
+    return None
+
+
 def build_ledger_jsonl(records: list[dict[str, Any]]) -> bytes:
     """One canonical line per record, sorted by id, trailing newline per line."""
     parts: list[bytes] = []
@@ -123,6 +173,7 @@ def build_val_exposure(
     records: list[dict[str, Any]],
     campaign: dict[str, Any],
     exposure_budget: int | None = None,
+    manifest_val_set_version: "int | str | None" = None,
 ) -> dict[str, Any]:
     """Derived val-exposure aggregate (PROTOCOL §17.6).
 
@@ -130,11 +181,19 @@ def build_val_exposure(
     a budget is available from metrics.yaml — ``exposure_budget`` and the boolean
     ``holdout_refresh_due`` (queries >= exposure_budget). No hand prose / no
     ``notes`` / ``last_incremented_by_iteration`` (F-rule: derived only).
+
+    ``val_set_version`` prefers the split MANIFEST (§6.3.1 source of truth) when
+    the caller resolves one, falling back to ``campaign.json`` for back-compat.
     """
     total = sum(resolve_val_queries(rec) for rec in records)
+    val_set_version = (
+        manifest_val_set_version
+        if manifest_val_set_version is not None
+        else campaign.get("val_set_version", 1)
+    )
     out: dict[str, Any] = {
         "protocol_version": campaign.get("protocol_version", _detect_pv(records)),
-        "val_set_version": campaign.get("val_set_version", 1),
+        "val_set_version": val_set_version,
         "queries": total,
     }
     if exposure_budget is not None:
@@ -248,7 +307,8 @@ def regenerate(state_dir: Path) -> dict[str, int]:
 
     ledger_bytes = build_ledger_jsonl(records)
     exposure_budget = read_exposure_budget(state_dir)
-    val_exposure = build_val_exposure(records, campaign, exposure_budget)
+    manifest_vsv = read_manifest_val_set_version(state_dir)
+    val_exposure = build_val_exposure(records, campaign, exposure_budget, manifest_vsv)
     tree = build_research_tree(records, campaign)
     index_md = build_index_md(records, campaign, val_exposure["queries"])
 

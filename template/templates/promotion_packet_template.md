@@ -6,6 +6,8 @@ status: "<promoted | low_evidence_promoted | rejected>"
 enforcement: "<ci_enforced | pre_receive | oop_verifier | container_ro | in_band_only>"
 not_deployable: <true | false>
 maturity_level: <int from request, MUST be ≥ 3 for promoted>
+cross_dataset: <true | false>            # §13.2.1/§18 comparison-set warning (rule 11); WARN, never gates status
+cross_dataset_note: "<null, or why the baseline/candidate comparison is flagged>"
 ---
 
 # Promotion Packet (verifier-written, signed)

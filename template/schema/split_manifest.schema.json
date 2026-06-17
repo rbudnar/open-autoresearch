@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://open-autoresearch/schema/split_manifest.schema.json",
+  "title": "Split Manifest (PROTOCOL.md §6.3.1, Protocol 0.5 two-mode splits)",
+  "description": "data/splits/MANIFEST.json. Two modes via anyOf: `frozen` (current, recommended default — per-split content hashes of materialized files; immutable; strongest anti-cheating) and `declarative` (a split RULE + seed + dataset_fingerprint; no persisted files; for growing/forward-moving datasets). Exactly ONE mode shape is accepted. Each branch sets `additionalProperties: false`, so a partial/mixed manifest (frozen keys mixed with declarative keys, or a frozen manifest missing a required split) fails closed against BOTH branches: foreign-mode keys are rejected as additional properties on the branch they don't belong to, and the missing required keys reject the branch they do. Every string field requires at least one non-whitespace character (pattern \\S) so present-but-empty/blank values fail closed too. `mode` is the discriminator. The split shapes are inlined (not `$ref`) so the stdlib structural validator in _ledger_common.py — which does NOT implement `$ref` — enforces them; mirrors the experiment_record.schema.json anyOf style.",
+  "type": "object",
+  "anyOf": [
+    {
+      "title": "Frozen mode",
+      "description": "Per-split content hashes of materialized files. The agent CANNOT regenerate this; any drift between the live split files and these hashes invalidates the campaign until a holdout refresh (§17.6.3). This is the shape bootstrap_verify.py enforces and the recommended default for deployment-grade immutability.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "mode",
+        "snapshot_id",
+        "val_set_version",
+        "train",
+        "val",
+        "test",
+        "frozen_at",
+        "frozen_by"
+      ],
+      "properties": {
+        "protocol_version": {"const": "0.5"},
+        "mode": {"const": "frozen"},
+        "snapshot_id": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "Stable identifier for the dataset version (not the files)."
+        },
+        "val_set_version": {
+          "type": ["integer", "string"],
+          "pattern": "\\S",
+          "description": "Version label for the validation set (§17.6); bumped on holdout refresh."
+        },
+        "train": {"$comment": "inlined per-split shape", "type": "object", "additionalProperties": false, "required": ["path", "sha256", "size_bytes"], "properties": {
+          "path": {"type": "string", "pattern": "\\S", "description": "Path (relative to host repo root) to the split file."},
+          "sha256": {"type": "string", "pattern": "\\S", "description": "SHA-256 of the split file bytes."},
+          "size_bytes": {"type": "integer", "minimum": 1, "description": "Size of the split file in bytes."},
+          "row_ids_sha256": {"type": "string", "pattern": "\\S", "description": "OPTIONAL alternative/additional content hash: sha256 of the sorted list of example IDs in this split."}
+        }},
+        "val": {"type": "object", "additionalProperties": false, "required": ["path", "sha256", "size_bytes"], "properties": {
+          "path": {"type": "string", "pattern": "\\S", "description": "Path to the split file."},
+          "sha256": {"type": "string", "pattern": "\\S", "description": "SHA-256 of the split file bytes."},
+          "size_bytes": {"type": "integer", "minimum": 1, "description": "Size of the split file in bytes."},
+          "row_ids_sha256": {"type": "string", "pattern": "\\S", "description": "OPTIONAL alternative content hash."}
+        }},
+        "test": {"type": "object", "additionalProperties": false, "required": ["path", "sha256", "size_bytes"], "properties": {
+          "path": {"type": "string", "pattern": "\\S", "description": "Path to the split file."},
+          "sha256": {"type": "string", "pattern": "\\S", "description": "SHA-256 of the split file bytes."},
+          "size_bytes": {"type": "integer", "minimum": 1, "description": "Size of the split file in bytes."},
+          "row_ids_sha256": {"type": "string", "pattern": "\\S", "description": "OPTIONAL alternative content hash."}
+        }},
+        "frozen_at": {"type": "string", "pattern": "\\S", "description": "ISO-8601 UTC timestamp the splits were frozen."},
+        "frozen_by": {"type": "string", "pattern": "\\S", "description": "Human or CI identity that froze the splits."}
+      }
+    },
+    {
+      "title": "Declarative mode",
+      "description": "A split RULE evaluated deterministically at run time from a seed against a fingerprinted dataset, instead of frozen files. Weakens the agent-can't-regenerate property (§6.3.1 best practices) — recommend frozen or a non-agent materialization for top-tier/deployment-grade campaigns. Promotes Guard B's data_fingerprint (docs/proposals/2026-06-13-provenance-redesign.md) into §6.3.1 as a split mode.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_version",
+        "mode",
+        "val_set_version",
+        "split_rule",
+        "seed",
+        "dataset_fingerprint"
+      ],
+      "properties": {
+        "protocol_version": {"const": "0.5"},
+        "mode": {"const": "declarative"},
+        "val_set_version": {
+          "type": ["integer", "string"],
+          "pattern": "\\S",
+          "description": "Version label for the validation set (§17.6). In declarative mode, dataset growth that changes the holdout membership is a val_set_version bump + holdout refresh (§17.6.3)."
+        },
+        "split_rule": {
+          "type": "object",
+          "description": "The deterministic rule that partitions the dataset into train/val/test. Requires `split_key` AND at least one partitioning clause (`ratio`, `cutoff`, or `temporal_oos_window`) — a split_key alone cannot materialize membership.",
+          "required": ["split_key"],
+          "anyOf": [
+            {"required": ["ratio"]},
+            {"required": ["cutoff"]},
+            {"required": ["temporal_oos_window"]}
+          ],
+          "properties": {
+            "split_key": {
+              "type": "string",
+              "pattern": "\\S",
+              "description": "Column/field the split is keyed on (e.g. member_id), so the same entity lands in the same split."
+            },
+            "ratio": {
+              "type": "object",
+              "description": "Fractional split sizes (e.g. {train: 0.8, val: 0.1, test: 0.1}). Each value is a fraction in [0, 1]. Use ratio OR cutoff/temporal_oos_window, not necessarily all.",
+              "additionalProperties": {"type": "number", "minimum": 0, "maximum": 1}
+            },
+            "cutoff": {
+              "type": ["string", "number"],
+              "pattern": "\\S",
+              "description": "Optional boundary value for a deterministic cutoff split (e.g. a date or row index)."
+            },
+            "temporal_oos_window": {
+              "type": "object",
+              "description": "Optional out-of-sample temporal window reserved for test: {start, end}, both non-empty.",
+              "required": ["start", "end"],
+              "properties": {
+                "start": {"type": ["string", "number"], "pattern": "\\S"},
+                "end": {"type": ["string", "number"], "pattern": "\\S"}
+              },
+              "additionalProperties": {"type": ["string", "number"]}
+            }
+          }
+        },
+        "seed": {
+          "type": "integer",
+          "description": "Seed for the deterministic materialization of the split rule. Same (rule, seed, dataset) => same membership."
+        },
+        "dataset_fingerprint": {
+          "type": "object",
+          "description": "Guard B fingerprint of the dataset the rule runs against — makes 'we ran the same dataset' auditable without persisting files.",
+          "required": ["source", "version", "date_window", "row_count", "schema_hash"],
+          "properties": {
+            "source": {"type": "string", "pattern": "\\S", "description": "Source table/path the dataset was read from."},
+            "version": {"type": "string", "pattern": "\\S", "description": "Dataset version / data-platform commit / tag."},
+            "date_window": {
+              "description": "The date window the dataset covers: a non-empty string label, or a {start, end} object with both bounds non-empty.",
+              "anyOf": [
+                {"type": "string", "pattern": "\\S"},
+                {
+                  "type": "object",
+                  "required": ["start", "end"],
+                  "properties": {
+                    "start": {"type": "string", "pattern": "\\S"},
+                    "end": {"type": "string", "pattern": "\\S"}
+                  }
+                }
+              ]
+            },
+            "row_count": {"type": "integer", "minimum": 1, "description": "Number of rows in the fingerprinted dataset (a comparison set has at least one row)."},
+            "schema_hash": {"type": "string", "pattern": "\\S", "description": "Hash of the dataset schema (column names + dtypes)."}
+          }
+        },
+        "membership_sha256": {
+          "type": "object",
+          "description": "OPTIONAL strongest-tier proof: per-split sorted-id sha256 materialized at run time. When present, gives byte-level 'same set' proof even without frozen files (§6.3.1 best practices). Named to match the experiment record's data_fingerprint.membership_sha256 so the same artifact has one name across surfaces.",
+          "properties": {
+            "train": {"type": "string", "pattern": "\\S"},
+            "val": {"type": "string", "pattern": "\\S"},
+            "test": {"type": "string", "pattern": "\\S"}
+          }
+        }
+      }
+    }
+  ]
+}

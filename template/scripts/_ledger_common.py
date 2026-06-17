@@ -124,8 +124,9 @@ def sanitize_slug(raw: str) -> str:
 # only, so non-Python repos can run these scripts). This is a small structural
 # validator covering exactly the constructs used by
 # experiment_record.schema.json (draft 2020-12 subset): type, required,
-# properties, items, pattern, const, enum, additionalProperties, anyOf. It is
-# NOT a complete draft-2020-12 implementation.
+# properties, items, pattern, minLength, minimum, maximum, minItems, const, enum,
+# additionalProperties (boolean OR schema-valued — each extra property validated
+# against the subschema), anyOf. It is NOT a complete draft-2020-12 implementation.
 
 _JSON_TYPE_CHECKS = {
     "object": lambda v: isinstance(v, dict),
@@ -194,6 +195,21 @@ def validate_against_schema(
         pattern = schema.get("pattern")
         if pattern is not None and re.search(pattern, instance) is None:
             errors.append(f"{path}: {instance!r} does not match pattern {pattern!r}")
+        min_length = schema.get("minLength")
+        if isinstance(min_length, int) and len(instance) < min_length:
+            errors.append(
+                f"{path}: string shorter than minLength {min_length} (len {len(instance)})"
+            )
+
+    # `minimum`/`maximum` apply to numbers (not bools, which are excluded by the
+    # `integer`/`number` type checks above).
+    if isinstance(instance, (int, float)) and not isinstance(instance, bool):
+        minimum = schema.get("minimum")
+        if isinstance(minimum, (int, float)) and instance < minimum:
+            errors.append(f"{path}: {instance} is less than minimum {minimum}")
+        maximum = schema.get("maximum")
+        if isinstance(maximum, (int, float)) and instance > maximum:
+            errors.append(f"{path}: {instance} is greater than maximum {maximum}")
 
     if isinstance(instance, dict):
         for req in schema.get("required", []):
@@ -210,8 +226,23 @@ def validate_against_schema(
             for key in instance:
                 if key not in props:
                     errors.append(f"{path}: additional property {key!r} not allowed")
+        elif isinstance(additional, dict):
+            # Schema-valued additionalProperties: every property NOT named in
+            # `properties` must itself validate against this subschema (e.g. a
+            # ratio map whose values must all be numbers). Without this branch
+            # the value constraint was silently skipped.
+            for key, value in instance.items():
+                if key not in props:
+                    errors.extend(
+                        validate_against_schema(value, additional, f"{path}.{key}")
+                    )
 
     if isinstance(instance, list):
+        min_items = schema.get("minItems")
+        if isinstance(min_items, int) and len(instance) < min_items:
+            errors.append(
+                f"{path}: array shorter than minItems {min_items} (len {len(instance)})"
+            )
         item_schema = schema.get("items")
         if isinstance(item_schema, dict):
             for i, item in enumerate(instance):

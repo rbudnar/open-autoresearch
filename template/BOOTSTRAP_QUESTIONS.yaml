@@ -416,36 +416,112 @@ groups:
   - group: "8. Data splits (§6.3.1)"
     questions:
 
+      - id: split_mode
+        ask: |
+          Which split MODE will this campaign use? Ask this FIRST — it
+          decides which of the following questions apply.
+            frozen       — content-hash materialized train/val/test files
+                           (the recommended default; immutable, strongest
+                           anti-cheating; the agent CANNOT regenerate them).
+            declarative  — a deterministic split RULE (split_key, ratio/cutoff,
+                           temporal OOS window) + seed + dataset_fingerprint,
+                           materialized at run time. Use this when the dataset
+                           GROWS and freezing files goes stale immediately.
+          Best practice: default to `frozen`. Declarative weakens the
+          agent-can't-regenerate property — for deployment-grade campaigns
+          prefer frozen, or materialize the declarative split with a
+          non-agent (CI/human) process and freeze the result.
+        why: |
+          §6.3.1 supports two manifest shapes (the anyOf of
+          split_manifest.schema.json). The mode selects which fields the
+          MANIFEST carries; bootstrap_verify fails closed on a mixed manifest.
+        maps_to: "data/splits/MANIFEST.json :: mode"
+        required: true
+        example: "frozen"
+
+      # --- frozen-mode questions (answer when split_mode == frozen) ---------
       - id: train_split_path
-        ask: "Path (relative to host repo root) to the training-set file(s)."
+        ask: "FROZEN mode: path (relative to host repo root) to the training-set file(s)."
         why: |
           Each split file gets a SHA-256 hash pinned in
           data/splits/MANIFEST.json. If the file changes, the verifier
           rejects all packets until MANIFEST is regenerated under
           out-of-band approval.
         maps_to: "data/splits/MANIFEST.json :: train.path"
-        required: true
+        required: false
         example: "data/splits/train.parquet"
 
       - id: val_split_path
-        ask: "Path to the validation-set file(s)."
+        ask: "FROZEN mode: path to the validation-set file(s)."
         why: |
           Same as train; also drives val_set_exposure_budget accounting.
         maps_to: "data/splits/MANIFEST.json :: val.path"
-        required: true
+        required: false
         example: "data/splits/val.parquet"
 
       - id: test_split_path
         ask: |
-          Path to the test-set file(s). MUST be different from val and
-          ideally locked behind a tag the loop-driving agent can't read.
+          FROZEN mode: path to the test-set file(s). MUST be different from
+          val and ideally locked behind a tag the loop-driving agent can't read.
         why: |
           §18 promotion requires a single locked test-set evaluation at
           the end. If the agent can read it during the campaign, the test
           result is no longer locked.
         maps_to: "data/splits/MANIFEST.json :: test.path"
-        required: true
+        required: false
         example: "data/splits/test.parquet"
+
+      # --- declarative-mode questions (answer when split_mode == declarative)
+      - id: split_rule
+        ask: |
+          DECLARATIVE mode: the deterministic split RULE. Give:
+            - split_key   — the column the split is keyed on (e.g. member_id),
+                            so the same entity always lands in the same split.
+            - ratio       — fractional sizes, e.g. {train: 0.8, val: 0.1, test: 0.1}.
+            - cutoff      — optional boundary value (date or row index).
+            - temporal_oos_window — optional {start, end} reserved for test.
+        why: |
+          §6.3.1 declarative mode pins a rule instead of files. The rule +
+          seed + dataset_fingerprint must deterministically reproduce the
+          same membership, or comparisons silently diverge.
+        maps_to: "data/splits/MANIFEST.json :: split_rule.split_key"
+        required: false
+        example: |
+          split_key: member_id
+          ratio: {train: 0.8, val: 0.1, test: 0.1}
+          temporal_oos_window: {start: "2026-05-01", end: "2026-06-01"}
+
+      - id: split_seed
+        ask: |
+          DECLARATIVE mode: the integer SEED used to materialize the split
+          rule. Same (rule, seed, dataset) must yield the same membership.
+        why: |
+          Determinism is what makes a declarative split auditable. Without a
+          pinned seed, two runs of "the same" rule are not the same split.
+        maps_to: "data/splits/MANIFEST.json :: seed"
+        required: false
+        example: 42
+
+      - id: dataset_fingerprint
+        ask: |
+          DECLARATIVE mode: the dataset_fingerprint = (source, version,
+          date_window, row_count, schema_hash). This is what makes "we ran
+          the same dataset" auditable without persisting files. Strongly
+          consider ALSO recording a per-split membership hash (sorted-id
+          sha256) at run time for byte-level same-set proof.
+        why: |
+          §6.3.1 / Guard B: the fingerprint pins the dataset generation the
+          rule ran against. Combined with split_rule + seed it reconstructs
+          the exact membership; the verifier's rule 11 compares it across a
+          baseline/candidate pair and flags cross_dataset on mismatch.
+        maps_to: "data/splits/MANIFEST.json :: dataset_fingerprint.source"
+        required: false
+        example: |
+          source: gold.activities
+          version: v2026-06-16
+          date_window: "2025-01-01..2026-06-16"
+          row_count: 1234567
+          schema_hash: "<sha256 of column names + dtypes>"
 
       - id: dataset_snapshot_id
         ask: |
@@ -456,12 +532,14 @@ groups:
           starting point — but commit to it as the canonical ID for this
           campaign.
         why: |
-          PROTOCOL.md §6.3.1 requires a dataset snapshot ID in the
-          MANIFEST so that "we re-ran the same dataset" is verifiable
+          PROTOCOL.md §6.3.1 frozen mode requires a dataset snapshot ID in
+          the MANIFEST so that "we re-ran the same dataset" is verifiable
           beyond per-file hashing (hashes alone don't tell you which
-          dataset *generation* the files came from).
+          dataset *generation* the files came from). In DECLARATIVE mode the
+          equivalent role is played by `dataset_fingerprint.version`, so
+          snapshot_id is not required there.
         maps_to: "data/splits/MANIFEST.json :: snapshot_id"
-        required: true
+        required: false
         example: "initial-20260518"
 
       - id: val_set_version
@@ -482,10 +560,16 @@ groups:
 
 # The remaining MANIFEST fields PROTOCOL.md §6.3.1 requires are agent-derived,
 # not human-asked:
-#   - sha256, size_bytes, row_count per split → agent reads the file
-#   - frozen_at  → agent uses current UTC ISO-8601 timestamp at bootstrap
-#   - frozen_by  → agent fills in its own `bootstrapped_by` identity
-# Don't add questions for these; just fill them in when writing MANIFEST.json.
+#   FROZEN mode:
+#     - sha256, size_bytes per split → agent reads the file
+#     - frozen_at  → agent uses current UTC ISO-8601 timestamp at bootstrap
+#     - frozen_by  → agent fills in its own `bootstrapped_by` identity
+#   DECLARATIVE mode:
+#     - dataset_fingerprint.row_count / schema_hash → agent reads the dataset
+#     - membership_sha256 (optional, strongest tier) → agent materializes the
+#       split once and hashes the sorted ids per split
+# Always write `protocol_version: "0.5"` and the chosen `mode`. Don't add
+# questions for the agent-derived fields; fill them in when writing MANIFEST.json.
 
   - group: "9. Behavioral-equivalence fixtures (§17.1.1)"
     questions:

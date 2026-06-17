@@ -87,6 +87,40 @@
     "data_snapshot": {
       "type": ["string", "null"]
     },
+    "data_fingerprint": {
+      "type": "object",
+      "description": "OPTIONAL split/dataset identity for this run (PROTOCOL.md §6.3.1, §14.1). Records WHICH split the run used so 'same comparison set' is explicit and checkable across a baseline/candidate pair (verifier rule 11_comparison_set_identity, warn-not-gate). Recommended but NOT required (back-compat: existing records stay valid) and NOT forced via anyOf. Depth is project-chosen: the strongest form carries per-split membership_sha256 (byte-level proof); a lighter form carries dataset_fingerprint + split_spec_hash + seed (assumes deterministic materialization). Either is accepted.",
+      "additionalProperties": true,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "description": "Which §6.3.1 split mode produced this run's data: frozen | declarative.",
+          "enum": ["frozen", "declarative"]
+        },
+        "dataset_fingerprint": {
+          "type": "object",
+          "description": "Guard B fingerprint of the dataset: (source, version, date_window, row_count, schema_hash). See split_manifest.schema.json.",
+          "additionalProperties": true
+        },
+        "split_spec_hash": {
+          "type": "string",
+          "description": "Hash of the split rule/spec (and seed) used to materialize the partition. Lighter same-set proof when the materialization is deterministic."
+        },
+        "seed": {
+          "type": "integer",
+          "description": "Seed used to materialize a declarative split."
+        },
+        "val_set_version": {
+          "type": ["integer", "string"],
+          "description": "val_set_version this run evaluated against (§17.6); part of split identity."
+        },
+        "membership_sha256": {
+          "type": "object",
+          "description": "OPTIONAL strongest-tier proof: per-split sha256 over the sorted membership ids, computed at run time (byte-level 'same set' proof even without frozen files).",
+          "additionalProperties": {"type": "string"}
+        }
+      }
+    },
     "single_non_baseline_switch": {
       "type": ["string", "null"]
     },

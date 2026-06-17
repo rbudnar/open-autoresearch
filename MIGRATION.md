@@ -2,6 +2,36 @@
 
 Each major / minor protocol bump may require host-project changes. This file walks through each transition.
 
+## Within v0.5 — declarative data splits + comparison-set identity (no data migration; one-line manifest `mode` add)
+
+The two-mode §6.3.1 split model and the comparison-set identity record field are a
+**backward-compatible** addition and the protocol stays 0.5. **No data migration is
+required** — records are zero-touch — but existing frozen manifests need one trivial,
+mechanical edit (a single `mode: frozen` line), not a data migration:
+
+- **Existing frozen `MANIFEST.json` files need a one-line `mode: frozen` add.** The
+  manifest is now the `anyOf` of a frozen and a declarative shape; the frozen branch
+  is the same enforced shape (`{path, sha256, size_bytes}` per split + `snapshot_id` +
+  `val_set_version` + `frozen_at`/`frozen_by`). The only required change is the
+  explicit `mode: frozen` discriminator — add it so `bootstrap_verify` can select the
+  frozen branch. **A manifest with no `mode` now fails closed, by design** (it cannot
+  select a branch), so this edit is not optional for existing manifests, but it is a
+  one-liner, not a data migration. `row_ids_sha256` is newly allowed as an alternative
+  content hash but is not required.
+- **Existing experiment records stay valid.** The new `data_fingerprint` split
+  identity is OPTIONAL and not forced via `anyOf`, so records without it validate
+  unchanged. Add it (any tier — from a lighter `dataset_fingerprint`+`seed` to a
+  per-split `membership_sha256`) when you want the verifier's `cross_dataset`
+  warning to have something to compare.
+- **Adopting declarative mode** is opt-in: set `mode: declarative` and write
+  `split_rule` + `seed` + `dataset_fingerprint` instead of the frozen file hashes.
+  Frozen remains the recommended default; for deployment-grade campaigns prefer
+  frozen or freeze a non-agent materialization of the declarative split.
+- `examples/` ship no `MANIFEST.json`, so they are unaffected.
+
+See `docs/adr/0002-declarative-data-splits.md` and
+`docs/proposals/2026-06-16-dynamic-splits.md`.
+
 ## v0.4 → v0.5
 
 **Scope:** The experiment ledger moves from a single append-only `state/experiment_ledger.jsonl` to a **directory of immutable per-record files** `state/ledger/<id>.json` (the new source of truth). Four files become DERIVED and git-ignored. A new committed `state/campaign.json` holds campaign metadata. The §10.5 promotion-request hashes are recomputed against the pinned canonical serializer.

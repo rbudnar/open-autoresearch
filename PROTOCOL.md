@@ -83,7 +83,7 @@ Do these in order. Each step references the section you need, but you only need 
 1. **Pick a cost tier (§6.1).** Time one full baseline run. Look up the tier. This single decision configures seed counts, evidence labels, and budgets throughout the rest of the protocol.
 2. **Declare enforcement (§3.1.1).** Pick one of the 4 enforcement patterns or `mechanism: none` (and accept the in-band-only label). Write `enforcement.yaml`. Without this step, anti-cheating is honor-system and you must communicate that honestly in every report.
 3. **Define the scorecard (§6.1).** Write `metrics.yaml` with: primary metric, 2-4 secondaries, 1-3 guardrails, the cost tier from step 1, the statistical defaults (§13.2.1 will fill in if you omit), `max_playbook_tokens`, ledger rotation interval.
-4. **Freeze splits (§6.3.1) and snapshot data (§6.3).** Content-hash the dataset and commit the hash. Freeze train/val/test split definitions — these become read-only via §3.1.1 enforcement.
+4. **Define splits (§6.3.1) and snapshot data (§6.3).** Write `data/splits/MANIFEST.json` — `mode: frozen` (content-hash the split files; the recommended default) or `mode: declarative` (a deterministic split rule + seed + `dataset_fingerprint`, for growing datasets). Either way the manifest is read-only via §3.1.1 enforcement.
 5. **Establish baseline (§6.3).** Run baseline at the cost-tier seed count. Save reproducibility metadata (§17.5.1). Write a baseline report including known weaknesses.
 6. **Write 3-5 golden fixtures (§17.1.1).** Pick 3-5 representative inputs; record the current evaluator's outputs as ground truth. This is your tripwire for evaluator drift.
 7. **Open the playbook + ledger (§14).** Empty files are fine. The first iteration fills them.
@@ -231,6 +231,7 @@ autoresearch/
   MIGRATION.md
   schema/
     experiment_record.schema.json  # JSON Schema (draft 2020-12) for one ledger record (§14.1)
+    split_manifest.schema.json     # two-mode (frozen | declarative) data/splits/MANIFEST.json (§6.3.1)
   config/
     editable_paths.yaml
     protected_paths.yaml        # also listed in itself; only meaningful if §3.1.1 enforcement is configured
@@ -293,7 +294,7 @@ autoresearch/
 # Project-level (outside autoresearch/, but referenced by it):
 data/
   splits/
-    MANIFEST.json               # frozen-split content hashes (§6.3.1); protected
+    MANIFEST.json               # frozen-split content hashes OR a declarative split rule (§6.3.1, two modes); protected
     train.parquet               # or whatever your data layout is
     val.parquet
     test.parquet
@@ -479,34 +480,74 @@ Before the first candidate run:
 3. Capture reproducibility metadata (§17.5.1): torch version, CUDA, cuDNN, `torch.use_deterministic_algorithms` state, AMP/dtype, dataloader workers, OS.
 4. Create baseline report with known weaknesses and subgroup failures.
 
-### 6.3.1 Freeze splits
+### 6.3.1 Define splits (frozen or declarative)
 
-Before any candidate run, **the train/val/test split definitions must be frozen and committed under §3.1.1 enforcement.** "Frozen" means:
+Before any candidate run, **the train/val/test split definitions must be pinned in `data/splits/MANIFEST.json`, committed, and protected under §3.1.1 enforcement.** `MANIFEST.json` carries a `mode` discriminator and supports two shapes (the `anyOf` of `schema/split_manifest.schema.json`). Whatever mode you pick:
 
-- Split membership is content-addressed (e.g., a sorted list of example IDs hashed to a single `train_split_sha256`, `val_split_sha256`, `test_split_sha256`).
-- The hashes are written to `data/splits/MANIFEST.json` and committed.
 - `data/splits/MANIFEST.json` is listed in `protected_paths.yaml` and protected by the host's §3.1.1 mechanism.
-- Any change to split membership is a holdout refresh (§17.6.3), requires human review, and bumps `val_set_version` in `metrics.yaml`.
+- Any change to split membership is a holdout refresh (§17.6.3), requires human review, and bumps `val_set_version` in `data/splits/MANIFEST.json` (the manifest is the source of truth for `val_set_version`, not `metrics.yaml`).
+- A partial or mixed manifest (frozen keys alongside declarative keys, or a frozen manifest missing a split) **fails closed** — `bootstrap_verify.py` rejects it rather than passing one half of a mode.
 
-Concretely, for a project with row-indexed data:
+#### Mode `frozen` (recommended default)
+
+Split membership is content-addressed by hashing the materialized split files. This is immutable and the strongest anti-cheating shape — the agent CANNOT regenerate it. The canonical frozen shape (the one `bootstrap_verify.py` enforces) is top-level `snapshot_id` + `val_set_version` + a `train`/`val`/`test` block each carrying `path` + `sha256` + `size_bytes`, plus `frozen_at` / `frozen_by`:
 
 ```json
 {
   "protocol_version": "0.5",
-  "data_snapshot_id": "data-snap-2026-05-15",
-  "data_snapshot_sha256": "...",
-  "splits": {
-    "train": {"row_ids_sha256": "...", "size": 80000},
-    "val":   {"row_ids_sha256": "...", "size": 10000},
-    "test":  {"row_ids_sha256": "...", "size": 10000}
-  },
+  "mode": "frozen",
+  "snapshot_id": "data-snap-2026-05-15",
   "val_set_version": 1,
+  "train": {"path": "data/splits/train.parquet", "sha256": "...", "size_bytes": 80000000},
+  "val":   {"path": "data/splits/val.parquet",   "sha256": "...", "size_bytes": 10000000},
+  "test":  {"path": "data/splits/test.parquet",  "sha256": "...", "size_bytes": 10000000},
   "frozen_at": "2026-05-15T12:00:00Z",
   "frozen_by": "<human-or-CI-identity>"
 }
 ```
 
-The agent CANNOT regenerate this file. Any drift between the live split files and the manifest hashes invalidates the campaign until a holdout refresh is performed (§17.6.3) or the live splits are restored. The `behavioral_equivalence.py` script (§17.1.1) reads `MANIFEST.json` at every iteration and refuses to launch evaluation on a mismatched split.
+For row-indexed data where there is no single split file, each split block may additionally carry `row_ids_sha256` — the sha256 of the sorted example-ID list — as an allowed alternative content hash. (`path`/`sha256`/`size_bytes` stay required so the enforced shape is one shape; `row_ids_sha256` is additive.)
+
+Any drift between the live split files and the manifest hashes invalidates the campaign until a holdout refresh is performed (§17.6.3) or the live splits are restored. Enforcing this at run time — re-hashing the live split files against `MANIFEST.json` before each evaluation and refusing to launch on a mismatch — is a RECOMMENDED host-side guard the adopter wires into their campaign loop. The reference `behavioral_equivalence.py` (§17.1.1) checks evaluator fixture equivalence only; it does NOT read `MANIFEST.json` or hash split files, so split-drift enforcement is the host's responsibility, not something this script already provides.
+
+#### Mode `declarative` (for growing / forward-moving datasets)
+
+Freezing parquet goes stale immediately when the train/val date window keeps moving forward (the common case for production datasets that grow daily). Declarative mode pins a deterministic **split rule** evaluated at run time instead of persisted files:
+
+```json
+{
+  "protocol_version": "0.5",
+  "mode": "declarative",
+  "val_set_version": 1,
+  "split_rule": {
+    "split_key": "member_id",
+    "ratio": {"train": 0.8, "val": 0.1, "test": 0.1},
+    "temporal_oos_window": {"start": "2026-05-01", "end": "2026-06-01"}
+  },
+  "seed": 42,
+  "dataset_fingerprint": {
+    "source": "gold.activities",
+    "version": "v2026-06-16",
+    "date_window": "2025-01-01..2026-06-16",
+    "row_count": 1234567,
+    "schema_hash": "..."
+  }
+}
+```
+
+- `split_rule`: `split_key` (e.g. `member_id`, so the same entity always lands in the same split), a `ratio` and/or a `cutoff`, and an optional `temporal_oos_window` reserved for test.
+- `seed`: deterministic materialization — the same `(rule, seed, dataset)` yields the same membership.
+- `dataset_fingerprint`: `(source, version, date_window, row_count, schema_hash)` — this is Guard B from `docs/proposals/2026-06-13-provenance-redesign.md`, promoted into §6.3.1 as a split mode. It makes "we ran the same dataset" auditable without persisting files.
+
+Declarative mode **weakens the agent-can't-regenerate property**: an agent with the rule, seed, and dataset can re-materialize the split, so it is not immutable the way frozen files are. **For deployment-grade / top-tier campaigns, recommend frozen, or materialize the declarative split with a non-agent process** (CI/human) and freeze the result. Declarative is nonetheless first-class — when the comparison-set identity matches (below) it does not itself cap the achievable promotion label.
+
+#### Best practices: which mode, and proving "same set"
+
+- **Default to `frozen`** for immutability and anti-cheating. Reach for `declarative` only when the dataset genuinely grows and freezing files is impractical.
+- **Comparison-set identity (both modes).** §13.2.1 compares a candidate to its baseline; that comparison is only sound on **identical holdout observations**. Record a split identity in each experiment record (`data_fingerprint`, §14.1) so "same set" is explicit and checkable. Depth is project-chosen:
+  - **Strongest:** a **materialized membership hash** — per-split sha256 over the sorted train/val/test IDs, computed at run time. Byte-level proof of identical membership even without frozen files.
+  - **Lighter:** `dataset_fingerprint` + `split_spec_hash` + `seed`, which proves same-set only under the assumption that materialization is deterministic.
+  The schema accepts either. When a candidate and its baseline carry different (or unconfirmable) identities, the verifier flags `cross_dataset` on the packet and warns (§13.2.1, §18) — it does **not** auto-reject; the implementer chooses the evidence tier.
 
 ### 6.4 Create initial research tree
 
@@ -753,6 +794,12 @@ enforcement: "ci_enforced | pre_receive | oop_verifier | container_ro | in_band_
 # Computed deployability label
 not_deployable: false                # true iff enforcement == "in_band_only" OR status == "low_evidence_promoted"
 
+# Comparison-set warning (§13.2.1, rule 11) — WARN, not a gate. true when the
+# candidate and baseline did not (or could not be confirmed to) run on identical
+# holdout observations; never affects `status`. See §18.
+cross_dataset: false
+cross_dataset_note: "<null, or a short note on why the comparison is flagged>"
+
 # Verifier's check results — one boolean per §18 criterion
 criteria_check:
   c1_primary_meaningful_delta: true
@@ -792,7 +839,8 @@ The verifier MUST:
 7. Reject if `behavioral_equivalence_test_passed_for_evaluator != true`.
 8. Reject if `maturity_level_used < 3`.
 9. Reject if `role_separation_achieved.implementation_worker_vs_skeptic` is below `level_2`.
-10. Sign `packet.signature` over all preceding fields with a key not available to the agent.
+10. Compare the baseline's and each candidate's recorded split identity (`data_fingerprint`, §6.3.1 / §14.1) and set `cross_dataset` (+ `cross_dataset_note`) on the packet when they differ or cannot be confirmed identical. This is **WARN-not-gate** — it never rejects the request; a divergent split is surfaced for the implementer to weigh, never silently treated as comparable (§13.2.1, §18).
+11. Sign `packet.signature` over all preceding fields with a key not available to the agent.
 
 A rejected request returns the candidate to `promotion_candidate` status; the agent may revise and resubmit.
 
@@ -936,6 +984,8 @@ Acceptable methods (use the one declared in `metrics.yaml`):
 
 Prefer paired comparisons when candidate and baseline predict on the same examples.
 
+**Same comparison set (strongly recommended).** A candidate-vs-baseline comparison is only sound when both ran on **identical holdout observations**. Strongly recommend the same `val_set_version` and the same split membership for the two runs. Record each run's split identity (`data_fingerprint`, §6.3.1 / §14.1) so this is explicit and checkable rather than assumed: the verifier's `11_comparison_set_identity` rule compares the baseline's and candidate's recorded identity and sets a `cross_dataset` flag on the packet (§18) when they differ or cannot be confirmed identical. Per the protocol's posture this is a **warning, not a hard gate** — a divergent split is never *silently* treated as comparable, but the implementer chooses the evidence tier (e.g. discount the result, or justify why the comparison still holds).
+
 ### 13.2.1 Default decision rule (direction-aware)
 
 If `metrics.yaml` does not override, the protocol uses paired-bootstrap intervals on the per-example delta `(candidate − baseline)` and applies the rule below.
@@ -1052,6 +1102,8 @@ That is: compact separators, **insertion order** (NO `sort_keys`), `ensure_ascii
 Optional curated per-node fields `node_title` and `node_lessons` may be added to a record; they feed the derived research tree (§15) and are distinct from the per-iteration `lessons` field.
 
 **Provenance (content-addressed, Level 1).** A record carries `source_commit` (the commit HEAD pointed at when the experiment ran), `source_branch`, and `resolvable_from_main` (true only if `source_commit` is an ancestor of `main`). The commit is a **non-authoritative breadcrumb**, not a reproducibility guarantee: campaigns run on off-main, often ephemeral branches and squash-merge destroys the SHA, so most records carry `resolvable_from_main: false`. Auditability is the structured record itself (hypothesis / params / metrics / lineage), which is durable on `main`. The deprecated `git_sha_before` / `git_sha_after` fields are superseded by this triple and accepted only for back-compat with pre-redesign (legacy v0.4–v0.5) records; `log_experiment.py` no longer emits them (writer back-compat is preserved via the deprecated `--git-sha-*` flags, but readers must migrate to `source_commit`). Every record must still carry provenance — the schema requires either the full `source_commit` / `source_branch` / `resolvable_from_main` triple or the legacy `git_sha_before` / `git_sha_after` pair (a `source_commit`-only record is rejected). The content-addressed Level 2/3 roadmap (run-time code/data/env capture + a reproduce tool) lives in `docs/proposals/2026-06-13-provenance-redesign.md` and `docs/adr/0001-content-addressed-provenance.md`.
+
+**Split / dataset identity (optional, recommended).** A record MAY carry a `data_fingerprint` object recording WHICH split the run used (§6.3.1), so "same comparison set" is explicit and checkable across a baseline/candidate pair. It is **optional and not forced via `anyOf`** — existing records stay valid and projects choose whether and how deeply to record it. Fields (all optional within the object): `mode` (`frozen` | `declarative`), `dataset_fingerprint` (the Guard-B `(source, version, date_window, row_count, schema_hash)`), `split_spec_hash`, `seed`, `val_set_version`, and the strongest tier `membership_sha256` (per-split sha256 over the sorted membership IDs, byte-level same-set proof). The verifier's `11_comparison_set_identity` rule reads this field on the referenced baseline/candidate records to set the packet's `cross_dataset` warning (§13.2.1, §18). This is distinct from the legacy free-form `data_snapshot` string, which is retained.
 
 Each record (with filled example for §14.1 to avoid `{}` placeholders being copied verbatim):
 
@@ -1337,7 +1389,9 @@ A holdout refresh is a non-trivial event requiring human review per §3.1. Two o
 1. **Rotate splits.** Re-split the dataset under a documented procedure (new seed, same proportions). Old val becomes test; old test becomes train; fresh val from train. Allowed only if the dataset is large enough that re-splitting doesn't break statistical assumptions.
 2. **Refresh holdout from a held-back pool.** Draw a new val slice from data not previously exposed. Requires the host project to have set aside a pool in §6.3 for this purpose.
 
-Either way: increment a `val_set_version` integer in `metrics.yaml`; the §13.2.1 decision rule treats the new val as a fresh resource; campaign continues with `exposure.queries = 0`. The packets of any candidates promoted in the previous val version are tagged with that version for historical traceability.
+Either way: increment the `val_set_version` in `data/splits/MANIFEST.json` (§6.3.1 — the manifest is the source of truth for `val_set_version`, not `metrics.yaml`); the §13.2.1 decision rule treats the new val as a fresh resource; campaign continues with `exposure.queries = 0`. The packets of any candidates promoted in the previous val version are tagged with that version for historical traceability.
+
+**Declarative mode and dataset growth.** Under `mode: declarative` (§6.3.1) the dataset grows over time, so the holdout membership the split rule materializes can change between runs even with the same rule and seed. Treat any change to the held-out membership exactly like a holdout refresh: bump `val_set_version` (and the manifest's `dataset_fingerprint`), which resets exposure accounting and makes the new holdout a fresh §13.2.1 resource. Comparisons that straddle the bump are `cross_dataset` (§13.2.1) and must not be treated as same-set.
 
 #### 17.6.4 Why this matters
 
@@ -1441,6 +1495,8 @@ A model is promoted only if ALL hold. **Criterion 17 is a prerequisite** — Lev
 15. **Budget caps not exceeded** (§17.7) — campaign within `max_*_total` for LLM tokens, tool calls, GPU hours; per-iteration caps not exceeded for this candidate's runs.
 16. **Promotion packet present and verifier-signed** (§10.5). The agent emits a `promotion_request`; a **non-agent verifier** writes and signs the `promotion_packet` after running the schema validation rules. A self-signed packet is not a valid promotion artifact.
 17. **Maturity level ≥ 3** (§24) — prerequisite. Level 1 and Level 2 produce `level1_branch_winner` / `level2_branch_winner`, not `promoted`.
+
+**Comparison-set warning (not a gate).** The packet also carries a `cross_dataset` boolean from the verifier's `11_comparison_set_identity` rule (§13.2.1). When `true`, the candidate and baseline did not (or could not be confirmed to) run on identical holdout observations. This is a **warning surfaced for the human/implementer to weigh, not an automatic rejection** — the implementer chooses the evidence tier (discount the comparison, or document why it still holds). It is never silently ignored.
 
 ---
 

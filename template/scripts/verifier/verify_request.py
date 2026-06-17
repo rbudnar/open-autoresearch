@@ -56,10 +56,18 @@ except ImportError:
 # regenerate_state.py and log_experiment.py so the §10.5 hash basis is byte-
 # identical across all tools. scripts/ sits one level up from scripts/verifier/.
 try:
-    from _ledger_common import _canonical_record_bytes, resolve_val_queries
+    from _ledger_common import (
+        _canonical_record_bytes,
+        resolve_val_queries,
+        validate_against_schema,
+    )
 except ImportError:  # pragma: no cover - path shim for direct invocation
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from _ledger_common import _canonical_record_bytes, resolve_val_queries
+    from _ledger_common import (
+        _canonical_record_bytes,
+        resolve_val_queries,
+        validate_against_schema,
+    )
 
 
 # --- Constants ----------------------------------------------------------------
@@ -84,6 +92,7 @@ RULE_NAMES = [
     "8_skeptic_verdict_clean",
     "9_statistics_recomputed",
     "10_enforcement_caps_status",
+    "11_comparison_set_identity",
 ]
 
 
@@ -187,6 +196,14 @@ class VerifierContext:
     metrics: dict[str, Any]
     enforcement: dict[str, Any]
     unsigned: bool
+    # Set by rule 11 (comparison-set identity). WARN-not-gate: when the
+    # candidate and baseline ran on different split identities this is True and
+    # a note is surfaced on the packet; the request is NOT rejected for it.
+    # Conservative default: True ("unknown / not confirmed same-set") so that if
+    # rule 11 is ever skipped or raises before build_packet, the packet does not
+    # silently assert a comparison is comparable (fail-safe, not fail-open).
+    cross_dataset: bool = True
+    cross_dataset_note: str | None = None
 
 
 # --- Rule implementations -----------------------------------------------------
@@ -372,11 +389,15 @@ def rule_9_statistics_recomputed(ctx: VerifierContext) -> tuple[bool, str | None
     re-derive §13.2.1 from referenced ledger metrics; this reference checks
     that the referenced entries CONTAIN the metric values claimed.
     """
-    refs = ctx.request.get("references") or {}
+    refs = ctx.request.get("references")
+    if not isinstance(refs, dict):
+        return False, "references is not an object"
     candidate_runs = refs.get("candidate_runs") or []
-    if not candidate_runs:
-        return False, "references.candidate_runs is empty"
+    if not isinstance(candidate_runs, list) or not candidate_runs:
+        return False, "references.candidate_runs is empty or not a list"
     for i, ref in enumerate(candidate_runs):
+        if not isinstance(ref, dict):
+            return False, f"candidate_runs[{i}] is not an object"
         candidate_ledger_id = ref.get("ledger_id")
         if not isinstance(candidate_ledger_id, str):
             return False, f"candidate_runs[{i}] ledger_id is not a string"
@@ -385,7 +406,9 @@ def rule_9_statistics_recomputed(ctx: VerifierContext) -> tuple[bool, str | None
             return False, f"candidate_runs[{i}] ledger_id not found"
         if "metrics" not in entry["entry"]:
             return False, f"candidate_runs[{i}] ledger entry has no 'metrics' block"
-    baseline_ref = refs.get("baseline_run") or {}
+    baseline_ref = refs.get("baseline_run")
+    if not isinstance(baseline_ref, dict):
+        return False, "baseline_run is not an object"
     baseline_ledger_id = baseline_ref.get("ledger_id")
     if not isinstance(baseline_ledger_id, str):
         return False, "baseline_run ledger_id is not a string"
@@ -406,6 +429,194 @@ def rule_10_enforcement_caps_status(ctx: VerifierContext) -> tuple[bool, str | N
     return True, None
 
 
+# A comparable split identity is defined DECLARATIVELY and validated with the
+# shared structural validator, so "complete/valid" means exactly one thing and is
+# enforced by the same engine as the manifest schema (no scattered imperative
+# field checks that keep growing edge cases).
+#
+# `_NONEMPTY_STRING` requires at least one non-whitespace character, so "", "  ",
+# and non-strings are all rejected. These mirror split_manifest.schema.json's
+# declarative `dataset_fingerprint` (a test asserts the two stay in sync).
+_NONEMPTY_STRING = {"type": "string", "pattern": r"\S"}
+
+# Strongest tier: a COMPLETE per-split membership hash (all three non-empty).
+_MEMBERSHIP_IDENTITY_SCHEMA = {
+    "type": "object",
+    "required": ["train", "val", "test"],
+    "properties": {
+        "train": _NONEMPTY_STRING,
+        "val": _NONEMPTY_STRING,
+        "test": _NONEMPTY_STRING,
+    },
+}
+
+# A complete Guard-B dataset fingerprint: every field present and well-typed —
+# non-empty source/version/schema_hash, an integer row_count >= 0, and a
+# date_window that is either a non-empty string OR a {start,end} object with both
+# bounds non-empty.
+_DATASET_FINGERPRINT_IDENTITY_SCHEMA = {
+    "type": "object",
+    "required": ["source", "version", "date_window", "row_count", "schema_hash"],
+    "properties": {
+        "source": _NONEMPTY_STRING,
+        "version": _NONEMPTY_STRING,
+        "schema_hash": _NONEMPTY_STRING,
+        "row_count": {"type": "integer", "minimum": 1},
+        "date_window": {
+            "anyOf": [
+                _NONEMPTY_STRING,
+                {
+                    "type": "object",
+                    "required": ["start", "end"],
+                    "properties": {
+                        "start": _NONEMPTY_STRING,
+                        "end": _NONEMPTY_STRING,
+                    },
+                },
+            ]
+        },
+    },
+}
+
+# Lighter tier: a complete dataset fingerprint + split_spec_hash + seed. Extra
+# keys (membership_sha256, mode, val_set_version) are allowed and not part of the
+# completeness test; `val_set_version` is folded into the comparable key
+# separately so 1 and "1" don't false-mismatch.
+_LIGHTER_IDENTITY_SCHEMA = {
+    "type": "object",
+    "required": ["dataset_fingerprint", "split_spec_hash", "seed"],
+    "properties": {
+        "dataset_fingerprint": _DATASET_FINGERPRINT_IDENTITY_SCHEMA,
+        "split_spec_hash": _NONEMPTY_STRING,
+        "seed": {"type": "integer"},
+    },
+}
+
+
+def _split_identity(entry: dict[str, Any]) -> "Any | None":
+    """Return a comparable split-identity key for a ledger record, or None when
+    the record carries no COMPLETE split identity.
+
+    PROTOCOL §6.3.1 / §14.1: the optional ``data_fingerprint`` records WHICH
+    split a run used. The strongest tier is a complete per-split
+    ``membership_sha256`` (byte-level proof); the lighter tier is a complete
+    ``dataset_fingerprint`` + ``split_spec_hash`` + ``seed`` (+ optional
+    ``val_set_version``), which assumes deterministic materialization.
+    Completeness/validity at each tier is decided by validating against the
+    declarative schemas above, so an incomplete OR degenerately-valued identity
+    (missing field, empty/whitespace string, wrong type, blank-bounded
+    date_window, partial membership) yields None and rule 11 flags
+    ``cross_dataset`` rather than asserting same-set on weak evidence. We prefer
+    membership when both tiers qualify. The key is JSON-canonicalized so equality
+    is order-insensitive.
+    """
+    fp = entry.get("data_fingerprint")
+    if not isinstance(fp, dict):
+        return None
+    membership = fp.get("membership_sha256")
+    if isinstance(membership, dict) and not validate_against_schema(
+        membership, _MEMBERSHIP_IDENTITY_SCHEMA
+    ):
+        canonical = {k: membership[k] for k in ("train", "val", "test")}
+        return ("membership", json.dumps(canonical, sort_keys=True))
+    if not validate_against_schema(fp, _LIGHTER_IDENTITY_SCHEMA):
+        lighter: dict[str, Any] = {
+            "dataset_fingerprint": fp["dataset_fingerprint"],
+            "split_spec_hash": fp["split_spec_hash"],
+            "seed": fp["seed"],
+        }
+        # val_set_version may be logged as an int or a string for the same label
+        # (1 vs "1"); normalize to str. Only fold in a scalar value.
+        vsv = fp.get("val_set_version")
+        if isinstance(vsv, (int, str)) and not isinstance(vsv, bool):
+            lighter["val_set_version"] = str(vsv)
+        return ("fingerprint", json.dumps(lighter, sort_keys=True))
+    return None
+
+
+def rule_11_comparison_set_identity(ctx: VerifierContext) -> tuple[bool, str | None]:
+    """WARN-not-gate (§13.2.1 same-comparison-set note): compare the baseline's
+    split identity against every candidate's and set ``cross_dataset`` on the
+    packet when they diverge or cannot be confirmed identical.
+
+    This rule NEVER fails the request — per the owner's ratified decision the
+    protocol WARNS and STRONGLY RECOMMENDS identical holdout observations but
+    lets the implementer choose the evidence tier. It returns (True, note); the
+    note (and the ``cross_dataset`` flag) is surfaced on the packet so a
+    divergent comparison is never silently treated as comparable.
+    """
+
+    def _identity_for(ledger_id: Any) -> "Any | None":
+        if not isinstance(ledger_id, str):
+            return None
+        wrapped = ctx.ledger.get(ledger_id)
+        if wrapped is None:
+            return None
+        entry = wrapped.get("entry")
+        return _split_identity(entry) if isinstance(entry, dict) else None
+
+    # Tolerate a malformed request shape (non-dict references / baseline_run /
+    # candidate items): rule 11 never crashes — an unreadable identity is simply
+    # None, which surfaces as cross_dataset. (rule 2 rejects the malformed request
+    # cleanly; both run, so rule 11 must not raise on the same input.)
+    refs = ctx.request.get("references")
+    refs = refs if isinstance(refs, dict) else {}
+    baseline_ref = refs.get("baseline_run")
+    baseline_identity = (
+        _identity_for(baseline_ref.get("ledger_id"))
+        if isinstance(baseline_ref, dict)
+        else None
+    )
+
+    candidate_runs = refs.get("candidate_runs")
+    candidate_runs = candidate_runs if isinstance(candidate_runs, list) else []
+    candidate_identities: list["Any | None"] = [
+        _identity_for(ref.get("ledger_id")) if isinstance(ref, dict) else None
+        for ref in candidate_runs
+    ]
+
+    # No candidates to compare against: we cannot confirm same-set, so fail safe
+    # to cross_dataset rather than vacuously asserting "identical" (rule 9 also
+    # rejects empty candidate_runs, but rule 11 must not assert comparability it
+    # cannot establish).
+    if not candidate_identities:
+        ctx.cross_dataset = True
+        ctx.cross_dataset_note = (
+            "no candidate runs to compare split identity against; cannot confirm "
+            "identical holdout observations. Treat the comparison as cross_dataset."
+        )
+        return True, ctx.cross_dataset_note
+
+    # No identity recorded anywhere: we cannot confirm same-set. Flag it as a
+    # cross_dataset warning (the §6.3.1 identity record is recommended, not
+    # mandated) rather than asserting comparability.
+    if baseline_identity is None and all(c is None for c in candidate_identities):
+        ctx.cross_dataset = True
+        ctx.cross_dataset_note = (
+            "no split identity recorded on baseline or candidate runs; "
+            "cannot confirm identical holdout observations (§6.3.1 recommends "
+            "recording data_fingerprint). Treat the comparison as cross_dataset."
+        )
+        return True, ctx.cross_dataset_note
+
+    mismatched = baseline_identity is None or any(
+        c is None or c != baseline_identity for c in candidate_identities
+    )
+    if mismatched:
+        ctx.cross_dataset = True
+        ctx.cross_dataset_note = (
+            "baseline and candidate split identities differ (or are not all "
+            "recorded); strongly recommend identical holdout observations "
+            "(§13.2.1). Flagged cross_dataset — implementer chooses the evidence "
+            "tier; not auto-rejected."
+        )
+        return True, ctx.cross_dataset_note
+
+    ctx.cross_dataset = False
+    ctx.cross_dataset_note = "baseline and candidate share an identical split identity"
+    return True, ctx.cross_dataset_note
+
+
 RULE_FUNCS = {
     "1_protocol_version_match": rule_1_protocol_version_match,
     "2_references_rehash": rule_2_references_rehash,
@@ -417,6 +628,7 @@ RULE_FUNCS = {
     "8_skeptic_verdict_clean": rule_8_skeptic_verdict_clean,
     "9_statistics_recomputed": rule_9_statistics_recomputed,
     "10_enforcement_caps_status": rule_10_enforcement_caps_status,
+    "11_comparison_set_identity": rule_11_comparison_set_identity,
 }
 
 
@@ -507,6 +719,11 @@ def build_packet(
         "enforcement": enforcement_label,
         "not_deployable": not_deployable,
         "maturity_level": maturity,
+        # Comparison-set identity (§6.3.1 / §13.2.1, rule 11). WARN-not-gate:
+        # surfaced on the packet so a divergent baseline/candidate split is
+        # never silently treated as comparable. Never affects `status`.
+        "cross_dataset": ctx.cross_dataset,
+        "cross_dataset_note": ctx.cross_dataset_note,
         "verifier": {
             "type": verifier_type,
             "identity": verifier_identity,
@@ -551,6 +768,7 @@ def write_packet_files(
         f"enforcement: \"{packet['enforcement']}\"",
         f"not_deployable: {str(packet['not_deployable']).lower()}",
         f"maturity_level: {packet['maturity_level']}",
+        f"cross_dataset: {str(packet['cross_dataset']).lower()}",
         "---",
         "",
         "# Promotion Packet (verifier-written)",
@@ -558,6 +776,12 @@ def write_packet_files(
         f"**Status:** `{packet['status']}`",
         f"**Enforcement:** `{packet['enforcement']}`",
         f"**Not deployable:** `{packet['not_deployable']}`",
+        f"**Cross-dataset (comparison-set warning):** `{packet['cross_dataset']}`"
+        + (
+            f" — {packet['cross_dataset_note']}"
+            if packet.get("cross_dataset_note")
+            else ""
+        ),
         "",
         "## Verifier identity",
         "",

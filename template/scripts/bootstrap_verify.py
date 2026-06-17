@@ -16,10 +16,16 @@ Checks performed (each is independent and reports its own pass/fail):
   4. ``autoresearch/bootstrap-answers.yaml`` exists with the required
      frontmatter (``protocol_version``, ``bootstrapped_at``,
      ``bootstrapped_by``, ``answers``).
-  5. ``data/splits/MANIFEST.json`` exists with every §6.3.1 field
-     populated (``snapshot_id``, ``val_set_version``, ``train``/``val``/
-     ``test`` each with ``path``+``sha256``+``size_bytes``, ``frozen_at``,
-     ``frozen_by``).
+  5. ``data/splits/MANIFEST.json`` exists and matches EXACTLY ONE §6.3.1 split
+     mode (fail-closed on a partial/mixed manifest):
+       - ``mode: frozen`` (recommended default): ``snapshot_id``,
+         ``val_set_version``, ``train``/``val``/``test`` each with
+         ``path``+``sha256``+``size_bytes``, ``frozen_at``, ``frozen_by``.
+       - ``mode: declarative``: ``val_set_version``, ``split_rule`` (with a
+         ``split_key``), ``seed``, and ``dataset_fingerprint``
+         (``source``+``version``+``date_window``+``row_count``+``schema_hash``).
+     The two modes are the ``anyOf`` of ``schema/split_manifest.schema.json``;
+     this check replicates that anyOf in stdlib Python (no jsonschema dep).
   6. ``evaluation/fixtures/`` exists with at least 3 fixture JSON files,
      unless ``bootstrap-answers.yaml`` has ``partial: true`` (a fewer-than-3
      install is allowed only if the agent explicitly recorded the gap).
@@ -52,6 +58,18 @@ from pathlib import Path
 
 import yaml  # type: ignore[import-untyped]
 
+from _ledger_common import load_schema, validate_against_schema
+
+# The split manifest schema sits next to the vendored scaffold
+# (autoresearch/schema/ in a host, template/schema/ here). The hand-rolled
+# field checks below stay (friendly messages + size_bytes>0, which the schema's
+# `minimum` keyword the stdlib validator doesn't implement), but we ALSO run the
+# manifest through the structural schema so wrong TYPES (numeric path/sha256,
+# string seed, object val_set_version) and unknown keys fail closed instead of
+# slipping past the populated-only checks.
+SPLIT_MANIFEST_SCHEMA = (
+    Path(__file__).resolve().parent.parent / "schema" / ("split_manifest.schema.json")
+)
 
 REQUIRED_CONFIG_FILES = [
     "metrics.yaml",
@@ -67,7 +85,9 @@ REQUIRED_ANSWER_KEYS = [
     "answers",
 ]
 
-REQUIRED_MANIFEST_TOP_KEYS = [
+# --- §6.3.1 split manifest, two modes (anyOf of split_manifest.schema.json) ---
+# FROZEN (recommended default): per-split content hashes of materialized files.
+REQUIRED_FROZEN_TOP_KEYS = [
     "snapshot_id",
     "val_set_version",
     "train",
@@ -76,8 +96,34 @@ REQUIRED_MANIFEST_TOP_KEYS = [
     "frozen_at",
     "frozen_by",
 ]
+REQUIRED_FROZEN_SPLIT_KEYS = ["path", "sha256", "size_bytes"]
 
-REQUIRED_MANIFEST_SPLIT_KEYS = ["path", "sha256", "size_bytes"]
+# DECLARATIVE: a deterministic split rule + seed + dataset fingerprint, no files.
+REQUIRED_DECLARATIVE_TOP_KEYS = [
+    "val_set_version",
+    "split_rule",
+    "seed",
+    "dataset_fingerprint",
+]
+REQUIRED_DATASET_FINGERPRINT_KEYS = [
+    "source",
+    "version",
+    "date_window",
+    "row_count",
+    "schema_hash",
+]
+
+# Mode-exclusive keys: each mode rejects the other mode's keys so a complete
+# manifest of one mode that ALSO carries the other mode's keys fails closed
+# (mirrors `additionalProperties: false` on each anyOf branch of the schema).
+# Shared keys (protocol_version, mode, val_set_version) belong to neither set.
+FROZEN_ONLY_KEYS = {"snapshot_id", "train", "val", "test", "frozen_at", "frozen_by"}
+DECLARATIVE_ONLY_KEYS = {
+    "split_rule",
+    "seed",
+    "dataset_fingerprint",
+    "membership_sha256",
+}
 
 REQUIRED_FIXTURE_KEYS = ["fixture_id", "input", "golden_outputs"]
 
@@ -160,6 +206,18 @@ def check_bootstrap_answers(host_root: Path) -> tuple[bool, str]:
     return report(True, "bootstrap-answers.yaml exists with required frontmatter")
 
 
+def _ratio_has_positive_mass(ratio: dict) -> bool:
+    """A declarative split ratio must allocate some positive mass — an all-zero
+    (or non-numeric) ratio partitions nothing. Values are already schema-bounded
+    to [0, 1]; here we just require the total to be > 0."""
+    total = 0.0
+    for value in ratio.values():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        total += value
+    return total > 0
+
+
 def _is_populated(value: object) -> bool:
     """Truthy + length>0 for strings/collections; >=0 for ints; otherwise not None."""
     if value is None:
@@ -176,9 +234,199 @@ def _is_populated(value: object) -> bool:
     return True
 
 
+def _check_frozen_manifest(data: dict) -> list[tuple[bool, str]]:
+    """Frozen-mode (§6.3.1) sub-checks: per-split content hashes + metadata."""
+    results: list[tuple[bool, str]] = []
+    missing = [k for k in REQUIRED_FROZEN_TOP_KEYS if k not in data]
+    if missing:
+        results.append(
+            report(
+                False, "MANIFEST.json (frozen) top-level fields", f"missing: {missing}"
+            )
+        )
+    else:
+        scalar_keys = [
+            k for k in REQUIRED_FROZEN_TOP_KEYS if k not in ("train", "val", "test")
+        ]
+        unpopulated = [k for k in scalar_keys if not _is_populated(data[k])]
+        if unpopulated:
+            results.append(
+                report(
+                    False,
+                    "MANIFEST.json (frozen) top-level populated",
+                    f"empty or null values: {unpopulated}",
+                )
+            )
+        else:
+            results.append(report(True, "MANIFEST.json (frozen) top-level fields"))
+
+    for split in ("train", "val", "test"):
+        split_data = data.get(split)
+        if not isinstance(split_data, dict):
+            results.append(
+                report(
+                    False,
+                    f"MANIFEST.json (frozen) {split} schema",
+                    f"expected mapping, got {type(split_data).__name__}",
+                )
+            )
+            continue
+        missing = [k for k in REQUIRED_FROZEN_SPLIT_KEYS if k not in split_data]
+        if missing:
+            results.append(
+                report(
+                    False,
+                    f"MANIFEST.json (frozen) {split} schema",
+                    f"missing required keys: {missing}",
+                )
+            )
+            continue
+        unpopulated = [
+            k for k in REQUIRED_FROZEN_SPLIT_KEYS if not _is_populated(split_data[k])
+        ]
+        if unpopulated:
+            results.append(
+                report(
+                    False,
+                    f"MANIFEST.json (frozen) {split} populated",
+                    f"empty/null/zero values: {unpopulated}",
+                )
+            )
+            continue
+        size = split_data["size_bytes"]
+        if not isinstance(size, int) or size <= 0:
+            results.append(
+                report(
+                    False,
+                    f"MANIFEST.json (frozen) {split}.size_bytes positive int",
+                    f"got {size!r} ({type(size).__name__})",
+                )
+            )
+            continue
+        results.append(
+            report(True, f"MANIFEST.json (frozen) {split} schema + populated")
+        )
+    return results
+
+
+def _check_declarative_manifest(data: dict) -> list[tuple[bool, str]]:
+    """Declarative-mode (§6.3.1) sub-checks: split rule + seed + dataset fingerprint."""
+    results: list[tuple[bool, str]] = []
+    missing = [k for k in REQUIRED_DECLARATIVE_TOP_KEYS if k not in data]
+    if missing:
+        results.append(
+            report(
+                False,
+                "MANIFEST.json (declarative) top-level fields",
+                f"missing: {missing}",
+            )
+        )
+    else:
+        unpopulated = [
+            k
+            for k in REQUIRED_DECLARATIVE_TOP_KEYS
+            if k not in ("split_rule", "dataset_fingerprint")
+            and not _is_populated(data[k])
+        ]
+        if unpopulated:
+            results.append(
+                report(
+                    False,
+                    "MANIFEST.json (declarative) top-level populated",
+                    f"empty or null values: {unpopulated}",
+                )
+            )
+        else:
+            results.append(report(True, "MANIFEST.json (declarative) top-level fields"))
+
+    rule = data.get("split_rule")
+    if not isinstance(rule, dict):
+        results.append(
+            report(
+                False,
+                "MANIFEST.json (declarative) split_rule schema",
+                f"expected mapping, got {type(rule).__name__}",
+            )
+        )
+    elif not _is_populated(rule.get("split_key")):
+        results.append(
+            report(
+                False,
+                "MANIFEST.json (declarative) split_rule.split_key",
+                "missing or empty",
+            )
+        )
+    elif not any(
+        _is_populated(rule.get(k)) for k in ("ratio", "cutoff", "temporal_oos_window")
+    ):
+        # split_key alone cannot materialize train/val/test membership (§6.3.1):
+        # require at least one partitioning clause.
+        results.append(
+            report(
+                False,
+                "MANIFEST.json (declarative) split_rule partition clause",
+                "split_key present but no ratio / cutoff / temporal_oos_window — "
+                "cannot deterministically materialize train/val/test",
+            )
+        )
+    elif isinstance(rule.get("ratio"), dict) and not _ratio_has_positive_mass(
+        rule["ratio"]
+    ):
+        # A ratio whose values are all zero (or non-numeric) partitions nothing.
+        results.append(
+            report(
+                False,
+                "MANIFEST.json (declarative) split_rule.ratio",
+                "ratio values sum to zero — no split mass to materialize",
+            )
+        )
+    else:
+        results.append(report(True, "MANIFEST.json (declarative) split_rule"))
+
+    fp = data.get("dataset_fingerprint")
+    if not isinstance(fp, dict):
+        results.append(
+            report(
+                False,
+                "MANIFEST.json (declarative) dataset_fingerprint schema",
+                f"expected mapping, got {type(fp).__name__}",
+            )
+        )
+    else:
+        fp_missing = [k for k in REQUIRED_DATASET_FINGERPRINT_KEYS if k not in fp]
+        if fp_missing:
+            results.append(
+                report(
+                    False,
+                    "MANIFEST.json (declarative) dataset_fingerprint schema",
+                    f"missing required keys: {fp_missing}",
+                )
+            )
+        else:
+            fp_unpopulated = [
+                k for k in REQUIRED_DATASET_FINGERPRINT_KEYS if not _is_populated(fp[k])
+            ]
+            if fp_unpopulated:
+                results.append(
+                    report(
+                        False,
+                        "MANIFEST.json (declarative) dataset_fingerprint populated",
+                        f"empty/null/zero values: {fp_unpopulated}",
+                    )
+                )
+            else:
+                results.append(
+                    report(True, "MANIFEST.json (declarative) dataset_fingerprint")
+                )
+    return results
+
+
 def check_manifest(host_root: Path) -> list[tuple[bool, str]]:
-    """Check #5: data/splits/MANIFEST.json exists, has every §6.3.1 field, and
-    every required field is populated (not empty string, not null, not 0-size).
+    """Check #5: data/splits/MANIFEST.json exists and matches EXACTLY ONE §6.3.1
+    split mode (frozen or declarative — the anyOf of split_manifest.schema.json),
+    with every required field populated. Fail-closed on a partial/mixed manifest:
+    a manifest whose ``mode`` is unset/unknown, or that satisfies neither branch
+    cleanly, is rejected rather than silently passing one half of a mode.
     """
     results: list[tuple[bool, str]] = []
     p = host_root / "data" / "splits" / "MANIFEST.json"
@@ -201,78 +449,92 @@ def check_manifest(host_root: Path) -> list[tuple[bool, str]]:
         return results
     results.append(report(True, "MANIFEST.json exists and parses"))
 
-    missing = [k for k in REQUIRED_MANIFEST_TOP_KEYS if k not in data]
-    if missing:
-        results.append(
-            report(False, "MANIFEST.json top-level fields", f"missing: {missing}")
-        )
+    # Both schema branches require `protocol_version` const "0.5"; the stdlib
+    # validator can't be relied on here (and isn't run), so check it explicitly.
+    # A missing/wrong version fails closed rather than passing on `mode` alone.
+    version = data.get("protocol_version")
+    if version == EXPECTED_PROTOCOL_VERSION:
+        results.append(report(True, "MANIFEST.json protocol_version"))
     else:
-        # All required top-level keys present — now check the non-split ones
-        # are populated. Split sub-checks below cover train/val/test.
-        scalar_keys = [
-            k for k in REQUIRED_MANIFEST_TOP_KEYS if k not in ("train", "val", "test")
-        ]
-        unpopulated = [k for k in scalar_keys if not _is_populated(data[k])]
-        if unpopulated:
-            results.append(
-                report(
-                    False,
-                    "MANIFEST.json top-level populated",
-                    f"empty or null values: {unpopulated}",
-                )
+        results.append(
+            report(
+                False,
+                "MANIFEST.json protocol_version",
+                f"expected {EXPECTED_PROTOCOL_VERSION!r}, got {version!r}",
             )
-        else:
-            results.append(report(True, "MANIFEST.json top-level fields"))
+        )
 
-    for split in ("train", "val", "test"):
-        split_data = data.get(split)
-        if not isinstance(split_data, dict):
-            results.append(
-                report(
-                    False,
-                    f"MANIFEST.json {split} schema",
-                    f"expected mapping, got {type(split_data).__name__}",
-                )
+    # `mode` is the anyOf discriminator. Fail-closed when it is missing or not
+    # one of the two known modes — a mixed/partial manifest cannot select a
+    # branch and so must not pass.
+    mode = data.get("mode")
+    if mode == "frozen":
+        results.append(report(True, "MANIFEST.json mode = frozen"))
+        results.extend(_reject_foreign_mode_keys(data, mode, DECLARATIVE_ONLY_KEYS))
+        results.extend(_check_frozen_manifest(data))
+    elif mode == "declarative":
+        results.append(report(True, "MANIFEST.json mode = declarative"))
+        results.extend(_reject_foreign_mode_keys(data, mode, FROZEN_ONLY_KEYS))
+        results.extend(_check_declarative_manifest(data))
+    else:
+        results.append(
+            report(
+                False,
+                "MANIFEST.json mode",
+                f"expected 'frozen' or 'declarative' (§6.3.1), got {mode!r}; "
+                f"a partial/mixed manifest fails closed",
             )
-            continue
-        missing = [k for k in REQUIRED_MANIFEST_SPLIT_KEYS if k not in split_data]
-        if missing:
-            results.append(
-                report(
-                    False,
-                    f"MANIFEST.json {split} schema",
-                    f"missing required keys: {missing}",
-                )
-            )
-            continue
-        # Schema present — verify values are populated. sha256 + path must
-        # be non-empty strings; size_bytes must be a positive integer.
-        unpopulated = [
-            k for k in REQUIRED_MANIFEST_SPLIT_KEYS if not _is_populated(split_data[k])
-        ]
-        if unpopulated:
-            results.append(
-                report(
-                    False,
-                    f"MANIFEST.json {split} populated",
-                    f"empty/null/zero values: {unpopulated}",
-                )
-            )
-            continue
-        # Extra: size_bytes must be strictly positive (a 0-byte split is a bug,
-        # not a valid bootstrap state).
-        size = split_data["size_bytes"]
-        if not isinstance(size, int) or size <= 0:
-            results.append(
-                report(
-                    False,
-                    f"MANIFEST.json {split}.size_bytes positive int",
-                    f"got {size!r} ({type(size).__name__})",
-                )
-            )
-            continue
-        results.append(report(True, f"MANIFEST.json {split} schema + populated"))
+        )
+
+    # Structural schema backstop: the populated-only checks above accept wrong
+    # TYPES (numeric path/sha256, string seed, object val_set_version) that
+    # split_manifest.schema.json rejects. Run the manifest through the stdlib
+    # structural validator so those — and unknown keys — fail closed here too.
+    results.append(_check_manifest_schema(data))
     return results
+
+
+def _check_manifest_schema(data: dict) -> tuple[bool, str]:
+    """Validate the manifest against split_manifest.schema.json (stdlib validator).
+
+    A single PASS/FAIL backstop for field types + unknown keys + the `const`
+    discriminators; the per-field checks above carry the friendly detail and the
+    `size_bytes`/`row_count` `minimum` bounds the structural validator omits.
+    """
+    try:
+        schema = load_schema(SPLIT_MANIFEST_SCHEMA)
+    except (OSError, json.JSONDecodeError) as exc:
+        return report(
+            False, "MANIFEST.json schema loadable", f"{SPLIT_MANIFEST_SCHEMA}: {exc}"
+        )
+    errors = validate_against_schema(data, schema)
+    if errors:
+        return report(
+            False,
+            "MANIFEST.json matches split_manifest.schema.json",
+            "; ".join(errors[:3]),
+        )
+    return report(True, "MANIFEST.json matches split_manifest.schema.json")
+
+
+def _reject_foreign_mode_keys(
+    data: dict, mode: str, foreign_keys: set[str]
+) -> list[tuple[bool, str]]:
+    """Fail closed when a manifest of one mode also carries the OTHER mode's
+    keys (e.g. ``mode: frozen`` plus ``split_rule``). Mirrors the schema's
+    per-branch ``additionalProperties: false`` so the hand-rolled validator
+    rejects a complete-superset mixed manifest, not just an incomplete one."""
+    present = sorted(foreign_keys & set(data))
+    if present:
+        return [
+            report(
+                False,
+                f"MANIFEST.json ({mode}) no foreign-mode keys",
+                f"carries keys from the other mode: {present}; a mixed manifest "
+                f"fails closed",
+            )
+        ]
+    return []
 
 
 def check_fixtures(host_root: Path, allow_partial: bool) -> list[tuple[bool, str]]:
