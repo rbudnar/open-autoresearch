@@ -275,6 +275,20 @@ class TestCheckManifestModes(unittest.TestCase):
                 self.assertFalse(_ok(results))
                 self.assertTrue(any("schema" in line for ok, line in results if not ok))
 
+    def test_all_zero_ratio_fails_closed(self):
+        # ratio values in-range but summing to zero partitions nothing.
+        m = _declarative_manifest()
+        m["split_rule"] = {
+            "split_key": "member_id",
+            "ratio": {"train": 0, "val": 0, "test": 0},
+        }
+        results = _run_check_manifest(m)
+        self.assertFalse(_ok(results))
+        self.assertTrue(
+            any("ratio" in line for ok, line in results if not ok),
+            [line for ok, line in results if not ok],
+        )
+
     def test_blank_temporal_window_fails_via_schema(self):
         # temporal_oos_window {start:"", end:""} carries no auditable window.
         for bad in (
@@ -695,6 +709,39 @@ class TestRule11WarnNotGate(unittest.TestCase):
         ctx = self._ctx(None, None)
         self.assertTrue(ctx.cross_dataset)
 
+    def test_malformed_references_do_not_crash_rule_11(self):
+        # A non-dict references / baseline_run / candidate item must yield a clean
+        # cross_dataset flag, never an AttributeError traceback.
+        for bad_request in [
+            {"references": "not-an-object"},
+            {
+                "references": {
+                    "baseline_run": "x",
+                    "candidate_runs": [{"ledger_id": "c"}],
+                }
+            },
+            {"references": {"baseline_run": {"ledger_id": "b"}, "candidate_runs": "x"}},
+            {
+                "references": {
+                    "baseline_run": {"ledger_id": "b"},
+                    "candidate_runs": ["x"],
+                }
+            },
+            {},
+        ]:
+            with self.subTest(request=bad_request):
+                ctx = vr.VerifierContext(
+                    request=bad_request,
+                    request_path=Path("req.json"),
+                    ledger={},
+                    metrics={},
+                    enforcement={},
+                    unsigned=True,
+                )
+                ok, _ = vr.rule_11_comparison_set_identity(ctx)
+                self.assertTrue(ok)  # rule 11 never fails the request
+                self.assertTrue(ctx.cross_dataset)  # cannot confirm → flag
+
     def test_data_fingerprint_records_are_schema_valid(self):
         # The records rule 11 reads must themselves validate against the record
         # schema (the optional data_fingerprint object).
@@ -852,6 +899,7 @@ def _degenerate_fingerprints() -> list:
         ("string", "10"),
         ("float", 1.5),
         ("negative", -1),
+        ("zero", 0),
         ("bool", True),
         ("missing", None),
     ]:

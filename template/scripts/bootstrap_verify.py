@@ -206,6 +206,18 @@ def check_bootstrap_answers(host_root: Path) -> tuple[bool, str]:
     return report(True, "bootstrap-answers.yaml exists with required frontmatter")
 
 
+def _ratio_has_positive_mass(ratio: dict) -> bool:
+    """A declarative split ratio must allocate some positive mass — an all-zero
+    (or non-numeric) ratio partitions nothing. Values are already schema-bounded
+    to [0, 1]; here we just require the total to be > 0."""
+    total = 0.0
+    for value in ratio.values():
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        total += value
+    return total > 0
+
+
 def _is_populated(value: object) -> bool:
     """Truthy + length>0 for strings/collections; >=0 for ints; otherwise not None."""
     if value is None:
@@ -355,6 +367,17 @@ def _check_declarative_manifest(data: dict) -> list[tuple[bool, str]]:
                 "MANIFEST.json (declarative) split_rule partition clause",
                 "split_key present but no ratio / cutoff / temporal_oos_window — "
                 "cannot deterministically materialize train/val/test",
+            )
+        )
+    elif isinstance(rule.get("ratio"), dict) and not _ratio_has_positive_mass(
+        rule["ratio"]
+    ):
+        # A ratio whose values are all zero (or non-numeric) partitions nothing.
+        results.append(
+            report(
+                False,
+                "MANIFEST.json (declarative) split_rule.ratio",
+                "ratio values sum to zero — no split mass to materialize",
             )
         )
     else:

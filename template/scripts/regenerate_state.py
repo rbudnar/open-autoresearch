@@ -123,7 +123,13 @@ def read_manifest_val_set_version(state_dir: Path) -> "int | str | None":
         return None
     if isinstance(data, dict):
         vsv = data.get("val_set_version")
-        if isinstance(vsv, (int, str)) and not isinstance(vsv, bool):
+        if isinstance(vsv, bool):
+            return None
+        if isinstance(vsv, int):
+            return vsv
+        # Align with the schema's non-empty requirement: a blank string label is
+        # not a usable val_set_version, fall back to campaign.json.
+        if isinstance(vsv, str) and vsv.strip():
             return vsv
     return None
 

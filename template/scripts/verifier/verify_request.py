@@ -389,11 +389,15 @@ def rule_9_statistics_recomputed(ctx: VerifierContext) -> tuple[bool, str | None
     re-derive §13.2.1 from referenced ledger metrics; this reference checks
     that the referenced entries CONTAIN the metric values claimed.
     """
-    refs = ctx.request.get("references") or {}
+    refs = ctx.request.get("references")
+    if not isinstance(refs, dict):
+        return False, "references is not an object"
     candidate_runs = refs.get("candidate_runs") or []
-    if not candidate_runs:
-        return False, "references.candidate_runs is empty"
+    if not isinstance(candidate_runs, list) or not candidate_runs:
+        return False, "references.candidate_runs is empty or not a list"
     for i, ref in enumerate(candidate_runs):
+        if not isinstance(ref, dict):
+            return False, f"candidate_runs[{i}] is not an object"
         candidate_ledger_id = ref.get("ledger_id")
         if not isinstance(candidate_ledger_id, str):
             return False, f"candidate_runs[{i}] ledger_id is not a string"
@@ -402,7 +406,9 @@ def rule_9_statistics_recomputed(ctx: VerifierContext) -> tuple[bool, str | None
             return False, f"candidate_runs[{i}] ledger_id not found"
         if "metrics" not in entry["entry"]:
             return False, f"candidate_runs[{i}] ledger entry has no 'metrics' block"
-    baseline_ref = refs.get("baseline_run") or {}
+    baseline_ref = refs.get("baseline_run")
+    if not isinstance(baseline_ref, dict):
+        return False, "baseline_run is not an object"
     baseline_ledger_id = baseline_ref.get("ledger_id")
     if not isinstance(baseline_ledger_id, str):
         return False, "baseline_run ledger_id is not a string"
@@ -455,7 +461,7 @@ _DATASET_FINGERPRINT_IDENTITY_SCHEMA = {
         "source": _NONEMPTY_STRING,
         "version": _NONEMPTY_STRING,
         "schema_hash": _NONEMPTY_STRING,
-        "row_count": {"type": "integer", "minimum": 0},
+        "row_count": {"type": "integer", "minimum": 1},
         "date_window": {
             "anyOf": [
                 _NONEMPTY_STRING,
@@ -549,11 +555,21 @@ def rule_11_comparison_set_identity(ctx: VerifierContext) -> tuple[bool, str | N
         entry = wrapped.get("entry")
         return _split_identity(entry) if isinstance(entry, dict) else None
 
-    refs = ctx.request.get("references") or {}
-    baseline_ref = refs.get("baseline_run") or {}
-    baseline_identity = _identity_for(baseline_ref.get("ledger_id"))
+    # Tolerate a malformed request shape (non-dict references / baseline_run /
+    # candidate items): rule 11 never crashes — an unreadable identity is simply
+    # None, which surfaces as cross_dataset. (rule 2 rejects the malformed request
+    # cleanly; both run, so rule 11 must not raise on the same input.)
+    refs = ctx.request.get("references")
+    refs = refs if isinstance(refs, dict) else {}
+    baseline_ref = refs.get("baseline_run")
+    baseline_identity = (
+        _identity_for(baseline_ref.get("ledger_id"))
+        if isinstance(baseline_ref, dict)
+        else None
+    )
 
-    candidate_runs = refs.get("candidate_runs") or []
+    candidate_runs = refs.get("candidate_runs")
+    candidate_runs = candidate_runs if isinstance(candidate_runs, list) else []
     candidate_identities: list["Any | None"] = [
         _identity_for(ref.get("ledger_id")) if isinstance(ref, dict) else None
         for ref in candidate_runs

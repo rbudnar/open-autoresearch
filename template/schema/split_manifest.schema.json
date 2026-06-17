@@ -139,7 +139,7 @@
                 }
               ]
             },
-            "row_count": {"type": "integer", "minimum": 0, "description": "Number of rows in the fingerprinted dataset."},
+            "row_count": {"type": "integer", "minimum": 1, "description": "Number of rows in the fingerprinted dataset (a comparison set has at least one row)."},
             "schema_hash": {"type": "string", "pattern": "\\S", "description": "Hash of the dataset schema (column names + dtypes)."}
           }
         },
