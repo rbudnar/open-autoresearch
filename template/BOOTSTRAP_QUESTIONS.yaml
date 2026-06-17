@@ -504,11 +504,16 @@ groups:
 
       - id: dataset_fingerprint
         ask: |
-          DECLARATIVE mode: the dataset_fingerprint = (source, version,
-          date_window, row_count, schema_hash). This is what makes "we ran
-          the same dataset" auditable without persisting files. Strongly
-          consider ALSO recording a per-split membership hash (sorted-id
-          sha256) at run time for byte-level same-set proof.
+          DECLARATIVE mode: the dataset_fingerprint IDENTITY = (source,
+          version, date_window) — required. This is what makes "we ran the
+          same dataset" auditable without persisting files. A growing /
+          forward-moving dataset is identified by its date range alone (a
+          continuously-appended source cannot pin a stable row_count).
+          row_count + schema_hash are OPTIONAL strengtheners: add them only
+          when you pin a fixed materialized snapshot (they fail closed if
+          present-but-degenerate). Strongly consider ALSO recording a
+          per-split membership hash (sorted-id sha256) at run time for
+          byte-level same-set proof when you do pin a snapshot.
         why: |
           §6.3.1 / Guard B: the fingerprint pins the dataset generation the
           rule ran against. Combined with split_rule + seed it reconstructs
@@ -520,6 +525,8 @@ groups:
           source: gold.activities
           version: v2026-06-16
           date_window: "2025-01-01..2026-06-16"
+          # row_count + schema_hash are OPTIONAL — include them only when pinning
+          # a fixed snapshot; omit for a growing dataset identified by date range:
           row_count: 1234567
           schema_hash: "<sha256 of column names + dtypes>"
 
@@ -565,7 +572,8 @@ groups:
 #     - frozen_at  → agent uses current UTC ISO-8601 timestamp at bootstrap
 #     - frozen_by  → agent fills in its own `bootstrapped_by` identity
 #   DECLARATIVE mode:
-#     - dataset_fingerprint.row_count / schema_hash → agent reads the dataset
+#     - dataset_fingerprint.row_count / schema_hash (OPTIONAL) → agent reads the
+#       dataset WHEN pinning a fixed snapshot; omit for a growing dataset
 #     - membership_sha256 (optional, strongest tier) → agent materializes the
 #       split once and hashes the sorted ids per split
 # Always write `protocol_version: "0.5"` and the chosen `mode`. Don't add

@@ -25,8 +25,16 @@ mechanical edit (a single `mode: frozen` line), not a data migration:
   warning to have something to compare.
 - **Adopting declarative mode** is opt-in: set `mode: declarative` and write
   `split_rule` + `seed` + `dataset_fingerprint` instead of the frozen file hashes.
-  Frozen remains the recommended default; for deployment-grade campaigns prefer
-  frozen or freeze a non-agent materialization of the declarative split.
+  The `dataset_fingerprint` identity is `(source, version, date_window)` —
+  required. A **growing / forward-moving dataset** (a continuously-appended source
+  that cannot pin a stable `row_count`) is identified by its **date range alone**:
+  write only `source` + `version` + `date_window` and omit `row_count` +
+  `schema_hash`. Add those two optional strengtheners only when a campaign pins a
+  fixed materialized snapshot — they fail closed when present-but-degenerate
+  (`row_count` must be `>= 1`, `schema_hash` non-empty) and fold into the rule-11
+  comparison identity. Frozen remains the recommended default; for
+  deployment-grade campaigns prefer frozen or freeze a non-agent materialization
+  of the declarative split.
 - `examples/` ship no `MANIFEST.json`, so they are unaffected.
 
 See `docs/adr/0002-declarative-data-splits.md` and

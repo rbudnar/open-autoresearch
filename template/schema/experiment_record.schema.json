@@ -99,7 +99,7 @@
         },
         "dataset_fingerprint": {
           "type": "object",
-          "description": "Guard B fingerprint of the dataset: (source, version, date_window, row_count, schema_hash). See split_manifest.schema.json.",
+          "description": "Guard B fingerprint of the dataset. Identity is (source, version, date_window) — required for a comparable identity; row_count + schema_hash are optional strengtheners (omit for a growing dataset identified by date range). See split_manifest.schema.json.",
           "additionalProperties": true
         },
         "split_spec_hash": {

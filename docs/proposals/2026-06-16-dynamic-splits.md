@@ -61,9 +61,13 @@ discriminated by `mode`:
   example with the enforced shape).
 - **`mode: declarative` (new).** A split **rule** (`split_key` e.g. member_id;
   `ratio`/`cutoff`; `temporal_oos_window`), a **`seed`**, and a
-  **`dataset_fingerprint`** = `(source, version, date_window, row_count,
-  schema_hash)`. This is Guard B from the 2026-06-13 provenance redesign, promoted
-  into §6.3.1 as a split mode. No persisted files.
+  **`dataset_fingerprint`** whose identity is `(source, version, date_window)` —
+  required — with optional `row_count` + `schema_hash` strengtheners. A
+  growing/forward-moving dataset is identified by its **date range alone** (a
+  continuously-appended source cannot pin a stable `row_count`); a campaign that
+  pins a fixed snapshot adds `row_count`/`schema_hash` (fail closed when present).
+  This is Guard B from the 2026-06-13 provenance redesign, promoted into §6.3.1 as
+  a split mode. No persisted files.
 
 A partial/mixed manifest fails closed (neither anyOf branch is satisfied).
 

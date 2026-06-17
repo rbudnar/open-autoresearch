@@ -292,8 +292,10 @@ def main(argv: list[str]) -> int:
         "--dataset-fingerprint",
         default="",
         help=(
-            "JSON object: (source, version, date_window, row_count, schema_hash). "
-            "Lighter same-set proof (assumes deterministic materialization)."
+            "JSON object. Identity (source, version, date_window) is required; "
+            "row_count + schema_hash are optional strengtheners (omit for a "
+            "growing dataset identified by date range). Lighter same-set proof "
+            "(assumes deterministic materialization)."
         ),
     )
     parser.add_argument(

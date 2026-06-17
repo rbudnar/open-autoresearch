@@ -120,13 +120,13 @@
         },
         "dataset_fingerprint": {
           "type": "object",
-          "description": "Guard B fingerprint of the dataset the rule runs against — makes 'we ran the same dataset' auditable without persisting files.",
-          "required": ["source", "version", "date_window", "row_count", "schema_hash"],
+          "description": "Guard B fingerprint of the dataset the rule runs against — makes 'we ran the same dataset' auditable without persisting files. The IDENTITY is `(source, version, date_window)` — required — so a forward-moving/growing dataset can be identified by its date range alone (a continuously-appended source cannot pin a stable row_count). `row_count` and `schema_hash` are OPTIONAL integrity strengtheners: include them when a campaign pins a fixed, materialized snapshot (they fail closed if present-but-degenerate); omit them for a growing dataset identified by date range. When present they become part of the comparison-set identity (rule 11), so two runs over the same date_window but different row_count are NOT asserted same-set.",
+          "required": ["source", "version", "date_window"],
           "properties": {
             "source": {"type": "string", "pattern": "\\S", "description": "Source table/path the dataset was read from."},
             "version": {"type": "string", "pattern": "\\S", "description": "Dataset version / data-platform commit / tag."},
             "date_window": {
-              "description": "The date window the dataset covers: a non-empty string label, or a {start, end} object with both bounds non-empty.",
+              "description": "The date window the dataset covers: a non-empty string label, or a {start, end} object with both bounds non-empty. For a growing dataset this IS the identity.",
               "anyOf": [
                 {"type": "string", "pattern": "\\S"},
                 {
@@ -139,8 +139,8 @@
                 }
               ]
             },
-            "row_count": {"type": "integer", "minimum": 1, "description": "Number of rows in the fingerprinted dataset (a comparison set has at least one row)."},
-            "schema_hash": {"type": "string", "pattern": "\\S", "description": "Hash of the dataset schema (column names + dtypes)."}
+            "row_count": {"type": "integer", "minimum": 1, "description": "OPTIONAL. Number of rows in the fingerprinted dataset; include only when a fixed snapshot is pinned (a growing/forward-moving dataset cannot stably pin it). When present must be >= 1 (a comparison set has at least one row)."},
+            "schema_hash": {"type": "string", "pattern": "\\S", "description": "OPTIONAL. Hash of the dataset schema (column names + dtypes); include when a fixed snapshot is pinned. When present must be non-empty."}
           }
         },
         "membership_sha256": {

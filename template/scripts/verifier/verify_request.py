@@ -450,13 +450,17 @@ _MEMBERSHIP_IDENTITY_SCHEMA = {
     },
 }
 
-# A complete Guard-B dataset fingerprint: every field present and well-typed —
-# non-empty source/version/schema_hash, an integer row_count >= 0, and a
-# date_window that is either a non-empty string OR a {start,end} object with both
-# bounds non-empty.
+# A complete Guard-B dataset fingerprint. The IDENTITY is (source, version,
+# date_window) — required — so a growing/forward-moving dataset identified by its
+# date range alone qualifies (it cannot pin a stable row_count). row_count and
+# schema_hash are OPTIONAL strengtheners: when PRESENT they must be well-typed
+# (integer row_count >= 1, non-empty schema_hash) and they fold into the
+# comparable identity key, so two runs over the same date_window but a different
+# row_count are NOT asserted same-set. Kept in lock-step with the declarative
+# dataset_fingerprint branch of split_manifest.schema.json (drift-lock test).
 _DATASET_FINGERPRINT_IDENTITY_SCHEMA = {
     "type": "object",
-    "required": ["source", "version", "date_window", "row_count", "schema_hash"],
+    "required": ["source", "version", "date_window"],
     "properties": {
         "source": _NONEMPTY_STRING,
         "version": _NONEMPTY_STRING,

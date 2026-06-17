@@ -41,9 +41,15 @@ Add a two-mode split model to §6.3.1 and close the comparison-set gap, as mecha
      shape — there is now one canonical frozen shape and both the prose and the
      code match it.
    - **`mode: declarative`** (new) — a split rule (`split_key`, ratio/cutoff,
-     temporal OOS window) + `seed` + `dataset_fingerprint`
-     `(source, version, date_window, row_count, schema_hash)`. This is Guard B from
-     the 2026-06-13 provenance redesign, promoted into §6.3.1 as a split mode.
+     temporal OOS window) + `seed` + `dataset_fingerprint`. The fingerprint
+     IDENTITY is `(source, version, date_window)` — **required** — so a
+     growing/forward-moving dataset can be identified by its date range alone (a
+     continuously-appended source cannot pin a stable `row_count`). `row_count`
+     and `schema_hash` are **optional** integrity strengtheners: include them when
+     a campaign pins a fixed materialized snapshot (they fail closed if
+     present-but-degenerate and fold into the rule-11 comparison identity); omit
+     them for a growing dataset. This is Guard B from the 2026-06-13 provenance
+     redesign, promoted into §6.3.1 as a split mode.
    A partial/mixed manifest **fails closed**.
 2. Each experiment record may carry an OPTIONAL `data_fingerprint` recording its
    split identity. Depth is project-chosen: strongest = a per-split

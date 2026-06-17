@@ -325,11 +325,45 @@ class TestCheckManifestModes(unittest.TestCase):
         results = _run_check_manifest(m)
         self.assertFalse(_ok(results))
 
-    def test_declarative_missing_fingerprint_key_fails(self):
+    def test_declarative_missing_optional_fingerprint_keys_passes(self):
+        # row_count and schema_hash are OPTIONAL integrity strengtheners — a
+        # growing/forward-moving dataset identified by its date range alone omits
+        # them. The manifest stays valid (identity = source/version/date_window).
         m = _declarative_manifest()
         del m["dataset_fingerprint"]["schema_hash"]
+        del m["dataset_fingerprint"]["row_count"]
         results = _run_check_manifest(m)
-        self.assertFalse(_ok(results))
+        self.assertTrue(_ok(results), [line for ok, line in results if not ok])
+
+    def test_declarative_present_but_degenerate_optional_fingerprint_fails(self):
+        # OPTIONAL is not a placeholder loophole: when PRESENT, row_count must be
+        # an int >= 1 and schema_hash non-empty — degenerate values fail closed
+        # via the split_manifest.schema.json backstop.
+        for key, bad in [
+            ("row_count", 0),
+            ("row_count", -1),
+            ("row_count", "10"),
+            ("schema_hash", ""),
+            ("schema_hash", "   "),
+        ]:
+            with self.subTest(key=key, bad=bad):
+                m = _declarative_manifest()
+                m["dataset_fingerprint"][key] = bad
+                results = _run_check_manifest(m)
+                self.assertFalse(
+                    _ok(results), f"dataset_fingerprint.{key}={bad!r} must fail closed"
+                )
+
+    def test_declarative_missing_required_fingerprint_key_fails(self):
+        # source/version/date_window remain REQUIRED identity keys.
+        for key in ("source", "version", "date_window"):
+            with self.subTest(key=key):
+                m = _declarative_manifest()
+                del m["dataset_fingerprint"][key]
+                results = _run_check_manifest(m)
+                self.assertFalse(
+                    _ok(results), f"missing dataset_fingerprint.{key} must fail"
+                )
 
     def test_declarative_missing_split_key_fails(self):
         m = _declarative_manifest()
@@ -861,6 +895,21 @@ def _full_membership_fp() -> dict:
     return {"membership_sha256": {"train": "t", "val": "v", "test": "s"}}
 
 
+def _date_range_only_fp() -> dict:
+    # A growing/forward-moving dataset: identity is (source, version, date_window)
+    # with NO row_count / schema_hash (a continuously-appended source can't pin a
+    # stable count). This is now a COMPLETE lighter-tier identity.
+    return {
+        "dataset_fingerprint": {
+            "source": "gold.activities",
+            "version": "v1",
+            "date_window": {"start": "2022-01-01", "end": "2026-02-01"},
+        },
+        "split_spec_hash": "spec",
+        "seed": 7,
+    }
+
+
 # Degenerate data_fingerprint values that must NOT yield a comparable identity
 # (every one makes _split_identity return None → rule 11 flags cross_dataset).
 def _degenerate_fingerprints() -> list:
@@ -886,8 +935,9 @@ def _degenerate_fingerprints() -> list:
         fp = _full_lighter_fp()
         mutate(fp)
         cases.append((label, fp))
-    # Per-Guard-B-field degeneracy.
-    for key in ("source", "version", "schema_hash"):
+    # Per-Guard-B-field degeneracy. source/version are REQUIRED identity keys, so
+    # present-but-degenerate AND missing both fail closed.
+    for key in ("source", "version"):
         for bad_label, bad in [("empty", ""), ("blank", "  "), ("non-str", 123)]:
             fp = _full_lighter_fp()
             fp["dataset_fingerprint"][key] = bad
@@ -895,19 +945,24 @@ def _degenerate_fingerprints() -> list:
         fp = _full_lighter_fp()
         del fp["dataset_fingerprint"][key]
         cases.append((f"dataset_fingerprint.{key} missing", fp))
+    # schema_hash is OPTIONAL (a growing dataset omits it), so only a
+    # present-but-degenerate value fails — a MISSING schema_hash is a valid
+    # date-range identity (covered in the valid matrix), NOT degenerate.
+    for bad_label, bad in [("empty", ""), ("blank", "  "), ("non-str", 123)]:
+        fp = _full_lighter_fp()
+        fp["dataset_fingerprint"]["schema_hash"] = bad
+        cases.append((f"dataset_fingerprint.schema_hash {bad_label}", fp))
+    # row_count is OPTIONAL but must be an integer >= 1 WHEN PRESENT. A MISSING
+    # row_count is a valid date-range identity, NOT degenerate.
     for bad_label, bad in [
         ("string", "10"),
         ("float", 1.5),
         ("negative", -1),
         ("zero", 0),
         ("bool", True),
-        ("missing", None),
     ]:
         fp = _full_lighter_fp()
-        if bad is None:
-            del fp["dataset_fingerprint"]["row_count"]
-        else:
-            fp["dataset_fingerprint"]["row_count"] = bad
+        fp["dataset_fingerprint"]["row_count"] = bad
         cases.append((f"row_count {bad_label}", fp))
     for bad_label, bad in [
         ("empty string", ""),
@@ -965,6 +1020,7 @@ class TestSplitIdentityMatrix(unittest.TestCase):
                 },
             ),
             ("full membership", _full_membership_fp()),
+            ("date-range-only lighter (growing dataset)", _date_range_only_fp()),
             (
                 "lighter + int val_set_version",
                 {**_full_lighter_fp(), "val_set_version": 1},
@@ -980,6 +1036,24 @@ class TestSplitIdentityMatrix(unittest.TestCase):
                     vr._split_identity({"data_fingerprint": fp}),
                     f"{label!r} must be a comparable identity",
                 )
+
+    def test_date_range_only_identity_semantics(self):
+        # A growing dataset identified by date range alone yields a comparable
+        # identity; two runs over the same window share it; a run that ALSO pins
+        # row_count/schema_hash is NOT asserted same-set as the date-range-only run
+        # (the present fields fold into the comparable key).
+        a = vr._split_identity({"data_fingerprint": _date_range_only_fp()})
+        b = vr._split_identity({"data_fingerprint": _date_range_only_fp()})
+        self.assertIsNotNone(a)
+        self.assertEqual(a, b)
+        pinned = _date_range_only_fp()
+        pinned["dataset_fingerprint"]["row_count"] = 1000
+        pinned["dataset_fingerprint"]["schema_hash"] = "sh"
+        c = vr._split_identity({"data_fingerprint": pinned})
+        self.assertIsNotNone(c)
+        self.assertNotEqual(
+            a, c, "date-range-only and row_count-pinned must not be same-set"
+        )
 
     def test_val_set_version_int_str_canonicalize_equal(self):
         a = vr._split_identity(
@@ -1011,6 +1085,8 @@ class TestSplitIdentityMatrix(unittest.TestCase):
                 "schema_hash": "h",
             }
         )
+        # Date-range-only identity (growing dataset): BOTH schemas must accept it.
+        probes.append({"source": "s", "version": "v", "date_window": "2022..2026"})
         for df in probes:
             with self.subTest(df=df):
                 rule11_ok = not validate_against_schema(
@@ -1072,7 +1148,8 @@ class TestManifestFieldMatrix(unittest.TestCase):
                     )
 
     def test_bad_numeric_fields_fail_closed(self):
-        # size_bytes must be a positive int; row_count a non-negative int.
+        # size_bytes and (the optional, when-present) row_count must be a
+        # positive int (>= 1); present-but-degenerate values fail closed.
         for factory, path, bad in [
             (_frozen_manifest, ("train", "size_bytes"), 0),
             (_frozen_manifest, ("train", "size_bytes"), -5),
