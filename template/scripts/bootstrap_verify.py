@@ -184,7 +184,9 @@ def check_no_fill_me(host_root: Path) -> list[tuple[bool, str]]:
         p = config_dir / f
         if not p.is_file():
             continue  # already reported as a missing-file failure
-        text = p.read_text()
+        # errors="replace": a binary/non-UTF8 config must report a FAIL line, not
+        # crash with UnicodeDecodeError.
+        text = p.read_text(errors="replace")
         if "<FILL_ME>" in text:
             n = text.count("<FILL_ME>")
             results.append(
@@ -201,7 +203,7 @@ def check_bootstrap_answers(host_root: Path) -> tuple[bool, str]:
     if not p.is_file():
         return report(False, "bootstrap-answers.yaml exists", f"missing: {p}")
     try:
-        data = yaml.safe_load(p.read_text())
+        data = yaml.safe_load(p.read_text(errors="replace"))
     except yaml.YAMLError as e:
         return report(False, "bootstrap-answers.yaml exists", f"YAML parse error: {e}")
     if not isinstance(data, dict):
@@ -634,7 +636,7 @@ def check_protocol_version(host_root: Path) -> list[tuple[bool, str]]:
         if not p.is_file():
             continue
         try:
-            data = yaml.safe_load(p.read_text())
+            data = yaml.safe_load(p.read_text(errors="replace"))
         except yaml.YAMLError:
             continue
         if not isinstance(data, dict):

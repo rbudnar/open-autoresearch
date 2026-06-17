@@ -66,8 +66,17 @@ def load_records(ledger_dir: Path) -> list[dict[str, Any]]:
     if not ledger_dir.is_dir():
         return records
     for path in sorted(ledger_dir.glob("*.json")):
-        with path.open("r", encoding="utf-8") as f:
-            obj = json.load(f)
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                obj = json.load(f)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            # Mirror validate_ledger.load_records: a malformed/non-UTF8 shard is
+            # skipped (with a warning) rather than crashing the regeneration.
+            # validate_ledger.py is the surface that FAILS on such a shard.
+            sys.stderr.write(
+                f"WARNING: skipping malformed ledger shard {path.name}: {exc}\n"
+            )
+            continue
         if isinstance(obj, dict):
             records.append(obj)
     # Sort by id for deterministic output.
@@ -234,13 +243,15 @@ def build_research_tree(
             lessons = (
                 rec.get("lessons", []) if isinstance(rec.get("lessons"), list) else []
             )
+        parents = rec.get("parent_ids")
+        parents = parents if isinstance(parents, list) else []
         nodes[rid] = {
             "id": rid,
             "title": title,
             "branch": rec.get("branch", ""),
             "status": rec.get("status", ""),
             "hypothesis": rec.get("hypothesis", ""),
-            "parent_ids": list(rec.get("parent_ids", []) or []),
+            "parent_ids": [p for p in parents if isinstance(p, str)],
             "lessons": list(lessons),
         }
         children.setdefault(rid, [])
@@ -249,8 +260,13 @@ def build_research_tree(
         rid = rec.get("id")
         if not isinstance(rid, str):
             continue
-        parents = rec.get("parent_ids", []) or []
-        real_parents = [p for p in parents if p != BASELINE_SENTINEL and p in nodes]
+        parents = rec.get("parent_ids")
+        parents = parents if isinstance(parents, list) else []
+        real_parents = [
+            p
+            for p in parents
+            if isinstance(p, str) and p != BASELINE_SENTINEL and p in nodes
+        ]
         if not real_parents:
             roots.append(rid)
         for p in real_parents:

@@ -54,7 +54,10 @@ def load_records(ledger_dir: Path) -> list[tuple[Path, Any]]:
 
 
 def validate(ledger_dir: Path, schema_path: Path) -> tuple[bool, list[str]]:
-    schema = load_schema(schema_path)
+    try:
+        schema = load_schema(schema_path)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return False, [f"FAIL schema not loadable: {schema_path}: {exc}"]
     lines: list[str] = []
     ok_overall = True
 
@@ -104,6 +107,11 @@ def validate(ledger_dir: Path, schema_path: Path) -> tuple[bool, list[str]]:
         parent_ids = obj.get("parent_ids") if isinstance(obj, dict) else None
         if isinstance(parent_ids, list):
             for pid in parent_ids:
+                if not isinstance(pid, str):
+                    record_errors.append(
+                        f"parent_id {pid!r} is not a string"
+                    )
+                    continue
                 if pid == BASELINE_SENTINEL:
                     continue
                 if pid not in all_ids:

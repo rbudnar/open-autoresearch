@@ -38,7 +38,14 @@ REPO_ROOT = SCRIPTS_DIR.parent.parent
 L3 = REPO_ROOT / "examples" / "level3-counter-example"
 LEDGER_DIR = L3 / "state" / "ledger"
 REQUEST_JSON = L3 / "proposals" / "iter08-promotion-request.json"
+# VERIFIER resolution stays script-relative (portable: ships with the scaffold).
 VERIFIER = SCRIPTS_DIR / "verifier" / "verify_request.py"
+
+# The examples/ counter-example fixtures live at the upstream repo root and are
+# NOT vendored into a host install. Skip the whole module cleanly when absent so
+# `unittest discover` over a host's autoresearch/scripts/tests passes instead of
+# erroring on missing fixtures.
+_L3_REASON = "examples/ fixtures are upstream-only; absent in a host install"
 
 
 def _shard_hash(ledger_id: str) -> str:
@@ -47,6 +54,7 @@ def _shard_hash(ledger_id: str) -> str:
     return hashlib.sha256(_ledger_common._canonical_record_bytes(entry)).hexdigest()
 
 
+@unittest.skipUnless(L3.exists(), _L3_REASON)
 class TestReferencedHashesMatchGolden(unittest.TestCase):
     """Every ledger-id reference hash == recomputed canonical-bytes hash."""
 
@@ -93,6 +101,7 @@ class TestReferencedHashesMatchGolden(unittest.TestCase):
         self.assertEqual(self.request["protocol_version"], "0.5")
 
 
+@unittest.skipUnless(L3.exists(), _L3_REASON)
 class TestVerifierReproducesLevel3Decision(unittest.TestCase):
     """The verifier reproduces the rejected decision from the shard layout."""
 
@@ -144,6 +153,7 @@ class TestVerifierReproducesLevel3Decision(unittest.TestCase):
             )
 
 
+@unittest.skipUnless(L3.exists(), _L3_REASON)
 class TestExposureAntiSpoof(unittest.TestCase):
     """rule_6 rejects a request that UNDER-reports val exposure vs the ledger.
 

@@ -93,25 +93,31 @@ EvaluatorFn = Callable[[Any], Any]
 def metric_index(metrics_yaml: dict[str, Any]) -> dict[str, dict[str, str]]:
     """Build {metric_name: {direction, aggregation, eval_dtype}} index."""
     out: dict[str, dict[str, str]] = {}
-    primary = metrics_yaml.get("primary_metric") or {}
-    if primary.get("name"):
-        out[primary["name"]] = {
+    primary = metrics_yaml.get("primary_metric")
+    primary = primary if isinstance(primary, dict) else {}
+    primary_name = primary.get("name")
+    if primary_name:
+        if not isinstance(primary_name, str):
+            raise SystemExit("CONFIG ERROR: primary_metric.name must be a string")
+        out[primary_name] = {
             "direction": primary.get("direction", ""),
             "aggregation": primary.get("aggregation", ""),
             "eval_dtype": primary.get("eval_dtype", "fp32"),
         }
-    for entry in metrics_yaml.get("secondary_metrics", []) or []:
-        out[entry["name"]] = {
-            "direction": entry.get("direction", ""),
-            "aggregation": entry.get("aggregation", ""),
-            "eval_dtype": entry.get("eval_dtype", "fp32"),
-        }
-    for entry in metrics_yaml.get("guardrails", []) or []:
-        out[entry["name"]] = {
-            "direction": entry.get("direction", ""),
-            "aggregation": entry.get("aggregation", ""),
-            "eval_dtype": entry.get("eval_dtype", "fp32"),
-        }
+    for group in ("secondary_metrics", "guardrails"):
+        entries = metrics_yaml.get(group)
+        entries = entries if isinstance(entries, list) else []
+        for entry in entries:
+            if not isinstance(entry, dict) or not isinstance(entry.get("name"), str):
+                raise SystemExit(
+                    f"CONFIG ERROR: {group} metric entry not a mapping / "
+                    "missing 'name' (or non-string name)"
+                )
+            out[entry["name"]] = {
+                "direction": entry.get("direction", ""),
+                "aggregation": entry.get("aggregation", ""),
+                "eval_dtype": entry.get("eval_dtype", "fp32"),
+            }
     return out
 
 
@@ -126,10 +132,21 @@ def tolerance_for_metric(
     MUST provide either a ``per_metric`` override or a ``defaults_by_dtype``
     entry for that dtype. Missing config is a hard error.
     """
-    per_metric = (equivalence_cfg.get("per_metric") or {}).get(metric_name)
+    per_metric_cfg = equivalence_cfg.get("per_metric")
+    per_metric_cfg = per_metric_cfg if isinstance(per_metric_cfg, dict) else {}
+    per_metric = per_metric_cfg.get(metric_name)
     if per_metric:
+        if (
+            not isinstance(per_metric, dict)
+            or "rtol" not in per_metric
+            or "atol" not in per_metric
+        ):
+            raise SystemExit(
+                f"CONFIG ERROR: tolerance for '{metric_name}' missing rtol/atol"
+            )
         return float(per_metric["rtol"]), float(per_metric["atol"])
-    defaults_by_dtype = equivalence_cfg.get("defaults_by_dtype") or {}
+    defaults_by_dtype = equivalence_cfg.get("defaults_by_dtype")
+    defaults_by_dtype = defaults_by_dtype if isinstance(defaults_by_dtype, dict) else {}
     dtype_defaults = defaults_by_dtype.get(eval_dtype)
     if dtype_defaults is None:
         raise SystemExit(
@@ -137,6 +154,14 @@ def tolerance_for_metric(
             f"{eval_dtype!r} but metrics.yaml.evaluator_equivalence has no "
             f"defaults_by_dtype.{eval_dtype} entry and no per_metric.{metric_name} "
             f"override. Add one or the other (§17.1.1)."
+        )
+    if (
+        not isinstance(dtype_defaults, dict)
+        or "rtol" not in dtype_defaults
+        or "atol" not in dtype_defaults
+    ):
+        raise SystemExit(
+            f"CONFIG ERROR: tolerance for '{metric_name}' missing rtol/atol"
         )
     return float(dtype_defaults["rtol"]), float(dtype_defaults["atol"])
 
@@ -169,7 +194,16 @@ def load_fixtures(fixtures_dir: Path) -> list[dict[str, Any]]:
         raise SystemExit(f"CONFIG ERROR: fixtures dir does not exist: {fixtures_dir}")
     for path in sorted(fixtures_dir.rglob("*.json")):
         with path.open("r", encoding="utf-8") as f:
-            data = json.load(f)
+            try:
+                data = json.load(f)
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise SystemExit(
+                    f"CONFIG ERROR: fixture {path} is not valid JSON: {exc}"
+                )
+        if not isinstance(data, dict):
+            raise SystemExit(
+                f"CONFIG ERROR: fixture {path} top-level must be an object"
+            )
         for key in ("fixture_id", "input", "golden_outputs"):
             if key not in data:
                 raise SystemExit(
@@ -306,6 +340,9 @@ def main(argv: list[str]) -> int:
 
     with args.metrics.open("r", encoding="utf-8") as f:
         metrics_yaml = yaml.safe_load(f)
+    if not isinstance(metrics_yaml, dict):
+        sys.stderr.write("CONFIG ERROR: metrics.yaml did not parse as a mapping\n")
+        return 2
     equivalence_cfg = metrics_yaml.get("evaluator_equivalence") or {}
     if not equivalence_cfg:
         sys.stderr.write(

@@ -61,6 +61,8 @@ def resolve_val_queries(entry: dict[str, Any]) -> int:
     (``val_queries_incurred_by_this_run``) and the AE record shape
     (``metrics.validation_set_queries``).
     """
+    if not isinstance(entry, dict):
+        return 0
     direct = entry.get("val_queries_incurred_by_this_run")
     if isinstance(direct, bool):
         # bool is an int subclass; a stray True/False is not a query count.

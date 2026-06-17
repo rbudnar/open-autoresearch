@@ -19,9 +19,14 @@ done
 
 After this step you have a `<host>/autoresearch/` directory matching the layout described in `PROTOCOL.md` §4. None of the configs are usable yet — they are template placeholders with `<FILL_ME>` fields. Read `PROTOCOL.md` §1.5 ("Start Here") and edit them, OR walk `BOOTSTRAP_QUESTIONS.yaml` with an agent.
 
-When you're done, verify the install:
+When you're done, verify the install. The scaffold you just copied ships the
+verifier, so run the host copy from your host project root:
 
 ```bash
+# Host form (after copying the scaffold into ./autoresearch/):
+python autoresearch/scripts/bootstrap_verify.py <host-root>
+
+# Upstream-dev form (running from a checkout of this repo, before copying):
 python /path/to/open-autoresearch/template/scripts/bootstrap_verify.py <host-root>
 ```
 

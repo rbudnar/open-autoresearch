@@ -91,8 +91,12 @@ def load_questionnaire(path: Path) -> dict[str, Any]:
 def collect_questions(questionnaire: dict[str, Any]) -> list[dict[str, Any]]:
     """Flatten all questions across all groups."""
     questions: list[dict[str, Any]] = []
-    for group in questionnaire.get("groups", []):
-        for q in group.get("questions", []):
+    for group in questionnaire.get("groups") or []:
+        if not isinstance(group, dict):
+            continue
+        group_questions = group.get("questions")
+        group_questions = group_questions if isinstance(group_questions, list) else []
+        for q in group_questions:
             if isinstance(q, dict):
                 questions.append(q)
     return questions
@@ -280,25 +284,42 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--scaffold-root",
+        type=Path,
+        default=None,
+        help=(
+            "Scaffold root holding BOOTSTRAP_QUESTIONS.yaml and config/ "
+            "(`template/` upstream, `autoresearch/` in a host install). "
+            "Default: the scaffold this script lives in (one level up from "
+            "scripts/)."
+        ),
+    )
+    parser.add_argument(
         "--repo-root",
         type=Path,
         default=None,
         help=(
-            "Repo root (containing template/). Default: auto-detect by "
-            "walking up from this script."
+            "Deprecated alias for --scaffold-root (the directory holding "
+            "BOOTSTRAP_QUESTIONS.yaml and config/)."
         ),
     )
     args = parser.parse_args()
 
-    repo_root: Path
-    if args.repo_root is not None:
-        repo_root = args.repo_root
+    # The scaffold root is the directory that holds BOOTSTRAP_QUESTIONS.yaml and
+    # config/. It is `template/` in this upstream repo and `autoresearch/` once
+    # the scaffold is vendored into a host. Resolve it relative to THIS script
+    # (scripts/ sits inside the scaffold) so the check runs identically from both
+    # layouts. --scaffold-root (or the deprecated --repo-root alias) overrides.
+    scaffold: Path
+    if args.scaffold_root is not None:
+        scaffold = args.scaffold_root
+    elif args.repo_root is not None:
+        scaffold = args.repo_root
     else:
-        # template/scripts/check_questionnaire_drift.py → repo root is 2 up.
-        repo_root = Path(__file__).resolve().parent.parent.parent
+        scaffold = Path(__file__).resolve().parent.parent
 
-    questionnaire_path = repo_root / "template" / "BOOTSTRAP_QUESTIONS.yaml"
-    config_dir = repo_root / "template" / "config"
+    questionnaire_path = scaffold / "BOOTSTRAP_QUESTIONS.yaml"
+    config_dir = scaffold / "config"
 
     if not questionnaire_path.exists():
         print(f"error: questionnaire not found at {questionnaire_path}")

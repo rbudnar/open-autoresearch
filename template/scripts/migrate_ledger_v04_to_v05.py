@@ -50,7 +50,12 @@ def read_jsonl(path: Path) -> list[dict[str, Any]]:
             stripped = line.strip()
             if not stripped:
                 continue
-            obj = json.loads(stripped)
+            try:
+                obj = json.loads(stripped)
+            except json.JSONDecodeError as e:
+                raise SystemExit(
+                    f"ledger line is not valid JSON: {stripped[:80]!r} ({e})"
+                )
             if not isinstance(obj, dict):
                 raise SystemExit(f"ledger line is not an object: {stripped[:80]!r}")
             records.append(obj)

@@ -163,7 +163,13 @@ def load_ledger(ledger_dir: Path) -> dict[str, dict[str, Any]]:
     out: dict[str, dict[str, Any]] = {}
     for shard in sorted(ledger_dir.glob("*.json")):
         with shard.open("r", encoding="utf-8") as f:
-            entry = json.load(f)
+            try:
+                entry = json.load(f)
+            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                raise SystemExit(
+                    f"CONFIG ERROR: ledger shard {shard.name} is not valid "
+                    f"JSON: {exc}"
+                )
         if not isinstance(entry, dict):
             raise SystemExit(
                 f"CONFIG ERROR: ledger shard {shard.name} is not a JSON object"
@@ -172,6 +178,10 @@ def load_ledger(ledger_dir: Path) -> dict[str, dict[str, Any]]:
         if not entry_id:
             raise SystemExit(
                 f"CONFIG ERROR: ledger shard {shard.name} missing 'id' field"
+            )
+        if not isinstance(entry_id, str):
+            raise SystemExit(
+                f"CONFIG ERROR: ledger shard {shard.name} 'id' is not a string"
             )
         if entry_id in out:
             raise SystemExit(
@@ -220,7 +230,9 @@ def rule_1_protocol_version_match(ctx: VerifierContext) -> tuple[bool, str | Non
 
 
 def rule_2_references_rehash(ctx: VerifierContext) -> tuple[bool, str | None]:
-    refs = ctx.request.get("references") or {}
+    refs = ctx.request.get("references")
+    if not isinstance(refs, dict):
+        return False, "references is not an object/mapping"
     if not refs:
         return False, "request has no 'references' block"
     mismatches: list[str] = []
@@ -232,6 +244,9 @@ def rule_2_references_rehash(ctx: VerifierContext) -> tuple[bool, str | None]:
         path_ref = ref.get("path")
         if claimed is None:
             mismatches.append(f"{label}: no content_sha256")
+            return
+        if not isinstance(claimed, str):
+            mismatches.append(f"{label}: content_sha256 is not a string")
             return
         if ledger_id:
             entry = ctx.ledger.get(ledger_id)
@@ -245,6 +260,9 @@ def rule_2_references_rehash(ctx: VerifierContext) -> tuple[bool, str | None]:
                     f"actual={actual[:12]}..."
                 )
         elif path_ref:
+            if not isinstance(path_ref, str):
+                mismatches.append(f"{label}: path is not a string")
+                return
             file_path = Path(path_ref)
             if not file_path.is_absolute():
                 file_path = ctx.request_path.parent.parent / path_ref
@@ -263,6 +281,9 @@ def rule_2_references_rehash(ctx: VerifierContext) -> tuple[bool, str | None]:
     for label, ref in refs.items():
         if isinstance(ref, list):
             for i, item in enumerate(ref):
+                if not isinstance(item, dict):
+                    mismatches.append(f"{label}[{i}]: not an object")
+                    continue
                 check_ref(f"{label}[{i}]", item)
         elif isinstance(ref, dict):
             check_ref(label, ref)
@@ -287,10 +308,18 @@ def rule_3_maturity_level_ge_3(ctx: VerifierContext) -> tuple[bool, str | None]:
 
 
 def rule_4_role_separation_ok(ctx: VerifierContext) -> tuple[bool, str | None]:
-    claims = ctx.request.get("claims") or {}
-    sep = claims.get("role_separation_achieved") or {}
+    claims = ctx.request.get("claims")
+    claims = claims if isinstance(claims, dict) else {}
+    sep = claims.get("role_separation_achieved")
+    sep = sep if isinstance(sep, dict) else {}
     impl_vs_skeptic = sep.get("implementation_worker_vs_skeptic", "")
-    if impl_vs_skeptic not in {"level_2", "level_3"}:
+    # Guard the type before the set-membership test: a non-string (unhashable
+    # list/dict from an untrusted request) can never be a valid level label, and
+    # `x in {…}` would otherwise raise on an unhashable value.
+    if not isinstance(impl_vs_skeptic, str) or impl_vs_skeptic not in {
+        "level_2",
+        "level_3",
+    }:
         return False, (
             f"implementation_worker_vs_skeptic={impl_vs_skeptic!r}; §5.0 "
             f"requires Level 2 minimum for promotion"
@@ -299,8 +328,10 @@ def rule_4_role_separation_ok(ctx: VerifierContext) -> tuple[bool, str | None]:
 
 
 def rule_5_stack_requires_factorial(ctx: VerifierContext) -> tuple[bool, str | None]:
-    claims = ctx.request.get("claims") or {}
-    ablation = claims.get("ablation") or {}
+    claims = ctx.request.get("claims")
+    claims = claims if isinstance(claims, dict) else {}
+    ablation = claims.get("ablation")
+    ablation = ablation if isinstance(ablation, dict) else {}
     change_type = ablation.get("change_type")
     factorial = ablation.get("factorial_grid_completed")
     if change_type == "stack" and not factorial:
@@ -314,8 +345,10 @@ def rule_5_stack_requires_factorial(ctx: VerifierContext) -> tuple[bool, str | N
 def rule_6_val_exposure_not_exhausted(
     ctx: VerifierContext,
 ) -> tuple[bool, str | None]:
-    claims = ctx.request.get("claims") or {}
-    exposure = claims.get("val_set_exposure_at_request") or {}
+    claims = ctx.request.get("claims")
+    claims = claims if isinstance(claims, dict) else {}
+    exposure = claims.get("val_set_exposure_at_request")
+    exposure = exposure if isinstance(exposure, dict) else {}
     queries = exposure.get("queries_against_val_this_campaign")
     budget = exposure.get("exposure_budget")
     if not isinstance(queries, int) or not isinstance(budget, int):
@@ -347,7 +380,8 @@ def rule_6_val_exposure_not_exhausted(
 def rule_7_behavioral_equivalence_passed(
     ctx: VerifierContext,
 ) -> tuple[bool, str | None]:
-    claims = ctx.request.get("claims") or {}
+    claims = ctx.request.get("claims")
+    claims = claims if isinstance(claims, dict) else {}
     passed = claims.get("behavioral_equivalence_test_passed_for_evaluator")
     if passed is not True:
         return False, (
@@ -358,13 +392,16 @@ def rule_7_behavioral_equivalence_passed(
 
 
 def rule_8_skeptic_verdict_clean(ctx: VerifierContext) -> tuple[bool, str | None]:
-    refs = ctx.request.get("references") or {}
+    refs = ctx.request.get("references")
+    refs = refs if isinstance(refs, dict) else {}
     skeptic_ref = refs.get("skeptic_review")
     if not isinstance(skeptic_ref, dict):
         return False, "references.skeptic_review missing or malformed"
     path_ref = skeptic_ref.get("path")
     if not path_ref:
         return False, "references.skeptic_review.path missing"
+    if not isinstance(path_ref, str):
+        return False, "references.skeptic_review.path is not a string"
     skeptic_path = Path(path_ref)
     if not skeptic_path.is_absolute():
         skeptic_path = ctx.request_path.parent.parent / path_ref
@@ -886,7 +923,14 @@ def main(argv: list[str]) -> int:
     rule_results: list[tuple[str, bool, str | None]] = []
     for rule_name in RULE_NAMES:
         rule_func = RULE_FUNCS[rule_name]
-        ok, reason = rule_func(ctx)
+        # Defense-in-depth: a rule that raises an UNEXPECTED exception (despite
+        # the per-rule input guards) must not escape as a bare traceback with no
+        # packet. Convert it into a failed check so the request is rejected and
+        # an auditable packet is still written.
+        try:
+            ok, reason = rule_func(ctx)
+        except Exception as exc:  # noqa: BLE001 - last-resort verifier backstop
+            ok, reason = False, f"internal error in {rule_name}: {exc}"
         rule_results.append((rule_name, ok, reason))
 
     packet = build_packet(
