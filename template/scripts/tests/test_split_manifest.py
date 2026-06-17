@@ -265,6 +265,40 @@ class TestCheckManifestModes(unittest.TestCase):
         self.assertFalse(_ok(results))
         self.assertTrue(any("schema" in line for ok, line in results if not ok))
 
+    def test_out_of_range_ratio_fails_via_schema(self):
+        # ratio values are fractions in [0, 1]; negative / >1 must be rejected.
+        for bad_ratio in ({"train": -1, "val": 2}, {"train": 1.5}, {"train": -0.1}):
+            with self.subTest(ratio=bad_ratio):
+                m = _declarative_manifest()
+                m["split_rule"] = {"split_key": "member_id", "ratio": bad_ratio}
+                results = _run_check_manifest(m)
+                self.assertFalse(_ok(results))
+                self.assertTrue(any("schema" in line for ok, line in results if not ok))
+
+    def test_blank_temporal_window_fails_via_schema(self):
+        # temporal_oos_window {start:"", end:""} carries no auditable window.
+        for bad in (
+            {"start": "", "end": ""},
+            {"start": "x"},
+            {"start": "  ", "end": "y"},
+        ):
+            with self.subTest(window=bad):
+                m = _declarative_manifest()
+                m["split_rule"] = {"split_key": "member_id", "temporal_oos_window": bad}
+                results = _run_check_manifest(m)
+                self.assertFalse(_ok(results))
+                self.assertTrue(any("schema" in line for ok, line in results if not ok))
+
+    def test_temporal_window_only_passes(self):
+        # A populated temporal_oos_window alone is a valid partition clause.
+        m = _declarative_manifest()
+        m["split_rule"] = {
+            "split_key": "member_id",
+            "temporal_oos_window": {"start": "2026-05-01", "end": "2026-06-01"},
+        }
+        results = _run_check_manifest(m)
+        self.assertTrue(_ok(results), [line for ok, line in results if not ok])
+
     def test_frozen_missing_split_fails(self):
         m = _frozen_manifest()
         del m["test"]
@@ -760,6 +794,252 @@ class TestRegenerateValSetVersion(unittest.TestCase):
                 rs.read_manifest_val_set_version(state_dir),
             )
             self.assertEqual(out["val_set_version"], 1)
+
+
+def _full_lighter_fp() -> dict:
+    return {
+        "dataset_fingerprint": {
+            "source": "gold.activities",
+            "version": "v1",
+            "date_window": "2026-01-01..2026-06-16",
+            "row_count": 1000,
+            "schema_hash": "sh",
+        },
+        "split_spec_hash": "spec",
+        "seed": 7,
+    }
+
+
+def _full_membership_fp() -> dict:
+    return {"membership_sha256": {"train": "t", "val": "v", "test": "s"}}
+
+
+# Degenerate data_fingerprint values that must NOT yield a comparable identity
+# (every one makes _split_identity return None → rule 11 flags cross_dataset).
+def _degenerate_fingerprints() -> list:
+    cases: list = [
+        ("non-dict data_fingerprint", "not-a-dict"),
+        ("empty data_fingerprint", {}),
+    ]
+    # Lighter-tier structural omissions / wrong scalar types.
+    for label, mutate in [
+        ("missing split_spec_hash", lambda f: f.pop("split_spec_hash")),
+        ("missing seed", lambda f: f.pop("seed")),
+        ("seed as string", lambda f: f.__setitem__("seed", "7")),
+        ("seed as bool", lambda f: f.__setitem__("seed", True)),
+        ("seed as float", lambda f: f.__setitem__("seed", 7.0)),
+        ("split_spec_hash empty", lambda f: f.__setitem__("split_spec_hash", "")),
+        ("split_spec_hash blank", lambda f: f.__setitem__("split_spec_hash", "   ")),
+        ("split_spec_hash non-str", lambda f: f.__setitem__("split_spec_hash", 1)),
+        (
+            "dataset_fingerprint empty",
+            lambda f: f.__setitem__("dataset_fingerprint", {}),
+        ),
+    ]:
+        fp = _full_lighter_fp()
+        mutate(fp)
+        cases.append((label, fp))
+    # Per-Guard-B-field degeneracy.
+    for key in ("source", "version", "schema_hash"):
+        for bad_label, bad in [("empty", ""), ("blank", "  "), ("non-str", 123)]:
+            fp = _full_lighter_fp()
+            fp["dataset_fingerprint"][key] = bad
+            cases.append((f"dataset_fingerprint.{key} {bad_label}", fp))
+        fp = _full_lighter_fp()
+        del fp["dataset_fingerprint"][key]
+        cases.append((f"dataset_fingerprint.{key} missing", fp))
+    for bad_label, bad in [
+        ("string", "10"),
+        ("float", 1.5),
+        ("negative", -1),
+        ("bool", True),
+        ("missing", None),
+    ]:
+        fp = _full_lighter_fp()
+        if bad is None:
+            del fp["dataset_fingerprint"]["row_count"]
+        else:
+            fp["dataset_fingerprint"]["row_count"] = bad
+        cases.append((f"row_count {bad_label}", fp))
+    for bad_label, bad in [
+        ("empty string", ""),
+        ("blank string", "  "),
+        ("empty object", {}),
+        ("missing end", {"start": "x"}),
+        ("blank bounds", {"start": "", "end": ""}),
+        ("whitespace bounds", {"start": "  ", "end": "  "}),
+        ("non-str scalar", 123),
+        ("missing", None),
+    ]:
+        fp = _full_lighter_fp()
+        if bad is None:
+            del fp["dataset_fingerprint"]["date_window"]
+        else:
+            fp["dataset_fingerprint"]["date_window"] = bad
+        cases.append((f"date_window {bad_label}", fp))
+    # Membership-tier degeneracy (with no lighter tuple, so it can't fall back).
+    for bad_label, membership in [
+        ("partial (train only)", {"train": "t"}),
+        ("one empty", {"train": "t", "val": "v", "test": ""}),
+        ("one blank", {"train": "t", "val": "v", "test": "  "}),
+        ("non-str values", {"train": 1, "val": 2, "test": 3}),
+        ("non-dict", "abc"),
+    ]:
+        cases.append((f"membership {bad_label}", {"membership_sha256": membership}))
+    return cases
+
+
+class TestSplitIdentityMatrix(unittest.TestCase):
+    """Exhaustive degenerate-input matrix for the comparability gate: every field
+    x {missing, empty, whitespace, wrong-type, negative, blank-object, partial}
+    must yield NO comparable identity (so rule 11 flags cross_dataset), and the
+    fully-valid forms must yield one."""
+
+    def test_degenerate_identities_are_incomparable(self):
+        for label, fp in _degenerate_fingerprints():
+            with self.subTest(case=label):
+                self.assertIsNone(
+                    vr._split_identity({"data_fingerprint": fp}),
+                    f"{label!r} must NOT be a comparable identity",
+                )
+
+    def test_valid_identities_are_comparable(self):
+        valid = [
+            ("full lighter (string date_window)", _full_lighter_fp()),
+            (
+                "full lighter (object date_window)",
+                {
+                    **_full_lighter_fp(),
+                    "dataset_fingerprint": {
+                        **_full_lighter_fp()["dataset_fingerprint"],
+                        "date_window": {"start": "2026-01-01", "end": "2026-06-16"},
+                    },
+                },
+            ),
+            ("full membership", _full_membership_fp()),
+            (
+                "lighter + int val_set_version",
+                {**_full_lighter_fp(), "val_set_version": 1},
+            ),
+            (
+                "lighter + str val_set_version",
+                {**_full_lighter_fp(), "val_set_version": "1"},
+            ),
+        ]
+        for label, fp in valid:
+            with self.subTest(case=label):
+                self.assertIsNotNone(
+                    vr._split_identity({"data_fingerprint": fp}),
+                    f"{label!r} must be a comparable identity",
+                )
+
+    def test_val_set_version_int_str_canonicalize_equal(self):
+        a = vr._split_identity(
+            {"data_fingerprint": {**_full_lighter_fp(), "val_set_version": 1}}
+        )
+        b = vr._split_identity(
+            {"data_fingerprint": {**_full_lighter_fp(), "val_set_version": "1"}}
+        )
+        self.assertEqual(a, b)
+
+    def test_rule11_and_manifest_schema_agree_on_dataset_fingerprint(self):
+        # Drift lock: the rule-11 identity schema and the manifest schema's
+        # declarative dataset_fingerprint must accept/reject the same values, so
+        # "complete Guard-B" means one thing across bootstrap and comparison.
+        manifest_schema = load_schema(SPLIT_SCHEMA)
+        manifest_df = manifest_schema["anyOf"][1]["properties"]["dataset_fingerprint"]
+        probes = [_full_lighter_fp()["dataset_fingerprint"]]
+        probes += [
+            fp["dataset_fingerprint"]
+            for _, fp in _degenerate_fingerprints()
+            if isinstance(fp, dict) and isinstance(fp.get("dataset_fingerprint"), dict)
+        ]
+        probes.append(
+            {
+                "source": "s",
+                "version": "v",
+                "date_window": {"start": "a", "end": "b"},
+                "row_count": 5,
+                "schema_hash": "h",
+            }
+        )
+        for df in probes:
+            with self.subTest(df=df):
+                rule11_ok = not validate_against_schema(
+                    df, vr._DATASET_FINGERPRINT_IDENTITY_SCHEMA
+                )
+                manifest_ok = not validate_against_schema(df, manifest_df)
+                self.assertEqual(
+                    rule11_ok,
+                    manifest_ok,
+                    f"rule11({rule11_ok}) vs manifest({manifest_ok}) disagree on {df!r}",
+                )
+
+
+class TestManifestFieldMatrix(unittest.TestCase):
+    """Every string field in BOTH manifest modes must reject empty / whitespace /
+    wrong-typed values (the schema's `\\S` pattern + type checks), so a
+    present-but-degenerate field fails closed at bootstrap."""
+
+    def _set(self, manifest: dict, path: tuple, value) -> dict:
+        node = manifest
+        for key in path[:-1]:
+            node = node[key]
+        node[path[-1]] = value
+        return manifest
+
+    def _string_fields(self):
+        # (factory, dotted-path) for every string field that must be non-empty.
+        frozen = [
+            ("snapshot_id",),
+            ("frozen_at",),
+            ("frozen_by",),
+            ("train", "path"),
+            ("train", "sha256"),
+            ("val", "path"),
+            ("val", "sha256"),
+            ("test", "path"),
+            ("test", "sha256"),
+        ]
+        declarative = [
+            ("split_rule", "split_key"),
+            ("dataset_fingerprint", "source"),
+            ("dataset_fingerprint", "version"),
+            ("dataset_fingerprint", "schema_hash"),
+        ]
+        for path in frozen:
+            yield _frozen_manifest, path
+        for path in declarative:
+            yield _declarative_manifest, path
+
+    def test_empty_or_wrong_typed_string_fields_fail_closed(self):
+        for factory, path in self._string_fields():
+            for bad_label, bad in [("empty", ""), ("blank", "   "), ("non-str", 123)]:
+                with self.subTest(field=".".join(path), bad=bad_label):
+                    m = self._set(factory(), path, bad)
+                    results = _run_check_manifest(m)
+                    self.assertFalse(
+                        _ok(results),
+                        f"{'.'.join(path)}={bad!r} must fail check_manifest",
+                    )
+
+    def test_bad_numeric_fields_fail_closed(self):
+        # size_bytes must be a positive int; row_count a non-negative int.
+        for factory, path, bad in [
+            (_frozen_manifest, ("train", "size_bytes"), 0),
+            (_frozen_manifest, ("train", "size_bytes"), -5),
+            (_frozen_manifest, ("train", "size_bytes"), "100"),
+            (_declarative_manifest, ("dataset_fingerprint", "row_count"), -1),
+            (_declarative_manifest, ("dataset_fingerprint", "row_count"), "10"),
+            (_declarative_manifest, ("dataset_fingerprint", "row_count"), 1.5),
+            (_declarative_manifest, ("seed",), "x"),
+        ]:
+            with self.subTest(field=".".join(path), bad=bad):
+                m = self._set(factory(), path, bad)
+                results = _run_check_manifest(m)
+                self.assertFalse(
+                    _ok(results), f"{'.'.join(path)}={bad!r} must fail check_manifest"
+                )
 
 
 if __name__ == "__main__":

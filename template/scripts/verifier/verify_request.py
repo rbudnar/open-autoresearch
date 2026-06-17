@@ -56,10 +56,18 @@ except ImportError:
 # regenerate_state.py and log_experiment.py so the §10.5 hash basis is byte-
 # identical across all tools. scripts/ sits one level up from scripts/verifier/.
 try:
-    from _ledger_common import _canonical_record_bytes, resolve_val_queries
+    from _ledger_common import (
+        _canonical_record_bytes,
+        resolve_val_queries,
+        validate_against_schema,
+    )
 except ImportError:  # pragma: no cover - path shim for direct invocation
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-    from _ledger_common import _canonical_record_bytes, resolve_val_queries
+    from _ledger_common import (
+        _canonical_record_bytes,
+        resolve_val_queries,
+        validate_against_schema,
+    )
 
 
 # --- Constants ----------------------------------------------------------------
@@ -415,51 +423,68 @@ def rule_10_enforcement_caps_status(ctx: VerifierContext) -> tuple[bool, str | N
     return True, None
 
 
-# Guard-B dataset fingerprint fields (§6.3.1, mirrors
-# split_manifest.schema.json `dataset_fingerprint.required` and
-# bootstrap_verify.REQUIRED_DATASET_FINGERPRINT_KEYS). The lighter split identity
-# is only comparable when the WHOLE tuple is present AND well-typed/populated — a
-# `dataset_fingerprint` missing fields, or carrying empty strings / a string
-# row_count, cannot establish that two runs ran the same dataset.
-_GUARD_B_KEYS = ("source", "version", "date_window", "row_count", "schema_hash")
+# A comparable split identity is defined DECLARATIVELY and validated with the
+# shared structural validator, so "complete/valid" means exactly one thing and is
+# enforced by the same engine as the manifest schema (no scattered imperative
+# field checks that keep growing edge cases).
+#
+# `_NONEMPTY_STRING` requires at least one non-whitespace character, so "", "  ",
+# and non-strings are all rejected. These mirror split_manifest.schema.json's
+# declarative `dataset_fingerprint` (a test asserts the two stay in sync).
+_NONEMPTY_STRING = {"type": "string", "pattern": r"\S"}
 
+# Strongest tier: a COMPLETE per-split membership hash (all three non-empty).
+_MEMBERSHIP_IDENTITY_SCHEMA = {
+    "type": "object",
+    "required": ["train", "val", "test"],
+    "properties": {
+        "train": _NONEMPTY_STRING,
+        "val": _NONEMPTY_STRING,
+        "test": _NONEMPTY_STRING,
+    },
+}
 
-def _nonempty_str(value: "Any") -> bool:
-    return isinstance(value, str) and bool(value.strip())
+# A complete Guard-B dataset fingerprint: every field present and well-typed —
+# non-empty source/version/schema_hash, an integer row_count >= 0, and a
+# date_window that is either a non-empty string OR a {start,end} object with both
+# bounds non-empty.
+_DATASET_FINGERPRINT_IDENTITY_SCHEMA = {
+    "type": "object",
+    "required": ["source", "version", "date_window", "row_count", "schema_hash"],
+    "properties": {
+        "source": _NONEMPTY_STRING,
+        "version": _NONEMPTY_STRING,
+        "schema_hash": _NONEMPTY_STRING,
+        "row_count": {"type": "integer", "minimum": 0},
+        "date_window": {
+            "anyOf": [
+                _NONEMPTY_STRING,
+                {
+                    "type": "object",
+                    "required": ["start", "end"],
+                    "properties": {
+                        "start": _NONEMPTY_STRING,
+                        "end": _NONEMPTY_STRING,
+                    },
+                },
+            ]
+        },
+    },
+}
 
-
-def _populated_date_window(value: "Any") -> bool:
-    """A date_window is populated only as a non-empty string label OR a
-    ``{start, end}`` object with BOTH bounds non-empty. An object form like
-    ``{"start": "", "end": ""}`` carries no auditable window and must not count."""
-    if _nonempty_str(value):
-        return True
-    if isinstance(value, dict):
-        return _nonempty_str(value.get("start")) and _nonempty_str(value.get("end"))
-    return False
-
-
-def _complete_guard_b(fp: "Any") -> bool:
-    """A Guard-B ``dataset_fingerprint`` counts toward a comparable identity only
-    when every field is present AND well-typed/populated — not merely non-None.
-
-    Non-empty ``source``/``version``/``schema_hash`` strings, a populated
-    ``date_window`` (a non-empty string label, or a ``{start, end}`` object with
-    BOTH non-empty), and an INTEGER ``row_count``. Empty strings, an
-    empty/blank-bounded date window, or a string ``row_count`` (which the record
-    schema's free ``dataset_fingerprint`` object permits) do NOT establish which
-    dataset was used, so they must not clear ``cross_dataset``.
-    """
-    if not isinstance(fp, dict):
-        return False
-    if not all(_nonempty_str(fp.get(k)) for k in ("source", "version", "schema_hash")):
-        return False
-    if not _populated_date_window(fp.get("date_window")):
-        return False
-    row_count = fp.get("row_count")
-    if isinstance(row_count, bool) or not isinstance(row_count, int) or row_count < 0:
-        return False
-    return True
+# Lighter tier: a complete dataset fingerprint + split_spec_hash + seed. Extra
+# keys (membership_sha256, mode, val_set_version) are allowed and not part of the
+# completeness test; `val_set_version` is folded into the comparable key
+# separately so 1 and "1" don't false-mismatch.
+_LIGHTER_IDENTITY_SCHEMA = {
+    "type": "object",
+    "required": ["dataset_fingerprint", "split_spec_hash", "seed"],
+    "properties": {
+        "dataset_fingerprint": _DATASET_FINGERPRINT_IDENTITY_SCHEMA,
+        "split_spec_hash": _NONEMPTY_STRING,
+        "seed": {"type": "integer"},
+    },
+}
 
 
 def _split_identity(entry: dict[str, Any]) -> "Any | None":
@@ -469,52 +494,35 @@ def _split_identity(entry: dict[str, Any]) -> "Any | None":
     PROTOCOL §6.3.1 / §14.1: the optional ``data_fingerprint`` records WHICH
     split a run used. The strongest tier is a complete per-split
     ``membership_sha256`` (byte-level proof); the lighter tier is a complete
-    ``dataset_fingerprint`` (all Guard-B fields) + ``split_spec_hash`` + ``seed``
-    (+ optional ``val_set_version``), which assumes deterministic
-    materialization. An INCOMPLETE identity at either tier returns None so rule 11
-    flags ``cross_dataset`` rather than asserting same-set on partial evidence. We
-    compare whichever tier is complete, preferring membership when both qualify.
-    The key is JSON-canonicalized so equality is order-insensitive.
+    ``dataset_fingerprint`` + ``split_spec_hash`` + ``seed`` (+ optional
+    ``val_set_version``), which assumes deterministic materialization.
+    Completeness/validity at each tier is decided by validating against the
+    declarative schemas above, so an incomplete OR degenerately-valued identity
+    (missing field, empty/whitespace string, wrong type, blank-bounded
+    date_window, partial membership) yields None and rule 11 flags
+    ``cross_dataset`` rather than asserting same-set on weak evidence. We prefer
+    membership when both tiers qualify. The key is JSON-canonicalized so equality
+    is order-insensitive.
     """
     fp = entry.get("data_fingerprint")
     if not isinstance(fp, dict):
         return None
-    # Strongest tier: a COMPLETE per-split membership hash. A partial membership
-    # (e.g. only ``train``) cannot confirm identical holdout observations, so we
-    # do not treat it as a comparable identity — require all three splits.
     membership = fp.get("membership_sha256")
-    if isinstance(membership, dict) and all(
-        isinstance(membership.get(k), str) and membership.get(k).strip()
-        for k in ("train", "val", "test")
+    if isinstance(membership, dict) and not validate_against_schema(
+        membership, _MEMBERSHIP_IDENTITY_SCHEMA
     ):
         canonical = {k: membership[k] for k in ("train", "val", "test")}
         return ("membership", json.dumps(canonical, sort_keys=True))
-    # Lighter tier: requires the COMPLETE tuple — a fully-populated Guard-B
-    # ``dataset_fingerprint`` (all of source/version/date_window/row_count/
-    # schema_hash) + ``split_spec_hash`` + ``seed``. A partial subset — a lone
-    # ``seed``, a lone ``val_set_version``, or a ``dataset_fingerprint`` that is
-    # ``{}`` or only carries ``version`` — proves nothing about WHICH dataset/
-    # split was used and must NOT be treated as a comparable identity (it would
-    # let two runs be marked same-set on meaningless shared fields). An incomplete
-    # identity returns None, which rule 11 surfaces as cross_dataset.
-    dataset_fp = fp.get("dataset_fingerprint")
-    spec_hash = fp.get("split_spec_hash")
-    seed = fp.get("seed")
-    if (
-        _complete_guard_b(dataset_fp)
-        and _nonempty_str(spec_hash)
-        and isinstance(seed, int)
-        and not isinstance(seed, bool)
-    ):
+    if not validate_against_schema(fp, _LIGHTER_IDENTITY_SCHEMA):
         lighter: dict[str, Any] = {
-            "dataset_fingerprint": dataset_fp,
-            "split_spec_hash": spec_hash,
-            "seed": seed,
+            "dataset_fingerprint": fp["dataset_fingerprint"],
+            "split_spec_hash": fp["split_spec_hash"],
+            "seed": fp["seed"],
         }
         # val_set_version may be logged as an int or a string for the same label
-        # (1 vs "1"); normalize to str so it doesn't produce a false mismatch.
+        # (1 vs "1"); normalize to str. Only fold in a scalar value.
         vsv = fp.get("val_set_version")
-        if vsv is not None:
+        if isinstance(vsv, (int, str)) and not isinstance(vsv, bool):
             lighter["val_set_version"] = str(vsv)
         return ("fingerprint", json.dumps(lighter, sort_keys=True))
     return None
