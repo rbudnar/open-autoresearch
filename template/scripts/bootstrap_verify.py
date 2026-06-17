@@ -22,8 +22,11 @@ Checks performed (each is independent and reports its own pass/fail):
          ``val_set_version``, ``train``/``val``/``test`` each with
          ``path``+``sha256``+``size_bytes``, ``frozen_at``, ``frozen_by``.
        - ``mode: declarative``: ``val_set_version``, ``split_rule`` (with a
-         ``split_key``), ``seed``, and ``dataset_fingerprint``
-         (``source``+``version``+``date_window``+``row_count``+``schema_hash``).
+         ``split_key``), ``seed``, and ``dataset_fingerprint`` whose IDENTITY is
+         ``source``+``version``+``date_window`` (required — a growing/forward-
+         moving dataset is identified by its date range alone); ``row_count`` and
+         ``schema_hash`` are OPTIONAL integrity strengtheners, validated when
+         present.
      The two modes are the ``anyOf`` of ``schema/split_manifest.schema.json``;
      this check replicates that anyOf in stdlib Python (no jsonschema dep).
   6. ``evaluation/fixtures/`` exists with at least 3 fixture JSON files,
@@ -61,12 +64,13 @@ import yaml  # type: ignore[import-untyped]
 from _ledger_common import load_schema, validate_against_schema
 
 # The split manifest schema sits next to the vendored scaffold
-# (autoresearch/schema/ in a host, template/schema/ here). The hand-rolled
-# field checks below stay (friendly messages + size_bytes>0, which the schema's
-# `minimum` keyword the stdlib validator doesn't implement), but we ALSO run the
-# manifest through the structural schema so wrong TYPES (numeric path/sha256,
-# string seed, object val_set_version) and unknown keys fail closed instead of
-# slipping past the populated-only checks.
+# (autoresearch/schema/ in a host, template/schema/ here). The hand-rolled field
+# checks below stay for the FRIENDLY messages on required/populated keys, but we
+# ALSO run the manifest through the structural schema (validate_against_schema,
+# which DOES enforce numeric `minimum`/`maximum` and string `pattern`) so wrong
+# TYPES (numeric path/sha256, string seed, object val_set_version), bound
+# violations (size_bytes 0, an OPTIONAL row_count present-but-0), and unknown
+# keys all fail closed instead of slipping past the populated-only checks.
 SPLIT_MANIFEST_SCHEMA = (
     Path(__file__).resolve().parent.parent / "schema" / ("split_manifest.schema.json")
 )
@@ -105,10 +109,20 @@ REQUIRED_DECLARATIVE_TOP_KEYS = [
     "seed",
     "dataset_fingerprint",
 ]
+# IDENTITY keys — required. A growing/forward-moving dataset is identified by its
+# date range alone (a continuously-appended source cannot pin a stable
+# row_count), so only these three are mandatory.
 REQUIRED_DATASET_FINGERPRINT_KEYS = [
     "source",
     "version",
     "date_window",
+]
+# OPTIONAL integrity strengtheners. When PRESENT they are validated by the
+# split_manifest.schema.json backstop (row_count >= 1; schema_hash non-empty) so
+# a present-but-degenerate value still fails closed; a growing dataset omits them.
+# Paired with REQUIRED_DATASET_FINGERPRINT_KEYS as a drift-lock against the schema's
+# dataset_fingerprint properties (test_fingerprint_key_partition_matches_schema).
+OPTIONAL_DATASET_FINGERPRINT_KEYS = [
     "row_count",
     "schema_hash",
 ]
@@ -498,8 +512,12 @@ def _check_manifest_schema(data: dict) -> tuple[bool, str]:
     """Validate the manifest against split_manifest.schema.json (stdlib validator).
 
     A single PASS/FAIL backstop for field types + unknown keys + the `const`
-    discriminators; the per-field checks above carry the friendly detail and the
-    `size_bytes`/`row_count` `minimum` bounds the structural validator omits.
+    discriminators; the per-field checks above carry the friendly detail. The
+    structural validator DOES enforce numeric `minimum` (e.g. `size_bytes` >= 1,
+    and `row_count` >= 1 WHEN the optional field is present) and string `pattern`,
+    so a present-but-degenerate OPTIONAL fingerprint field (row_count 0/negative,
+    empty schema_hash) fails closed here even though the per-field required-key
+    checks above no longer cover it.
     """
     try:
         schema = load_schema(SPLIT_MANIFEST_SCHEMA)

@@ -292,8 +292,15 @@ def main(argv: list[str]) -> int:
         "--dataset-fingerprint",
         default="",
         help=(
-            "JSON object: (source, version, date_window, row_count, schema_hash). "
-            "Lighter same-set proof (assumes deterministic materialization)."
+            "JSON object. Identity (source, version, date_window) is what makes "
+            "the fingerprint comparable (verifier rule 11); row_count + schema_hash "
+            "are optional strengtheners (omit for a growing dataset identified by "
+            "date range). Written into the record as-is — log_experiment does NOT "
+            "validate the shape (the record schema is intentionally permissive); "
+            "completeness is enforced downstream: bootstrap_verify for the split "
+            "MANIFEST, and rule 11 (which degrades to a cross_dataset warning on a "
+            "missing/degenerate identity). Lighter same-set proof (assumes "
+            "deterministic materialization)."
         ),
     )
     parser.add_argument(

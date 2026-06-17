@@ -117,8 +117,11 @@ of `schema/split_manifest.schema.json`). Pick ONE mode:
   - **`mode: declarative`** (for growing / forward-moving datasets) — a
     deterministic split RULE instead of persisted files: `protocol_version`
     `"0.5"` + `mode` + `val_set_version` + `split_rule` (with `split_key`) +
-    `seed` + a Guard-B `dataset_fingerprint`
-    (`source`/`version`/`date_window`/`row_count`/`schema_hash`).
+    `seed` + a Guard-B `dataset_fingerprint` whose identity is
+    `source`/`version`/`date_window` (required — a growing dataset is identified
+    by its date range alone); `row_count` + `schema_hash` are optional
+    strengtheners (add them when pinning a fixed snapshot, omit for a growing
+    dataset).
 A manifest with no `mode`, or that mixes the two modes' keys, **fails closed** in
 `bootstrap_verify.py`. Add `data/splits/**` to
 `<host>/autoresearch/config/protected_paths.yaml` if it isn't already (the
