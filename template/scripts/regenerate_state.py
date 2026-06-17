@@ -84,15 +84,32 @@ def load_campaign(state_dir: Path) -> dict[str, Any]:
     return obj if isinstance(obj, dict) else {}
 
 
+def host_root_from_state_dir(state_dir: Path) -> Path:
+    """Resolve the host repo root from the state dir.
+
+    Project-level data splits live at ``<host>/data/splits`` (PROTOCOL §6.3.1),
+    which is NOT the state dir's parent: in a real install the state dir is
+    ``<host>/autoresearch/state`` (the vendored scaffold sits under
+    ``autoresearch/``), so the host root is two levels up. The flat example layout
+    (``<root>/state``, no ``autoresearch/`` wrapper) puts it one level up. The
+    ``autoresearch`` directory name is the documented, deterministic marker (config
+    under ``autoresearch/`` is read the same way at ``state_dir.parent/config``).
+    """
+    if state_dir.parent.name == "autoresearch":
+        return state_dir.parent.parent
+    return state_dir.parent
+
+
 def read_manifest_val_set_version(state_dir: Path) -> "int | str | None":
     """The split MANIFEST (``data/splits/MANIFEST.json``, §6.3.1) is the source of
     truth for ``val_set_version`` (PROTOCOL §17.6.3): a holdout refresh bumps it
     there. Prefer it over ``campaign.json`` so derived exposure state reflects the
-    refresh instead of a stale runtime mirror. The host root is the state dir's
-    parent (the same convention ``read_exposure_budget`` uses for ``config/``).
-    Returns None when there is no manifest / no usable value, so callers fall back
-    to ``campaign.json`` (back-compat)."""
-    manifest_path = state_dir.parent / "data" / "splits" / "MANIFEST.json"
+    refresh instead of a stale runtime mirror. Returns None when there is no
+    manifest / no usable value, so callers use ``campaign.json`` (back-compat).
+    """
+    manifest_path = (
+        host_root_from_state_dir(state_dir) / "data" / "splits" / "MANIFEST.json"
+    )
     if not manifest_path.is_file():
         return None
     try:

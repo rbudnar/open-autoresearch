@@ -418,10 +418,39 @@ def rule_10_enforcement_caps_status(ctx: VerifierContext) -> tuple[bool, str | N
 # Guard-B dataset fingerprint fields (§6.3.1, mirrors
 # split_manifest.schema.json `dataset_fingerprint.required` and
 # bootstrap_verify.REQUIRED_DATASET_FINGERPRINT_KEYS). The lighter split identity
-# is only comparable when the WHOLE tuple is present — a `dataset_fingerprint`
-# missing source/version/date_window/row_count/schema_hash cannot establish that
-# two runs ran the same dataset.
+# is only comparable when the WHOLE tuple is present AND well-typed/populated — a
+# `dataset_fingerprint` missing fields, or carrying empty strings / a string
+# row_count, cannot establish that two runs ran the same dataset.
 _GUARD_B_KEYS = ("source", "version", "date_window", "row_count", "schema_hash")
+
+
+def _nonempty_str(value: "Any") -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def _complete_guard_b(fp: "Any") -> bool:
+    """A Guard-B ``dataset_fingerprint`` counts toward a comparable identity only
+    when every field is present AND well-typed/populated — not merely non-None.
+
+    Non-empty ``source``/``version``/``schema_hash`` strings, a non-empty
+    ``date_window`` (string label or ``{start,end}`` object), and an INTEGER
+    ``row_count``. Empty strings or a string ``row_count`` (which the record
+    schema's free ``dataset_fingerprint`` object permits) do NOT establish which
+    dataset was used, so they must not clear ``cross_dataset``.
+    """
+    if not isinstance(fp, dict):
+        return False
+    if not all(_nonempty_str(fp.get(k)) for k in ("source", "version", "schema_hash")):
+        return False
+    date_window = fp.get("date_window")
+    if not (
+        _nonempty_str(date_window) or (isinstance(date_window, dict) and date_window)
+    ):
+        return False
+    row_count = fp.get("row_count")
+    if isinstance(row_count, bool) or not isinstance(row_count, int) or row_count < 0:
+        return False
+    return True
 
 
 def _split_identity(entry: dict[str, Any]) -> "Any | None":
@@ -462,10 +491,12 @@ def _split_identity(entry: dict[str, Any]) -> "Any | None":
     dataset_fp = fp.get("dataset_fingerprint")
     spec_hash = fp.get("split_spec_hash")
     seed = fp.get("seed")
-    dataset_fp_complete = isinstance(dataset_fp, dict) and all(
-        dataset_fp.get(k) is not None for k in _GUARD_B_KEYS
-    )
-    if dataset_fp_complete and spec_hash is not None and seed is not None:
+    if (
+        _complete_guard_b(dataset_fp)
+        and _nonempty_str(spec_hash)
+        and isinstance(seed, int)
+        and not isinstance(seed, bool)
+    ):
         lighter: dict[str, Any] = {
             "dataset_fingerprint": dataset_fp,
             "split_spec_hash": spec_hash,

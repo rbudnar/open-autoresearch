@@ -228,6 +228,15 @@ class TestCheckManifestModes(unittest.TestCase):
         self.assertFalse(_ok(results))
         self.assertTrue(any("schema" in line for ok, line in results if not ok))
 
+    def test_declarative_non_numeric_ratio_fails_via_schema(self):
+        # split_rule.ratio uses schema-valued additionalProperties ({type:number});
+        # a string ratio value must be rejected by the schema backstop.
+        m = _declarative_manifest()
+        m["split_rule"]["ratio"] = {"train": "not-a-number", "val": 0.1, "test": 0.1}
+        results = _run_check_manifest(m)
+        self.assertFalse(_ok(results))
+        self.assertTrue(any("schema" in line for ok, line in results if not ok))
+
     def test_frozen_missing_split_fails(self):
         m = _frozen_manifest()
         del m["test"]
@@ -304,6 +313,15 @@ class TestSplitManifestSchema(unittest.TestCase):
         m["test"] = {}
         errors = validate_against_schema(m, self.schema)
         self.assertTrue(any("allowed schemas" in e for e in errors), errors)
+
+    def test_schema_valued_additional_properties_enforced(self):
+        # split_rule.ratio is `additionalProperties: {type: number}`; the stdlib
+        # validator must validate each ratio value (it previously skipped
+        # schema-valued additionalProperties).
+        m = _declarative_manifest()
+        m["split_rule"]["ratio"] = {"train": "not-a-number", "val": 0.1}
+        errors = validate_against_schema(m, self.schema)
+        self.assertTrue(errors, "non-numeric ratio value must be rejected")
 
 
 # --- verifier rule 11: comparison-set identity (warn, not gate) --------------
@@ -427,6 +445,25 @@ class TestComparisonSetIdentity(unittest.TestCase):
                 packet["cross_dataset"],
                 f"partial dataset_fingerprint {partial!r} must flag cross_dataset",
             )
+
+    def test_empty_or_wrong_typed_guard_b_flags_cross_dataset(self):
+        # All Guard-B keys PRESENT but empty/wrong-typed (the record schema's free
+        # dataset_fingerprint object permits this) must NOT clear cross_dataset —
+        # they don't establish which dataset was used.
+        fp = {
+            "dataset_fingerprint": {
+                "source": "",
+                "version": "",
+                "date_window": "",
+                "row_count": "not-int",
+                "schema_hash": "",
+            },
+            "split_spec_hash": "h",
+            "seed": 7,
+        }
+        packet, rule11, _ = self._run(fp, dict(fp))
+        self.assertTrue(rule11["pass"])
+        self.assertTrue(packet["cross_dataset"])
 
     def test_divergent_identity_flags_cross_dataset_without_rejecting(self):
         base = {"membership_sha256": {"train": "t", "val": "v", "test": "s"}}
@@ -576,8 +613,11 @@ class TestRegenerateValSetVersion(unittest.TestCase):
     derived exposure state; falls back to campaign.json when there is no manifest."""
 
     def _host(self, d: Path, manifest: "dict | None") -> Path:
-        state_dir = d / "state"
-        state_dir.mkdir()
+        # REAL install layout: state under <host>/autoresearch/state, the split
+        # manifest at the host root <host>/data/splits (PROTOCOL §4 + §6.3.1) — not
+        # flattened, so the test exercises the host-root resolution.
+        state_dir = d / "autoresearch" / "state"
+        state_dir.mkdir(parents=True)
         (state_dir / "campaign.json").write_text(
             json.dumps({"val_set_version": 1}), encoding="utf-8"
         )
@@ -592,16 +632,30 @@ class TestRegenerateValSetVersion(unittest.TestCase):
     def test_manifest_value_preferred_over_campaign(self):
         with tempfile.TemporaryDirectory(prefix="regen-vsv-") as d:
             m = _declarative_manifest()
-            m["val_set_version"] = 5
+            m["val_set_version"] = 9
             state_dir = self._host(Path(d), m)
-            self.assertEqual(rs.read_manifest_val_set_version(state_dir), 5)
+            self.assertEqual(rs.read_manifest_val_set_version(state_dir), 9)
             out = rs.build_val_exposure(
                 [],
                 {"val_set_version": 1},
                 None,
                 rs.read_manifest_val_set_version(state_dir),
             )
-            self.assertEqual(out["val_set_version"], 5)
+            self.assertEqual(out["val_set_version"], 9)
+
+    def test_regenerate_writes_manifest_val_set_version(self):
+        # End-to-end: a full regenerate() in the real host layout must write the
+        # MANIFEST's val_set_version into val_exposure.json, not campaign's stale 1.
+        with tempfile.TemporaryDirectory(prefix="regen-vsv-") as d:
+            m = _declarative_manifest()
+            m["val_set_version"] = 9
+            state_dir = self._host(Path(d), m)
+            (state_dir / "ledger").mkdir()
+            rs.regenerate(state_dir)
+            ve = json.loads(
+                (state_dir / "val_exposure.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(ve["val_set_version"], 9)
 
     def test_falls_back_to_campaign_without_manifest(self):
         with tempfile.TemporaryDirectory(prefix="regen-vsv-") as d:

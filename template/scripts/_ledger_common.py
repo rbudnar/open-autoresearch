@@ -124,8 +124,9 @@ def sanitize_slug(raw: str) -> str:
 # only, so non-Python repos can run these scripts). This is a small structural
 # validator covering exactly the constructs used by
 # experiment_record.schema.json (draft 2020-12 subset): type, required,
-# properties, items, pattern, const, enum, additionalProperties, anyOf. It is
-# NOT a complete draft-2020-12 implementation.
+# properties, items, pattern, const, enum, additionalProperties (boolean OR
+# schema-valued — each extra property validated against the subschema), anyOf.
+# It is NOT a complete draft-2020-12 implementation.
 
 _JSON_TYPE_CHECKS = {
     "object": lambda v: isinstance(v, dict),
@@ -210,6 +211,16 @@ def validate_against_schema(
             for key in instance:
                 if key not in props:
                     errors.append(f"{path}: additional property {key!r} not allowed")
+        elif isinstance(additional, dict):
+            # Schema-valued additionalProperties: every property NOT named in
+            # `properties` must itself validate against this subschema (e.g. a
+            # ratio map whose values must all be numbers). Without this branch
+            # the value constraint was silently skipped.
+            for key, value in instance.items():
+                if key not in props:
+                    errors.extend(
+                        validate_against_schema(value, additional, f"{path}.{key}")
+                    )
 
     if isinstance(instance, list):
         item_schema = schema.get("items")

@@ -231,6 +231,7 @@ autoresearch/
   MIGRATION.md
   schema/
     experiment_record.schema.json  # JSON Schema (draft 2020-12) for one ledger record (§14.1)
+    split_manifest.schema.json     # two-mode (frozen | declarative) data/splits/MANIFEST.json (§6.3.1)
   config/
     editable_paths.yaml
     protected_paths.yaml        # also listed in itself; only meaningful if §3.1.1 enforcement is configured
@@ -293,7 +294,7 @@ autoresearch/
 # Project-level (outside autoresearch/, but referenced by it):
 data/
   splits/
-    MANIFEST.json               # frozen-split content hashes (§6.3.1); protected
+    MANIFEST.json               # frozen-split content hashes OR a declarative split rule (§6.3.1, two modes); protected
     train.parquet               # or whatever your data layout is
     val.parquet
     test.parquet
