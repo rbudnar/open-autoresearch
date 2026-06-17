@@ -94,7 +94,12 @@ def host_root_from_state_dir(state_dir: Path) -> Path:
     (``<root>/state``, no ``autoresearch/`` wrapper) puts it one level up. The
     ``autoresearch`` directory name is the documented, deterministic marker (config
     under ``autoresearch/`` is read the same way at ``state_dir.parent/config``).
+
+    ``state_dir`` is resolved to an absolute path first so the documented relative
+    invocation (``--state-dir state/`` run from ``<host>/autoresearch``) sees the
+    real ``autoresearch`` parent rather than ``Path('state').parent == '.'``.
     """
+    state_dir = state_dir.resolve()
     if state_dir.parent.name == "autoresearch":
         return state_dir.parent.parent
     return state_dir.parent

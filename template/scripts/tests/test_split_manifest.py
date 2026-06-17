@@ -42,6 +42,7 @@ from _ledger_common import load_schema, validate_against_schema  # noqa: E402
 REPO_ROOT = SCRIPTS_DIR.parent.parent
 SPLIT_SCHEMA = REPO_ROOT / "template" / "schema" / "split_manifest.schema.json"
 VERIFIER = SCRIPTS_DIR / "verifier" / "verify_request.py"
+REGEN_SCRIPT = SCRIPTS_DIR / "regenerate_state.py"
 RECORD_SCHEMA = REPO_ROOT / "template" / "schema" / "experiment_record.schema.json"
 
 
@@ -237,6 +238,33 @@ class TestCheckManifestModes(unittest.TestCase):
         self.assertFalse(_ok(results))
         self.assertTrue(any("schema" in line for ok, line in results if not ok))
 
+    def test_declarative_split_key_only_fails_closed(self):
+        # split_key alone cannot materialize train/val/test — require a
+        # partition clause (ratio / cutoff / temporal_oos_window).
+        m = _declarative_manifest()
+        m["split_rule"] = {"split_key": "member_id"}
+        results = _run_check_manifest(m)
+        self.assertFalse(_ok(results))
+        self.assertTrue(
+            any("partition clause" in line for ok, line in results if not ok),
+            [line for ok, line in results if not ok],
+        )
+
+    def test_declarative_cutoff_only_passes(self):
+        # A cutoff (without ratio/temporal) is a valid partition clause.
+        m = _declarative_manifest()
+        m["split_rule"] = {"split_key": "member_id", "cutoff": "2026-05-01"}
+        results = _run_check_manifest(m)
+        self.assertTrue(_ok(results), [line for ok, line in results if not ok])
+
+    def test_object_date_window_empty_bounds_fails_via_schema(self):
+        # An object date_window with blank start/end carries no auditable window.
+        m = _declarative_manifest()
+        m["dataset_fingerprint"]["date_window"] = {"start": "", "end": ""}
+        results = _run_check_manifest(m)
+        self.assertFalse(_ok(results))
+        self.assertTrue(any("schema" in line for ok, line in results if not ok))
+
     def test_frozen_missing_split_fails(self):
         m = _frozen_manifest()
         del m["test"]
@@ -322,6 +350,20 @@ class TestSplitManifestSchema(unittest.TestCase):
         m["split_rule"]["ratio"] = {"train": "not-a-number", "val": 0.1}
         errors = validate_against_schema(m, self.schema)
         self.assertTrue(errors, "non-numeric ratio value must be rejected")
+
+    def test_split_key_only_rule_rejected(self):
+        # split_rule with split_key but no ratio/cutoff/temporal_oos_window must
+        # fail the schema (anyOf partition-clause requirement).
+        m = _declarative_manifest()
+        m["split_rule"] = {"split_key": "member_id"}
+        errors = validate_against_schema(m, self.schema)
+        self.assertTrue(errors, "split_key-only split_rule must be rejected")
+
+    def test_object_date_window_empty_bounds_rejected(self):
+        m = _declarative_manifest()
+        m["dataset_fingerprint"]["date_window"] = {"start": "", "end": ""}
+        errors = validate_against_schema(m, self.schema)
+        self.assertTrue(errors, "blank-bounded object date_window must be rejected")
 
 
 # --- verifier rule 11: comparison-set identity (warn, not gate) --------------
@@ -464,6 +506,35 @@ class TestComparisonSetIdentity(unittest.TestCase):
         packet, rule11, _ = self._run(fp, dict(fp))
         self.assertTrue(rule11["pass"])
         self.assertTrue(packet["cross_dataset"])
+
+    def test_object_date_window_empty_bounds_flags_cross_dataset(self):
+        # date_window {start:"", end:""} is a non-empty dict but carries no
+        # auditable window — must not clear cross_dataset.
+        fp = {
+            "dataset_fingerprint": {
+                **_COMPLETE_DATASET_FP,
+                "date_window": {"start": "", "end": ""},
+            },
+            "split_spec_hash": "h",
+            "seed": 7,
+        }
+        packet, rule11, _ = self._run(fp, dict(fp))
+        self.assertTrue(rule11["pass"])
+        self.assertTrue(packet["cross_dataset"])
+
+    def test_object_date_window_populated_not_cross_dataset(self):
+        # A {start, end} object with both bounds populated is a valid identity.
+        fp = {
+            "dataset_fingerprint": {
+                **_COMPLETE_DATASET_FP,
+                "date_window": {"start": "2026-01-01", "end": "2026-06-16"},
+            },
+            "split_spec_hash": "h",
+            "seed": 7,
+        }
+        packet, rule11, _ = self._run(fp, dict(fp))
+        self.assertTrue(rule11["pass"])
+        self.assertFalse(packet["cross_dataset"])
 
     def test_divergent_identity_flags_cross_dataset_without_rejecting(self):
         base = {"membership_sha256": {"train": "t", "val": "v", "test": "s"}}
@@ -652,6 +723,27 @@ class TestRegenerateValSetVersion(unittest.TestCase):
             state_dir = self._host(Path(d), m)
             (state_dir / "ledger").mkdir()
             rs.regenerate(state_dir)
+            ve = json.loads(
+                (state_dir / "val_exposure.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(ve["val_set_version"], 9)
+
+    def test_cli_relative_state_dir_resolves_host_manifest(self):
+        # The DOCUMENTED invocation: `regenerate_state.py --state-dir state/` run
+        # from <host>/autoresearch. The relative path must still resolve up to the
+        # host-root manifest, not <host>/autoresearch/data/splits.
+        with tempfile.TemporaryDirectory(prefix="regen-cli-") as d:
+            m = _declarative_manifest()
+            m["val_set_version"] = 9
+            state_dir = self._host(Path(d), m)
+            (state_dir / "ledger").mkdir()
+            proc = subprocess.run(
+                [sys.executable, str(REGEN_SCRIPT), "--state-dir", "state/"],
+                cwd=str(Path(d) / "autoresearch"),
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr)
             ve = json.loads(
                 (state_dir / "val_exposure.json").read_text(encoding="utf-8")
             )

@@ -794,6 +794,12 @@ enforcement: "ci_enforced | pre_receive | oop_verifier | container_ro | in_band_
 # Computed deployability label
 not_deployable: false                # true iff enforcement == "in_band_only" OR status == "low_evidence_promoted"
 
+# Comparison-set warning (§13.2.1, rule 11) — WARN, not a gate. true when the
+# candidate and baseline did not (or could not be confirmed to) run on identical
+# holdout observations; never affects `status`. See §18.
+cross_dataset: false
+cross_dataset_note: "<null, or a short note on why the comparison is flagged>"
+
 # Verifier's check results — one boolean per §18 criterion
 criteria_check:
   c1_primary_meaningful_delta: true
@@ -833,7 +839,8 @@ The verifier MUST:
 7. Reject if `behavioral_equivalence_test_passed_for_evaluator != true`.
 8. Reject if `maturity_level_used < 3`.
 9. Reject if `role_separation_achieved.implementation_worker_vs_skeptic` is below `level_2`.
-10. Sign `packet.signature` over all preceding fields with a key not available to the agent.
+10. Compare the baseline's and each candidate's recorded split identity (`data_fingerprint`, §6.3.1 / §14.1) and set `cross_dataset` (+ `cross_dataset_note`) on the packet when they differ or cannot be confirmed identical. This is **WARN-not-gate** — it never rejects the request; a divergent split is surfaced for the implementer to weigh, never silently treated as comparable (§13.2.1, §18).
+11. Sign `packet.signature` over all preceding fields with a key not available to the agent.
 
 A rejected request returns the candidate to `promotion_candidate` status; the agent may revise and resubmit.
 

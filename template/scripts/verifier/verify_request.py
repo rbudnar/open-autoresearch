@@ -428,13 +428,25 @@ def _nonempty_str(value: "Any") -> bool:
     return isinstance(value, str) and bool(value.strip())
 
 
+def _populated_date_window(value: "Any") -> bool:
+    """A date_window is populated only as a non-empty string label OR a
+    ``{start, end}`` object with BOTH bounds non-empty. An object form like
+    ``{"start": "", "end": ""}`` carries no auditable window and must not count."""
+    if _nonempty_str(value):
+        return True
+    if isinstance(value, dict):
+        return _nonempty_str(value.get("start")) and _nonempty_str(value.get("end"))
+    return False
+
+
 def _complete_guard_b(fp: "Any") -> bool:
     """A Guard-B ``dataset_fingerprint`` counts toward a comparable identity only
     when every field is present AND well-typed/populated — not merely non-None.
 
-    Non-empty ``source``/``version``/``schema_hash`` strings, a non-empty
-    ``date_window`` (string label or ``{start,end}`` object), and an INTEGER
-    ``row_count``. Empty strings or a string ``row_count`` (which the record
+    Non-empty ``source``/``version``/``schema_hash`` strings, a populated
+    ``date_window`` (a non-empty string label, or a ``{start, end}`` object with
+    BOTH non-empty), and an INTEGER ``row_count``. Empty strings, an
+    empty/blank-bounded date window, or a string ``row_count`` (which the record
     schema's free ``dataset_fingerprint`` object permits) do NOT establish which
     dataset was used, so they must not clear ``cross_dataset``.
     """
@@ -442,10 +454,7 @@ def _complete_guard_b(fp: "Any") -> bool:
         return False
     if not all(_nonempty_str(fp.get(k)) for k in ("source", "version", "schema_hash")):
         return False
-    date_window = fp.get("date_window")
-    if not (
-        _nonempty_str(date_window) or (isinstance(date_window, dict) and date_window)
-    ):
+    if not _populated_date_window(fp.get("date_window")):
         return False
     row_count = fp.get("row_count")
     if isinstance(row_count, bool) or not isinstance(row_count, int) or row_count < 0:

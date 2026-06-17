@@ -94,8 +94,13 @@
         },
         "split_rule": {
           "type": "object",
-          "description": "The deterministic rule that partitions the dataset into train/val/test.",
+          "description": "The deterministic rule that partitions the dataset into train/val/test. Requires `split_key` AND at least one partitioning clause (`ratio`, `cutoff`, or `temporal_oos_window`) — a split_key alone cannot materialize membership.",
           "required": ["split_key"],
+          "anyOf": [
+            {"required": ["ratio"]},
+            {"required": ["cutoff"]},
+            {"required": ["temporal_oos_window"]}
+          ],
           "properties": {
             "split_key": {
               "type": "string",
@@ -129,8 +134,18 @@
             "source": {"type": "string", "description": "Source table/path the dataset was read from."},
             "version": {"type": "string", "description": "Dataset version / data-platform commit / tag."},
             "date_window": {
-              "type": ["string", "object"],
-              "description": "The date window the dataset covers (a string label or {start, end})."
+              "description": "The date window the dataset covers: a non-empty string label, or a {start, end} object with both bounds non-empty.",
+              "anyOf": [
+                {"type": "string", "pattern": ".+"},
+                {
+                  "type": "object",
+                  "required": ["start", "end"],
+                  "properties": {
+                    "start": {"type": "string", "pattern": ".+"},
+                    "end": {"type": "string", "pattern": ".+"}
+                  }
+                }
+              ]
             },
             "row_count": {"type": "integer", "description": "Number of rows in the fingerprinted dataset.", "minimum": 0},
             "schema_hash": {"type": "string", "description": "Hash of the dataset schema (column names + dtypes)."}

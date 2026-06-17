@@ -344,6 +344,19 @@ def _check_declarative_manifest(data: dict) -> list[tuple[bool, str]]:
                 "missing or empty",
             )
         )
+    elif not any(
+        _is_populated(rule.get(k)) for k in ("ratio", "cutoff", "temporal_oos_window")
+    ):
+        # split_key alone cannot materialize train/val/test membership (§6.3.1):
+        # require at least one partitioning clause.
+        results.append(
+            report(
+                False,
+                "MANIFEST.json (declarative) split_rule partition clause",
+                "split_key present but no ratio / cutoff / temporal_oos_window — "
+                "cannot deterministically materialize train/val/test",
+            )
+        )
     else:
         results.append(report(True, "MANIFEST.json (declarative) split_rule"))
 
