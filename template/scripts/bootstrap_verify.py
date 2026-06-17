@@ -119,8 +119,9 @@ REQUIRED_DATASET_FINGERPRINT_KEYS = [
 ]
 # OPTIONAL integrity strengtheners. When PRESENT they are validated by the
 # split_manifest.schema.json backstop (row_count >= 1; schema_hash non-empty) so
-# a present-but-degenerate value still fails closed; a growing dataset omits
-# them. Listed for documentation + so the schema/identity surfaces agree.
+# a present-but-degenerate value still fails closed; a growing dataset omits them.
+# Paired with REQUIRED_DATASET_FINGERPRINT_KEYS as a drift-lock against the schema's
+# dataset_fingerprint properties (test_fingerprint_key_partition_matches_schema).
 OPTIONAL_DATASET_FINGERPRINT_KEYS = [
     "row_count",
     "schema_hash",

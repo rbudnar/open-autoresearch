@@ -47,9 +47,11 @@ RECORD_SCHEMA = REPO_ROOT / "template" / "schema" / "experiment_record.schema.js
 
 
 # A COMPLETE Guard-B dataset fingerprint (all of source/version/date_window/
-# row_count/schema_hash). The lighter split identity is only comparable when the
-# whole tuple is present — a partial one (e.g. {"version": "v1"}) must NOT clear
-# the cross_dataset warning.
+# row_count/schema_hash). The split identity is comparable when the IDENTITY
+# (source, version, date_window) is present and well-typed; row_count/schema_hash,
+# when present, fold into the comparable key. A fingerprint missing an IDENTITY
+# field (e.g. {"version": "v1"}) is incomparable and must NOT clear the
+# cross_dataset warning.
 _COMPLETE_DATASET_FP = {
     "source": "gold.activities",
     "version": "v1",
@@ -1099,6 +1101,28 @@ class TestSplitIdentityMatrix(unittest.TestCase):
                     f"rule11({rule11_ok}) vs manifest({manifest_ok}) disagree on {df!r}",
                 )
 
+    def test_fingerprint_key_partition_matches_schema(self):
+        # Drift lock: bootstrap_verify's REQUIRED + OPTIONAL fingerprint key lists
+        # must together cover EXACTLY the manifest schema's dataset_fingerprint
+        # properties. A new schema field added without updating the constants (or
+        # vice-versa) would let a field silently escape the required-key check.
+        manifest_schema = load_schema(SPLIT_SCHEMA)
+        schema_keys = set(
+            manifest_schema["anyOf"][1]["properties"]["dataset_fingerprint"][
+                "properties"
+            ]
+        )
+        partition = set(bv.REQUIRED_DATASET_FINGERPRINT_KEYS) | set(
+            bv.OPTIONAL_DATASET_FINGERPRINT_KEYS
+        )
+        self.assertEqual(schema_keys, partition)
+        # required and optional must be disjoint.
+        self.assertEqual(
+            set(bv.REQUIRED_DATASET_FINGERPRINT_KEYS)
+            & set(bv.OPTIONAL_DATASET_FINGERPRINT_KEYS),
+            set(),
+        )
+
 
 class TestManifestFieldMatrix(unittest.TestCase):
     """Every string field in BOTH manifest modes must reject empty / whitespace /
@@ -1154,9 +1178,13 @@ class TestManifestFieldMatrix(unittest.TestCase):
             (_frozen_manifest, ("train", "size_bytes"), 0),
             (_frozen_manifest, ("train", "size_bytes"), -5),
             (_frozen_manifest, ("train", "size_bytes"), "100"),
+            (_declarative_manifest, ("dataset_fingerprint", "row_count"), 0),
             (_declarative_manifest, ("dataset_fingerprint", "row_count"), -1),
             (_declarative_manifest, ("dataset_fingerprint", "row_count"), "10"),
             (_declarative_manifest, ("dataset_fingerprint", "row_count"), 1.5),
+            # bool is a Python int subclass — the OPTIONAL row_count must still
+            # reject it at the manifest level, not just at rule-11.
+            (_declarative_manifest, ("dataset_fingerprint", "row_count"), True),
             (_declarative_manifest, ("seed",), "x"),
         ]:
             with self.subTest(field=".".join(path), bad=bad):
