@@ -103,16 +103,27 @@ For each `<host>/autoresearch/config/*.yaml.example`:
   - In the new `.yaml` file, substitute every `<FILL_ME>` placeholder using
     the questionnaire answers. Each question's `maps_to` field names the
     config key.
-  - Keep `protocol_version: "0.4"` exactly as written. Don't bump it.
+  - Keep `protocol_version: "0.5"` exactly as written. Don't bump it.
 Commit: `chore(autoresearch): materialize config from bootstrap answers`.
 
-**6. Freeze data splits.**
-Per `PROTOCOL.md` §6.3.1, the host must declare its train/val/test split with
-content hashes pinned in `data/splits/MANIFEST.json`. Ask the human for the
-paths to each split file; compute SHA-256 of each; write the manifest.
-Add `data/splits/**` to `<host>/autoresearch/config/protected_paths.yaml`
-if it isn't already (the template default includes it).
-Commit: `chore(autoresearch): freeze data splits per §6.3.1`.
+**6. Pin the data splits (`MANIFEST.json`, two modes).**
+Per `PROTOCOL.md` §6.3.1, the host declares its train/val/test split in
+`data/splits/MANIFEST.json`, which carries a `mode` discriminator (the `anyOf`
+of `schema/split_manifest.schema.json`). Pick ONE mode:
+  - **`mode: frozen`** (recommended default) — content-addressed: ask the human
+    for the path to each split file, compute SHA-256, and write `protocol_version`
+    `"0.5"` + `snapshot_id` + `val_set_version` + a `train`/`val`/`test` block
+    each with `path`/`sha256`/`size_bytes`, plus `frozen_at`/`frozen_by`.
+  - **`mode: declarative`** (for growing / forward-moving datasets) — a
+    deterministic split RULE instead of persisted files: `protocol_version`
+    `"0.5"` + `mode` + `val_set_version` + `split_rule` (with `split_key`) +
+    `seed` + a Guard-B `dataset_fingerprint`
+    (`source`/`version`/`date_window`/`row_count`/`schema_hash`).
+A manifest with no `mode`, or that mixes the two modes' keys, **fails closed** in
+`bootstrap_verify.py`. Add `data/splits/**` to
+`<host>/autoresearch/config/protected_paths.yaml` if it isn't already (the
+template default includes it).
+Commit: `chore(autoresearch): pin data splits per §6.3.1`.
 
 **7. Seed behavioral-equivalence fixtures.**
 Per `PROTOCOL.md` §1.5 + §17.1.1, the loop relies on a small set of golden
@@ -239,9 +250,11 @@ A successful bootstrap leaves the host repo with:
 - All `autoresearch/config/*.yaml` files materialized (no `<FILL_ME>` left).
 - `autoresearch/bootstrap-answers.yaml` recording every answer (for
   reproducibility and future re-bootstraps).
-- `data/splits/MANIFEST.json` populated with every field PROTOCOL.md §6.3.1
-  requires (snapshot ID, content hashes, sizes, val_set_version, freeze
-  timestamp, freezer identity).
+- `data/splits/MANIFEST.json` populated for exactly ONE §6.3.1 mode (the `anyOf`
+  of `schema/split_manifest.schema.json`): `mode: frozen` (snapshot ID, per-split
+  content hashes + sizes, val_set_version, freeze timestamp + freezer identity) OR
+  `mode: declarative` (split rule + seed + Guard-B dataset fingerprint). A
+  missing/mixed `mode` fails closed.
 - `evaluation/fixtures/*.json` with 3–5 fixture files (or a recorded
   `partial` flag in `bootstrap-answers.yaml` if fewer), and the
   behavioral-equivalence script exits 0 against them.

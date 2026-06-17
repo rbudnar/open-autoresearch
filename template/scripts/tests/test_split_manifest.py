@@ -35,6 +35,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 sys.path.insert(0, str(SCRIPTS_DIR / "verifier"))
 
 import bootstrap_verify as bv  # noqa: E402
+import regenerate_state as rs  # noqa: E402
 import verify_request as vr  # noqa: E402
 from _ledger_common import load_schema, validate_against_schema  # noqa: E402
 
@@ -42,6 +43,19 @@ REPO_ROOT = SCRIPTS_DIR.parent.parent
 SPLIT_SCHEMA = REPO_ROOT / "template" / "schema" / "split_manifest.schema.json"
 VERIFIER = SCRIPTS_DIR / "verifier" / "verify_request.py"
 RECORD_SCHEMA = REPO_ROOT / "template" / "schema" / "experiment_record.schema.json"
+
+
+# A COMPLETE Guard-B dataset fingerprint (all of source/version/date_window/
+# row_count/schema_hash). The lighter split identity is only comparable when the
+# whole tuple is present — a partial one (e.g. {"version": "v1"}) must NOT clear
+# the cross_dataset warning.
+_COMPLETE_DATASET_FP = {
+    "source": "gold.activities",
+    "version": "v1",
+    "date_window": "2026-01-01..2026-06-16",
+    "row_count": 1000,
+    "schema_hash": "sh",
+}
 
 
 def _frozen_manifest() -> dict:
@@ -183,6 +197,36 @@ class TestCheckManifestModes(unittest.TestCase):
         m["seed"] = 0
         results = _run_check_manifest(m)
         self.assertTrue(_ok(results), [line for ok, line in results if not ok])
+
+    def test_frozen_wrong_type_path_fails_via_schema(self):
+        # `_is_populated` accepts a numeric path/sha256; the schema requires a
+        # string. The schema backstop must catch the type error.
+        m = _frozen_manifest()
+        m["train"]["path"] = 123
+        m["train"]["sha256"] = 456
+        results = _run_check_manifest(m)
+        self.assertFalse(_ok(results))
+        self.assertTrue(
+            any("schema" in line for ok, line in results if not ok),
+            [line for ok, line in results if not ok],
+        )
+
+    def test_declarative_wrong_type_seed_fails_via_schema(self):
+        # seed must be an integer; a string seed passes _is_populated but the
+        # schema rejects it.
+        m = _declarative_manifest()
+        m["seed"] = "not-an-int"
+        results = _run_check_manifest(m)
+        self.assertFalse(_ok(results))
+        self.assertTrue(any("schema" in line for ok, line in results if not ok))
+
+    def test_declarative_wrong_type_val_set_version_fails_via_schema(self):
+        # val_set_version must be int or string; an object is rejected by schema.
+        m = _declarative_manifest()
+        m["val_set_version"] = {"oops": True}
+        results = _run_check_manifest(m)
+        self.assertFalse(_ok(results))
+        self.assertTrue(any("schema" in line for ok, line in results if not ok))
 
     def test_frozen_missing_split_fails(self):
         m = _frozen_manifest()
@@ -359,13 +403,30 @@ class TestComparisonSetIdentity(unittest.TestCase):
 
     def test_matching_lighter_fingerprint_not_cross_dataset(self):
         fp = {
-            "dataset_fingerprint": {"version": "v1"},
+            "dataset_fingerprint": dict(_COMPLETE_DATASET_FP),
             "split_spec_hash": "h",
             "seed": 7,
         }
         packet, rule11, _ = self._run(fp, dict(fp))
         self.assertTrue(rule11["pass"])
         self.assertFalse(packet["cross_dataset"])
+
+    def test_incomplete_dataset_fingerprint_flags_cross_dataset(self):
+        # An empty or partial Guard-B fingerprint (here: only `version`) with a
+        # matching split_spec_hash/seed must NOT be treated as a comparable
+        # identity — it can't establish the runs used the same dataset.
+        for partial in ({}, {"version": "v1"}):
+            fp = {
+                "dataset_fingerprint": dict(partial),
+                "split_spec_hash": "h",
+                "seed": 7,
+            }
+            packet, rule11, _ = self._run(fp, dict(fp))
+            self.assertTrue(rule11["pass"])
+            self.assertTrue(
+                packet["cross_dataset"],
+                f"partial dataset_fingerprint {partial!r} must flag cross_dataset",
+            )
 
     def test_divergent_identity_flags_cross_dataset_without_rejecting(self):
         base = {"membership_sha256": {"train": "t", "val": "v", "test": "s"}}
@@ -404,13 +465,13 @@ class TestComparisonSetIdentity(unittest.TestCase):
         # Same complete lighter identity, val_set_version logged as int vs str
         # for the same label — must normalize and NOT flag a false mismatch.
         base = {
-            "dataset_fingerprint": {"version": "v1"},
+            "dataset_fingerprint": dict(_COMPLETE_DATASET_FP),
             "split_spec_hash": "h",
             "seed": 7,
             "val_set_version": 1,
         }
         cand = {
-            "dataset_fingerprint": {"version": "v1"},
+            "dataset_fingerprint": dict(_COMPLETE_DATASET_FP),
             "split_spec_hash": "h",
             "seed": 7,
             "val_set_version": "1",
@@ -424,7 +485,7 @@ class TestComparisonSetIdentity(unittest.TestCase):
         # fingerprint tuple — different tiers are not comparable → cross_dataset.
         base = {"membership_sha256": {"train": "t", "val": "v", "test": "s"}}
         cand = {
-            "dataset_fingerprint": {"version": "v1"},
+            "dataset_fingerprint": dict(_COMPLETE_DATASET_FP),
             "split_spec_hash": "h",
             "seed": 7,
         }
@@ -507,6 +568,52 @@ class TestRule11WarnNotGate(unittest.TestCase):
             },
         )
         self.assertEqual(validate_against_schema(rec, schema), [])
+
+
+class TestRegenerateValSetVersion(unittest.TestCase):
+    """val_set_version source-of-truth: the split MANIFEST (§6.3.1) wins over
+    campaign.json so a holdout refresh that bumps the manifest is reflected in
+    derived exposure state; falls back to campaign.json when there is no manifest."""
+
+    def _host(self, d: Path, manifest: "dict | None") -> Path:
+        state_dir = d / "state"
+        state_dir.mkdir()
+        (state_dir / "campaign.json").write_text(
+            json.dumps({"val_set_version": 1}), encoding="utf-8"
+        )
+        if manifest is not None:
+            splits = d / "data" / "splits"
+            splits.mkdir(parents=True)
+            (splits / "MANIFEST.json").write_text(
+                json.dumps(manifest), encoding="utf-8"
+            )
+        return state_dir
+
+    def test_manifest_value_preferred_over_campaign(self):
+        with tempfile.TemporaryDirectory(prefix="regen-vsv-") as d:
+            m = _declarative_manifest()
+            m["val_set_version"] = 5
+            state_dir = self._host(Path(d), m)
+            self.assertEqual(rs.read_manifest_val_set_version(state_dir), 5)
+            out = rs.build_val_exposure(
+                [],
+                {"val_set_version": 1},
+                None,
+                rs.read_manifest_val_set_version(state_dir),
+            )
+            self.assertEqual(out["val_set_version"], 5)
+
+    def test_falls_back_to_campaign_without_manifest(self):
+        with tempfile.TemporaryDirectory(prefix="regen-vsv-") as d:
+            state_dir = self._host(Path(d), None)
+            self.assertIsNone(rs.read_manifest_val_set_version(state_dir))
+            out = rs.build_val_exposure(
+                [],
+                {"val_set_version": 1},
+                None,
+                rs.read_manifest_val_set_version(state_dir),
+            )
+            self.assertEqual(out["val_set_version"], 1)
 
 
 if __name__ == "__main__":

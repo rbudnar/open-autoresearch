@@ -415,17 +415,28 @@ def rule_10_enforcement_caps_status(ctx: VerifierContext) -> tuple[bool, str | N
     return True, None
 
 
+# Guard-B dataset fingerprint fields (§6.3.1, mirrors
+# split_manifest.schema.json `dataset_fingerprint.required` and
+# bootstrap_verify.REQUIRED_DATASET_FINGERPRINT_KEYS). The lighter split identity
+# is only comparable when the WHOLE tuple is present — a `dataset_fingerprint`
+# missing source/version/date_window/row_count/schema_hash cannot establish that
+# two runs ran the same dataset.
+_GUARD_B_KEYS = ("source", "version", "date_window", "row_count", "schema_hash")
+
+
 def _split_identity(entry: dict[str, Any]) -> "Any | None":
     """Return a comparable split-identity key for a ledger record, or None when
-    the record carries no split identity.
+    the record carries no COMPLETE split identity.
 
     PROTOCOL §6.3.1 / §14.1: the optional ``data_fingerprint`` records WHICH
-    split a run used. The strongest tier is per-split ``membership_sha256``
-    (byte-level proof); the lighter tier is
-    ``dataset_fingerprint`` + ``split_spec_hash`` + ``seed`` (+ ``val_set_version``),
-    which assumes deterministic materialization. We compare whichever tier is
-    present, preferring the membership hash when both runs carry it. The key is
-    JSON-canonicalized so equality is order-insensitive.
+    split a run used. The strongest tier is a complete per-split
+    ``membership_sha256`` (byte-level proof); the lighter tier is a complete
+    ``dataset_fingerprint`` (all Guard-B fields) + ``split_spec_hash`` + ``seed``
+    (+ optional ``val_set_version``), which assumes deterministic
+    materialization. An INCOMPLETE identity at either tier returns None so rule 11
+    flags ``cross_dataset`` rather than asserting same-set on partial evidence. We
+    compare whichever tier is complete, preferring membership when both qualify.
+    The key is JSON-canonicalized so equality is order-insensitive.
     """
     fp = entry.get("data_fingerprint")
     if not isinstance(fp, dict):
@@ -440,17 +451,21 @@ def _split_identity(entry: dict[str, Any]) -> "Any | None":
     ):
         canonical = {k: membership[k] for k in ("train", "val", "test")}
         return ("membership", json.dumps(canonical, sort_keys=True))
-    # Lighter tier: requires the COMPLETE tuple (dataset_fingerprint +
-    # split_spec_hash + seed). A partial subset — a lone ``seed`` or a lone
-    # ``val_set_version`` — proves nothing about the dataset or membership and
-    # must NOT be treated as a comparable identity (it would let two runs be
-    # marked same-set on a meaningless shared field, or with different unrecorded
-    # split rules). An incomplete identity returns None, which rule 11 surfaces
-    # as cross_dataset.
+    # Lighter tier: requires the COMPLETE tuple — a fully-populated Guard-B
+    # ``dataset_fingerprint`` (all of source/version/date_window/row_count/
+    # schema_hash) + ``split_spec_hash`` + ``seed``. A partial subset — a lone
+    # ``seed``, a lone ``val_set_version``, or a ``dataset_fingerprint`` that is
+    # ``{}`` or only carries ``version`` — proves nothing about WHICH dataset/
+    # split was used and must NOT be treated as a comparable identity (it would
+    # let two runs be marked same-set on meaningless shared fields). An incomplete
+    # identity returns None, which rule 11 surfaces as cross_dataset.
     dataset_fp = fp.get("dataset_fingerprint")
     spec_hash = fp.get("split_spec_hash")
     seed = fp.get("seed")
-    if dataset_fp is not None and spec_hash is not None and seed is not None:
+    dataset_fp_complete = isinstance(dataset_fp, dict) and all(
+        dataset_fp.get(k) is not None for k in _GUARD_B_KEYS
+    )
+    if dataset_fp_complete and spec_hash is not None and seed is not None:
         lighter: dict[str, Any] = {
             "dataset_fingerprint": dataset_fp,
             "split_spec_hash": spec_hash,

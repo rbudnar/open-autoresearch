@@ -13,7 +13,7 @@ If you read only one section of this doc, read this one. Then decide whether you
 | Threat | Defense | Section |
 |---|---|---|
 | Agent edits evaluator code to inflate metrics | CI rejects PRs that touch `protected_paths`; CODEOWNERS requires non-agent review | §3.1.1, §3.1 |
-| Agent edits data splits to add held-out examples to training | `data/splits/MANIFEST.json` content-hashed; protected; behavioral_equivalence catches the drift | §6.3.1, §17.1.1 |
+| Agent edits data splits to add held-out examples to training | `data/splits/MANIFEST.json` content-hashed + protected (§3.1.1); run-time enforcement is a host-side guard that re-hashes the live splits against the manifest (or non-agent materialization) before each evaluation — the reference `behavioral_equivalence.py` checks evaluator fixtures only, NOT splits | §6.3.1 |
 | Agent silently changes metric computation while keeping the test green | §17.1.1 tolerance-based golden fixtures catch numerical drift; human review for legitimate refactors | §17.1.1 |
 | Agent self-attests a promotion | Verifier (`§10.5`) is a separate non-agent process with a signing key the agent cannot read; emits `promotion_packet.json` with HMAC | §10.5 |
 | Agent runs the same val-set comparison 200 times until something "wins" by chance | `val_set_exposure_budget` counter increments on every val read; verifier rejects promotion when budget is exhausted | §17.6 |

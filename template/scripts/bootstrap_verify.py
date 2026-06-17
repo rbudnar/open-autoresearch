@@ -58,6 +58,19 @@ from pathlib import Path
 
 import yaml  # type: ignore[import-untyped]
 
+from _ledger_common import load_schema, validate_against_schema
+
+# The split manifest schema sits next to the vendored scaffold
+# (autoresearch/schema/ in a host, template/schema/ here). The hand-rolled
+# field checks below stay (friendly messages + size_bytes>0, which the schema's
+# `minimum` keyword the stdlib validator doesn't implement), but we ALSO run the
+# manifest through the structural schema so wrong TYPES (numeric path/sha256,
+# string seed, object val_set_version) and unknown keys fail closed instead of
+# slipping past the populated-only checks.
+SPLIT_MANIFEST_SCHEMA = (
+    Path(__file__).resolve().parent.parent / "schema" / ("split_manifest.schema.json")
+)
+
 REQUIRED_CONFIG_FILES = [
     "metrics.yaml",
     "enforcement.yaml",
@@ -436,7 +449,36 @@ def check_manifest(host_root: Path) -> list[tuple[bool, str]]:
                 f"a partial/mixed manifest fails closed",
             )
         )
+
+    # Structural schema backstop: the populated-only checks above accept wrong
+    # TYPES (numeric path/sha256, string seed, object val_set_version) that
+    # split_manifest.schema.json rejects. Run the manifest through the stdlib
+    # structural validator so those — and unknown keys — fail closed here too.
+    results.append(_check_manifest_schema(data))
     return results
+
+
+def _check_manifest_schema(data: dict) -> tuple[bool, str]:
+    """Validate the manifest against split_manifest.schema.json (stdlib validator).
+
+    A single PASS/FAIL backstop for field types + unknown keys + the `const`
+    discriminators; the per-field checks above carry the friendly detail and the
+    `size_bytes`/`row_count` `minimum` bounds the structural validator omits.
+    """
+    try:
+        schema = load_schema(SPLIT_MANIFEST_SCHEMA)
+    except (OSError, json.JSONDecodeError) as exc:
+        return report(
+            False, "MANIFEST.json schema loadable", f"{SPLIT_MANIFEST_SCHEMA}: {exc}"
+        )
+    errors = validate_against_schema(data, schema)
+    if errors:
+        return report(
+            False,
+            "MANIFEST.json matches split_manifest.schema.json",
+            "; ".join(errors[:3]),
+        )
+    return report(True, "MANIFEST.json matches split_manifest.schema.json")
 
 
 def _reject_foreign_mode_keys(
