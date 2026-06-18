@@ -26,11 +26,22 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+# A short non-UTF-8 byte sequence (0xff/0xfe are never valid UTF-8 lead bytes):
+# reading with encoding="utf-8" (errors="strict") raises UnicodeDecodeError.
+# Proves the decode-error path WITHOUT a chmod (no-op as root, can hang in some
+# sandboxes).
+_NON_UTF8 = b"\xff\xfe\x00\x01 not utf-8 \xff"
+
+# chmod(0o000) does not deny the superuser, so permission-denied assertions are
+# skipped when the suite runs as root.
+_IS_ROOT = hasattr(os, "geteuid") and os.geteuid() == 0
 
 SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
@@ -145,6 +156,20 @@ class TestRulesNeverRaiseOnMalformedReferences(unittest.TestCase):
         ok, reason = vr.rule_2_references_rehash(_ctx(req))
         self.assertFalse(ok)
         self.assertIn("path is not a string", reason)
+
+    def test_unhashable_ledger_id_rule_2(self):
+        # F-4: ledger_id is an unhashable list/dict. `ctx.ledger.get(ledger_id)`
+        # would raise `TypeError: unhashable type` — must be a clean mismatch
+        # (False, "ledger_id is not a string"), mirroring rule 9's string guard.
+        for bad_id in ([1, 2], {"k": "v"}):
+            with self.subTest(bad_id=bad_id):
+                req = _base_request()
+                req["references"] = {
+                    "baseline_run": {"ledger_id": bad_id, "content_sha256": "x" * 64}
+                }
+                ok, reason = vr.rule_2_references_rehash(_ctx(req))
+                self.assertFalse(ok)
+                self.assertIn("ledger_id is not a string", reason)
 
     def test_references_non_dict_rule_8(self):
         # B4: rule_8 with references as a non-dict.
@@ -499,9 +524,381 @@ class TestRuleLoopBackstop(unittest.TestCase):
                 self.assertEqual(packet["status"], "rejected")
                 check = packet["criteria_check"]["3_maturity_level_ge_3"]
                 self.assertFalse(check["pass"])
-                self.assertIn("internal error", (check["note"] or "").lower())
+                note = check["note"] or ""
+                self.assertIn("internal error", note.lower())
+                # Backstop message MUST carry the exception TYPE so a stringifies-
+                # to-empty exception still names what went wrong.
+                self.assertIn("RuntimeError", note)
+                self.assertIn("synthetic rule crash", note)
         finally:
             vr.RULE_FUNCS["3_maturity_level_ge_3"] = original
+
+    def test_backstop_includes_type_for_empty_str_exception(self):
+        # An exception whose str() is empty (e.g. a bare KeyError) must still
+        # produce a non-empty diagnostic via type(exc).__name__.
+        original = vr.RULE_FUNCS["3_maturity_level_ge_3"]
+
+        def _boom(ctx):
+            raise KeyError()  # str(KeyError()) == "" -> type name is the only info
+
+        vr.RULE_FUNCS["3_maturity_level_ge_3"] = _boom
+        try:
+            with tempfile.TemporaryDirectory(prefix="mal-backstop2-") as tmp:
+                work = Path(tmp)
+                ledger_dir = work / "ledger"
+                ledger_dir.mkdir()
+                (ledger_dir / "b0.json").write_text(
+                    json.dumps({"id": "b0", "metrics": {}}), encoding="utf-8"
+                )
+                metrics, enforcement = _write_min_config(work)
+                out_dir = work / "out"
+                out_dir.mkdir()
+                req_path = work / "req.json"
+                req_path.write_text(json.dumps(_base_request()), encoding="utf-8")
+                rc = vr.main(
+                    [
+                        "--request",
+                        str(req_path),
+                        "--ledger",
+                        str(ledger_dir),
+                        "--metrics",
+                        str(metrics),
+                        "--enforcement",
+                        str(enforcement),
+                        "--out-dir",
+                        str(out_dir),
+                        "--verifier-identity",
+                        "unittest-backstop2",
+                        "--unsigned",
+                    ]
+                )
+                self.assertEqual(rc, 1)
+                packet = json.loads(
+                    next(out_dir.glob("*-promotion-packet.json")).read_text(
+                        encoding="utf-8"
+                    )
+                )
+                note = packet["criteria_check"]["3_maturity_level_ge_3"]["note"] or ""
+                self.assertIn("KeyError", note)
+        finally:
+            vr.RULE_FUNCS["3_maturity_level_ge_3"] = original
+
+
+# --- CLASS D: I/O / encoding failures on verifier inputs ----------------------
+#
+# Every verifier read of an external/operator/agent-provided file (ledger shard,
+# request, metrics/enforcement config, referenced skeptic file, referenced ref
+# path) must convert OSError (unreadable) and UnicodeDecodeError (non-UTF-8) into
+# the verifier's clean-error form — a CONFIG ERROR exit, a rejected packet, or a
+# (False, reason) — never a raw traceback.
+
+
+class TestLoadLedgerIOErrors(unittest.TestCase):
+    """load_ledger: a non-UTF-8 or unreadable shard is a CONFIG ERROR, not a
+    traceback. The open() is INSIDE the guard now."""
+
+    def test_non_utf8_shard(self):
+        with tempfile.TemporaryDirectory(prefix="vr-utf8-") as tmp:
+            ledger = Path(tmp) / "ledger"
+            ledger.mkdir()
+            (ledger / "bad.json").write_bytes(_NON_UTF8)
+            with self.assertRaises(SystemExit) as cm:
+                vr.load_ledger(ledger)
+            msg = str(cm.exception)
+            self.assertIn("CONFIG ERROR", msg)
+            self.assertIn("bad.json", msg)
+
+    def test_unreadable_shard(self):
+        if _IS_ROOT:
+            self.skipTest("chmod-based permission test is a no-op as root")
+        with tempfile.TemporaryDirectory(prefix="vr-perm-") as tmp:
+            ledger = Path(tmp) / "ledger"
+            ledger.mkdir()
+            shard = ledger / "b0.json"
+            shard.write_text(json.dumps({"id": "b0"}), encoding="utf-8")
+            shard.chmod(0o000)
+            try:
+                with self.assertRaises(SystemExit) as cm:
+                    vr.load_ledger(ledger)
+                msg = str(cm.exception)
+                self.assertIn("CONFIG ERROR", msg)
+                self.assertIn("not readable", msg)
+            finally:
+                shard.chmod(0o644)
+
+
+class TestLoadConfigIOErrors(unittest.TestCase):
+    """load_json / load_yaml: a non-UTF-8 request/config is a CONFIG ERROR, not a
+    traceback."""
+
+    def test_non_utf8_request_json(self):
+        with tempfile.TemporaryDirectory(prefix="vr-req-") as tmp:
+            req = Path(tmp) / "req.json"
+            req.write_bytes(_NON_UTF8)
+            with self.assertRaises(SystemExit) as cm:
+                vr.load_json(req)
+            self.assertIn("not readable/parseable", str(cm.exception))
+
+    def test_non_utf8_metrics_yaml(self):
+        with tempfile.TemporaryDirectory(prefix="vr-yaml-") as tmp:
+            mx = Path(tmp) / "metrics.yaml"
+            mx.write_bytes(_NON_UTF8)
+            with self.assertRaises(SystemExit) as cm:
+                vr.load_yaml(mx)
+            self.assertIn("not readable/parseable", str(cm.exception))
+
+
+class TestRule8SkepticFileIOErrors(unittest.TestCase):
+    """rule_8: a non-UTF-8 or unreadable skeptic-review file -> (False, reason),
+    never a traceback."""
+
+    def _ctx_with_skeptic(self, skeptic_abs: Path) -> "vr.VerifierContext":
+        req = _base_request()
+        req["references"] = {"skeptic_review": {"path": str(skeptic_abs)}}
+        return _ctx(req)
+
+    def test_non_utf8_skeptic_file(self):
+        with tempfile.TemporaryDirectory(prefix="vr-skep-") as tmp:
+            skeptic = Path(tmp) / "skeptic.md"
+            skeptic.write_bytes(_NON_UTF8)
+            ok, reason = vr.rule_8_skeptic_verdict_clean(
+                self._ctx_with_skeptic(skeptic)
+            )
+            self.assertFalse(ok)
+            self.assertIn("not readable/decodable", reason)
+
+    def test_unreadable_skeptic_file(self):
+        if _IS_ROOT:
+            self.skipTest("chmod-based permission test is a no-op as root")
+        with tempfile.TemporaryDirectory(prefix="vr-skep-perm-") as tmp:
+            skeptic = Path(tmp) / "skeptic.md"
+            skeptic.write_text("---\nverdict: no_objection\n---\n", encoding="utf-8")
+            skeptic.chmod(0o000)
+            try:
+                ok, reason = vr.rule_8_skeptic_verdict_clean(
+                    self._ctx_with_skeptic(skeptic)
+                )
+                self.assertFalse(ok)
+                self.assertIn("not readable/decodable", reason)
+            finally:
+                skeptic.chmod(0o644)
+
+
+class TestCheckRefUnreadablePath(unittest.TestCase):
+    """rule_2 check_ref: an OSError mid-read on a referenced path is recorded as a
+    missing ref (False, reason), never raised."""
+
+    def test_unreadable_ref_path(self):
+        if _IS_ROOT:
+            self.skipTest("chmod-based permission test is a no-op as root")
+        with tempfile.TemporaryDirectory(prefix="vr-ref-") as tmp:
+            work = Path(tmp)
+            # request_path.parent.parent is the base for relative ref paths; place
+            # the referenced file there and reference it by basename.
+            proposals = work / "proposals"
+            proposals.mkdir()
+            target = work / "artifact.bin"
+            target.write_bytes(b"some bytes")
+            target.chmod(0o000)
+            req = _base_request()
+            req["references"] = {
+                "baseline_run": {"content_sha256": "a" * 64, "path": "artifact.bin"}
+            }
+            ctx = vr.VerifierContext(
+                request=req,
+                request_path=proposals / "req.json",
+                ledger={},
+                metrics={},
+                enforcement={},
+                unsigned=True,
+            )
+            try:
+                ok, reason = vr.rule_2_references_rehash(ctx)
+                self.assertFalse(ok)
+                self.assertIn("not readable", reason)
+            finally:
+                target.chmod(0o644)
+
+
+class TestEndToEndNonUtf8ShardRejected(unittest.TestCase):
+    """A non-UTF-8 ledger shard drives the CLI to a CONFIG ERROR (nonzero exit)
+    with NO traceback on stderr."""
+
+    def test_non_utf8_shard_cli(self):
+        request = {
+            "protocol_version": "0.5",
+            "request_id": "non-utf8-ledger",
+            "maturity_level_used": 3,
+            "requested_status": "promoted",
+            "references": {"candidate_runs": []},
+            "claims": {},
+        }
+        with tempfile.TemporaryDirectory(prefix="vr-e2e-utf8-") as tmp:
+            work = Path(tmp)
+            ledger_dir = work / "ledger"
+            ledger_dir.mkdir()
+            (ledger_dir / "bad.json").write_bytes(_NON_UTF8)
+            req_path = work / "req.json"
+            req_path.write_text(json.dumps(request), encoding="utf-8")
+            proc = _run_verifier(req_path, ledger_dir, work)
+            self.assertNotIn("Traceback (most recent call last)", proc.stderr)
+            self.assertNotEqual(proc.returncode, 0, f"stderr={proc.stderr!r}")
+            self.assertIn("CONFIG ERROR", proc.stderr)
+            self.assertIn("bad.json", proc.stderr)
+
+
+# Load sign_packet as a module so we can call its helpers/cmds directly.
+SIGN_PACKET = SCRIPTS_DIR / "verifier" / "sign_packet.py"
+_sp_spec = importlib.util.spec_from_file_location("sign_packet", SIGN_PACKET)
+assert _sp_spec is not None and _sp_spec.loader is not None
+sp = importlib.util.module_from_spec(_sp_spec)
+sys.modules["sign_packet"] = sp
+_sp_spec.loader.exec_module(sp)
+
+# A 32-byte key satisfies get_signing_key()'s length floor (the cmds load it).
+_SIGN_KEY = b"k" * 32
+
+
+class TestSignPacketMalformed(unittest.TestCase):
+    """F-A: sign_packet had ZERO test coverage. A packet whose `verifier` field is
+    a non-dict (string/list) crashed `packet.get("verifier", {}).get("signature")`
+    (cmd_sign/cmd_verify) and `verifier.get(k)` (compute_signature) with
+    AttributeError. The `_load_packet` guard now rejects it as a clean CONFIG
+    ERROR. Also locks the non-UTF-8/unreadable packet path (no traceback)."""
+
+    def _write(self, tmp: str, obj_or_bytes) -> Path:
+        p = Path(tmp) / "packet.json"
+        if isinstance(obj_or_bytes, (bytes, bytearray)):
+            p.write_bytes(obj_or_bytes)
+        else:
+            p.write_text(json.dumps(obj_or_bytes), encoding="utf-8")
+        return p
+
+    def test_verifier_non_dict_load_packet(self):
+        for bad in ("a string", ["a", "list"], 42, True):
+            with self.subTest(bad=bad):
+                with tempfile.TemporaryDirectory(prefix="sp-vnd-") as tmp:
+                    p = self._write(tmp, {"verifier": bad})
+                    with self.assertRaises(SystemExit) as cm:
+                        sp._load_packet(p)
+                    self.assertIn(
+                        "'verifier' block is missing or not an object",
+                        str(cm.exception),
+                    )
+
+    def test_verifier_non_dict_cmd_sign(self):
+        # cmd_sign reads packet.get("verifier", {}).get("signature") -> would
+        # crash on a list verifier; the _load_packet guard fires first.
+        with tempfile.TemporaryDirectory(prefix="sp-sign-") as tmp:
+            p = self._write(tmp, {"verifier": ["not", "a", "dict"]})
+            with self.assertRaises(SystemExit) as cm:
+                sp.cmd_sign(p, _SIGN_KEY)
+            self.assertIn("not an object", str(cm.exception))
+
+    def test_verifier_non_dict_cmd_verify(self):
+        with tempfile.TemporaryDirectory(prefix="sp-verify-") as tmp:
+            p = self._write(tmp, {"verifier": "unsigned-but-a-string"})
+            with self.assertRaises(SystemExit) as cm:
+                sp.cmd_verify(p, _SIGN_KEY)
+            self.assertIn("not an object", str(cm.exception))
+
+    def test_non_utf8_packet(self):
+        # Non-UTF-8 bytes -> UnicodeDecodeError inside _load_packet -> clean
+        # CONFIG ERROR, never a traceback.
+        with tempfile.TemporaryDirectory(prefix="sp-utf8-") as tmp:
+            p = self._write(tmp, _NON_UTF8)
+            with self.assertRaises(SystemExit) as cm:
+                sp._load_packet(p)
+            msg = str(cm.exception)
+            self.assertIn("CONFIG ERROR", msg)
+            self.assertIn("not readable/parseable", msg)
+
+    def test_unreadable_packet(self):
+        if _IS_ROOT:
+            self.skipTest("chmod-based permission test is a no-op as root")
+        with tempfile.TemporaryDirectory(prefix="sp-perm-") as tmp:
+            p = self._write(tmp, {"verifier": {"signature": "unsigned"}})
+            p.chmod(0o000)
+            try:
+                with self.assertRaises(SystemExit) as cm:
+                    sp._load_packet(p)
+                self.assertIn("not readable/parseable", str(cm.exception))
+            finally:
+                p.chmod(0o644)
+
+    def test_non_string_signature_load_packet(self):
+        # D4/G3: verifier.signature is later hit by existing[:16] (cmd_sign),
+        # claimed[:16] and hmac.compare_digest (cmd_verify) — all str-only. A
+        # present-but-non-string signature (int/float/list/dict/bool) crashed
+        # those with TypeError; _load_packet now rejects it as a clean CONFIG
+        # ERROR. (A list signature even SILENTLY slipped past `existing[:16]`
+        # because list slicing succeeds — the guard closes that too.)
+        for bad in (42, 3.14, ["sig"], {"s": "ig"}, True):
+            with self.subTest(bad=bad):
+                with tempfile.TemporaryDirectory(prefix="sp-sig-") as tmp:
+                    p = self._write(tmp, {"verifier": {"signature": bad}})
+                    with self.assertRaises(SystemExit) as cm:
+                        sp._load_packet(p)
+                    self.assertIn(
+                        "'verifier.signature' is not a string", str(cm.exception)
+                    )
+
+    def test_non_string_signature_cmd_sign(self):
+        # The existing[:16] subscript site in cmd_sign — the _load_packet guard
+        # fires first, so the cmd never reaches the crash.
+        with tempfile.TemporaryDirectory(prefix="sp-sig-sign-") as tmp:
+            p = self._write(tmp, {"verifier": {"signature": 1234}})
+            with self.assertRaises(SystemExit) as cm:
+                sp.cmd_sign(p, _SIGN_KEY)
+            self.assertIn("is not a string", str(cm.exception))
+
+    def test_non_string_signature_cmd_verify(self):
+        # The hmac.compare_digest / claimed[:16] site in cmd_verify.
+        with tempfile.TemporaryDirectory(prefix="sp-sig-verify-") as tmp:
+            p = self._write(tmp, {"verifier": {"signature": ["not", "a", "str"]}})
+            with self.assertRaises(SystemExit) as cm:
+                sp.cmd_verify(p, _SIGN_KEY)
+            self.assertIn("is not a string", str(cm.exception))
+
+    def test_null_signature_tolerated(self):
+        # Boundary: a null (None) signature is NOT rejected — cmd_sign signs it.
+        # Locks that the guard fires only on non-string NON-null values.
+        with tempfile.TemporaryDirectory(prefix="sp-sig-null-") as tmp:
+            p = self._write(
+                tmp,
+                {
+                    "request_id": "r1",
+                    "verifier": {
+                        "type": "non_agent_ci",
+                        "identity": "ci-1",
+                        "signed_at": "2026-01-01T00:00:00+00:00",
+                        "signature": None,
+                    },
+                },
+            )
+            loaded = sp._load_packet(p)  # tolerated: no raise
+            self.assertIsNone(loaded["verifier"]["signature"])
+            self.assertEqual(sp.cmd_sign(p, _SIGN_KEY), 0)
+
+    def test_well_formed_packet_still_loads(self):
+        # Behavior preserved on valid input: a dict verifier loads fine and the
+        # round-trip sign->verify succeeds.
+        with tempfile.TemporaryDirectory(prefix="sp-ok-") as tmp:
+            p = self._write(
+                tmp,
+                {
+                    "request_id": "r1",
+                    "status": "promoted",
+                    "verifier": {
+                        "type": "non_agent_ci",
+                        "identity": "ci-1",
+                        "signed_at": "2026-01-01T00:00:00+00:00",
+                        "signature": "unsigned",
+                    },
+                },
+            )
+            self.assertEqual(sp.cmd_sign(p, _SIGN_KEY), 0)
+            self.assertEqual(sp.cmd_verify(p, _SIGN_KEY), 0)
 
 
 if __name__ == "__main__":

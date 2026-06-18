@@ -110,8 +110,13 @@ def now_iso() -> str:
 def load_yaml(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise SystemExit(f"CONFIG ERROR: {path} does not exist")
-    with path.open("r", encoding="utf-8") as f:
-        data = yaml.safe_load(f)
+    # An unreadable (OSError), non-UTF-8 (UnicodeDecodeError), or malformed
+    # (yaml.YAMLError) config file is a clean CONFIG ERROR, never a traceback.
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise SystemExit(f"CONFIG ERROR: {path} not readable/parseable: {exc}")
     if not isinstance(data, dict):
         raise SystemExit(f"CONFIG ERROR: {path} did not parse as a mapping")
     return data
@@ -120,8 +125,13 @@ def load_yaml(path: Path) -> dict[str, Any]:
 def load_json(path: Path) -> dict[str, Any]:
     if not path.exists():
         raise SystemExit(f"CONFIG ERROR: {path} does not exist")
-    with path.open("r", encoding="utf-8") as f:
-        data = json.load(f)
+    # An unreadable (OSError), non-UTF-8 (UnicodeDecodeError), or malformed
+    # (json.JSONDecodeError) file is a clean CONFIG ERROR, never a traceback.
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"CONFIG ERROR: {path} not readable/parseable: {exc}")
     if not isinstance(data, dict):
         raise SystemExit(f"CONFIG ERROR: {path} did not parse as a mapping")
     return data
@@ -162,14 +172,21 @@ def load_ledger(ledger_dir: Path) -> dict[str, dict[str, Any]]:
         )
     out: dict[str, dict[str, Any]] = {}
     for shard in sorted(ledger_dir.glob("*.json")):
-        with shard.open("r", encoding="utf-8") as f:
-            try:
+        # The open() itself is INSIDE the guard: an unreadable shard (OSError —
+        # permission denied, transient FS, is-a-directory) is as much a clean
+        # CONFIG ERROR as a non-UTF-8 (UnicodeDecodeError) or malformed
+        # (json.JSONDecodeError) one, never a traceback.
+        try:
+            with shard.open("r", encoding="utf-8") as f:
                 entry = json.load(f)
-            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                raise SystemExit(
-                    f"CONFIG ERROR: ledger shard {shard.name} is not valid "
-                    f"JSON: {exc}"
-                )
+        except OSError as exc:
+            raise SystemExit(
+                f"CONFIG ERROR: ledger shard {shard.name} not readable: {exc}"
+            )
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise SystemExit(
+                f"CONFIG ERROR: ledger shard {shard.name} is not valid JSON: {exc}"
+            )
         if not isinstance(entry, dict):
             raise SystemExit(
                 f"CONFIG ERROR: ledger shard {shard.name} is not a JSON object"
@@ -248,6 +265,13 @@ def rule_2_references_rehash(ctx: VerifierContext) -> tuple[bool, str | None]:
         if not isinstance(claimed, str):
             mismatches.append(f"{label}: content_sha256 is not a string")
             return
+        # ledger_id keys ctx.ledger (a dict): an unhashable list/dict from an
+        # untrusted request would crash `.get(ledger_id)` with `TypeError:
+        # unhashable type`. Guard the type the way rule 9 does so a malformed
+        # ledger_id is a clean mismatch, not a traceback.
+        if ledger_id is not None and not isinstance(ledger_id, str):
+            mismatches.append(f"{label}: ledger_id is not a string")
+            return
         if ledger_id:
             entry = ctx.ledger.get(ledger_id)
             if entry is None:
@@ -269,7 +293,16 @@ def rule_2_references_rehash(ctx: VerifierContext) -> tuple[bool, str | None]:
             if not file_path.exists():
                 missing.append(f"{label}: path={path_ref} not found at {file_path}")
                 return
-            actual = sha256_bytes(file_path.read_bytes())
+            # An OSError mid-read (after the .exists() check — a race, a
+            # permission flip, or is-a-directory) is recorded as a missing ref,
+            # not raised: a referenced file we cannot read fails the check
+            # cleanly rather than crashing the verifier.
+            try:
+                contents = file_path.read_bytes()
+            except OSError as exc:
+                missing.append(f"{label}: path {path_ref} not readable: {exc}")
+                return
+            actual = sha256_bytes(contents)
             if actual != claimed:
                 mismatches.append(
                     f"{label}: path={path_ref} claimed={claimed[:12]}... "
@@ -407,7 +440,12 @@ def rule_8_skeptic_verdict_clean(ctx: VerifierContext) -> tuple[bool, str | None
         skeptic_path = ctx.request_path.parent.parent / path_ref
     if not skeptic_path.exists():
         return False, f"skeptic review file not found: {skeptic_path}"
-    text = skeptic_path.read_text(encoding="utf-8")
+    # An unreadable (OSError) or non-UTF-8 (UnicodeDecodeError) skeptic-review
+    # file fails the rule cleanly, never as a traceback.
+    try:
+        text = skeptic_path.read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError):
+        return False, "references.skeptic_review.path not readable/decodable"
     if _skeptic_verdict(text) in VALID_SKEPTIC_VERDICTS:
         return True, None
     return False, (
@@ -930,7 +968,14 @@ def main(argv: list[str]) -> int:
         try:
             ok, reason = rule_func(ctx)
         except Exception as exc:  # noqa: BLE001 - last-resort verifier backstop
-            ok, reason = False, f"internal error in {rule_name}: {exc}"
+            # Include the exception TYPE: some exceptions (e.g. a bare
+            # KeyError, or an exception with an empty str()) stringify to
+            # nothing, which would drop the only diagnostic. type(exc).__name__
+            # guarantees the rejection note names what went wrong.
+            ok, reason = (
+                False,
+                f"internal error in {rule_name}: {type(exc).__name__}: {exc}",
+            )
         rule_results.append((rule_name, ok, reason))
 
     packet = build_packet(

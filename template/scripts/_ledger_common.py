@@ -142,8 +142,21 @@ _JSON_TYPE_CHECKS = {
 
 
 def load_schema(schema_path: "os.PathLike[str] | str") -> dict[str, Any]:
-    with open(schema_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """Load a JSON Schema document, raising a clean, typed ``ValueError`` on any
+    open/read/decode failure.
+
+    Every failure mode of reading an external schema file — ``OSError`` (missing,
+    permission denied, is-a-directory), ``UnicodeDecodeError`` (non-UTF-8 bytes),
+    and ``json.JSONDecodeError`` (malformed JSON) — is converted into a single
+    ``ValueError`` carrying the path and the underlying cause. Callers catch
+    ``ValueError`` (or the broader set) and convert it to their own clean-error
+    form, so a corrupt/inaccessible schema never surfaces as a raw traceback.
+    """
+    try:
+        with open(schema_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"schema {schema_path} not loadable: {exc}") from exc
 
 
 def _check_type(value: Any, type_spec: Any) -> bool:

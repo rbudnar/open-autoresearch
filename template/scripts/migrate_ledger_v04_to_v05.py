@@ -45,20 +45,29 @@ NEW_PROTOCOL_VERSION = "0.5"
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            try:
-                obj = json.loads(stripped)
-            except json.JSONDecodeError as e:
-                raise SystemExit(
-                    f"ledger line is not valid JSON: {stripped[:80]!r} ({e})"
-                )
-            if not isinstance(obj, dict):
-                raise SystemExit(f"ledger line is not an object: {stripped[:80]!r}")
-            records.append(obj)
+    # encoding="utf-8", errors="strict": a non-UTF-8 file raises
+    # UnicodeDecodeError during `for line in f` (iteration-time decode), NOT at
+    # json.loads. Wrap the open AND the iteration so both an unreadable file
+    # (OSError) and a non-UTF-8 one (UnicodeDecodeError) become a clean
+    # SystemExit, never a traceback. The inner json.JSONDecodeError guard keeps
+    # its line-level diagnostic.
+    try:
+        with path.open("r", encoding="utf-8", errors="strict") as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    obj = json.loads(stripped)
+                except json.JSONDecodeError as e:
+                    raise SystemExit(
+                        f"ledger line is not valid JSON: {stripped[:80]!r} ({e})"
+                    )
+                if not isinstance(obj, dict):
+                    raise SystemExit(f"ledger line is not an object: {stripped[:80]!r}")
+                records.append(obj)
+    except (OSError, UnicodeDecodeError) as exc:
+        raise SystemExit(f"ledger file {path} not readable/decodable: {exc}")
     return records
 
 
@@ -103,7 +112,9 @@ def build_campaign(state_dir: Path) -> dict[str, Any]:
         try:
             with tree_path.open("r", encoding="utf-8") as f:
                 tree = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            # A non-UTF-8 (UnicodeDecodeError) research_tree.json is as benign
+            # here as an unreadable/malformed one — fall back to no metadata.
             tree = {}
         if isinstance(tree, dict):
             for key in (
@@ -138,7 +149,9 @@ def migrate(state_dir: Path, force: bool) -> dict[str, Any]:
                 prior = json.load(f)
             if isinstance(prior, dict) and isinstance(prior.get("queries"), int):
                 prior_committed = prior["queries"]
-        except (json.JSONDecodeError, OSError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            # A non-UTF-8 prior val_exposure.json is treated like a malformed or
+            # unreadable one: no usable prior counter to reconcile against.
             prior_committed = None
     reconcile_val_exposure(records, prior_committed)
 

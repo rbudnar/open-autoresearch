@@ -87,6 +87,19 @@ except ImportError:
 EvaluatorFn = Callable[[Any], Any]
 
 
+def _is_number(value: Any) -> bool:
+    """True iff ``value`` is a real int/float metric value.
+
+    The single numeric-membership predicate for this script: every site that
+    feeds an untrusted value into ``abs()``/``math.isnan()``/``float()`` (golden
+    fixture values, the evaluator's returns, minimum_meaningful_delta, declared
+    tolerances) routes through here, so the "what counts as a number" rule is
+    defined once. ``bool`` is excluded — it is an ``int`` subclass but a stray
+    ``true``/``false`` is never a valid metric value or tolerance.
+    """
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 # --- Tolerance lookup ---------------------------------------------------------
 
 
@@ -121,6 +134,18 @@ def metric_index(metrics_yaml: dict[str, Any]) -> dict[str, dict[str, str]]:
     return out
 
 
+def _tolerance_float(metric_name: str, kind: str, value: Any) -> float:
+    """Coerce a declared rtol/atol to float, failing with a clean CONFIG ERROR
+    (not a raw ValueError/TypeError traceback) when the metrics.yaml value is
+    non-numeric (e.g. ``rtol: "abc"`` or a list/mapping)."""
+    if not _is_number(value):
+        raise SystemExit(
+            f"CONFIG ERROR: tolerance for '{metric_name}' {kind} must be numeric "
+            f"(got {value!r})"
+        )
+    return float(value)
+
+
 def tolerance_for_metric(
     metric_name: str,
     eval_dtype: str,
@@ -144,7 +169,10 @@ def tolerance_for_metric(
             raise SystemExit(
                 f"CONFIG ERROR: tolerance for '{metric_name}' missing rtol/atol"
             )
-        return float(per_metric["rtol"]), float(per_metric["atol"])
+        return (
+            _tolerance_float(metric_name, "rtol", per_metric["rtol"]),
+            _tolerance_float(metric_name, "atol", per_metric["atol"]),
+        )
     defaults_by_dtype = equivalence_cfg.get("defaults_by_dtype")
     defaults_by_dtype = defaults_by_dtype if isinstance(defaults_by_dtype, dict) else {}
     dtype_defaults = defaults_by_dtype.get(eval_dtype)
@@ -163,7 +191,10 @@ def tolerance_for_metric(
         raise SystemExit(
             f"CONFIG ERROR: tolerance for '{metric_name}' missing rtol/atol"
         )
-    return float(dtype_defaults["rtol"]), float(dtype_defaults["atol"])
+    return (
+        _tolerance_float(metric_name, "rtol", dtype_defaults["rtol"]),
+        _tolerance_float(metric_name, "atol", dtype_defaults["atol"]),
+    )
 
 
 def sanity_check_tolerance(
@@ -193,13 +224,17 @@ def load_fixtures(fixtures_dir: Path) -> list[dict[str, Any]]:
     if not fixtures_dir.exists():
         raise SystemExit(f"CONFIG ERROR: fixtures dir does not exist: {fixtures_dir}")
     for path in sorted(fixtures_dir.rglob("*.json")):
-        with path.open("r", encoding="utf-8") as f:
-            try:
+        # The open() is INSIDE the guard: an unreadable fixture (OSError —
+        # permission denied, transient FS, is-a-directory) is as clean an error
+        # as a non-UTF-8 (UnicodeDecodeError) or malformed (json.JSONDecodeError)
+        # one, never a traceback.
+        try:
+            with path.open("r", encoding="utf-8") as f:
                 data = json.load(f)
-            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                raise SystemExit(
-                    f"CONFIG ERROR: fixture {path} is not valid JSON: {exc}"
-                )
+        except OSError as exc:
+            raise SystemExit(f"CONFIG ERROR: fixture {path} not readable: {exc}")
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            raise SystemExit(f"CONFIG ERROR: fixture {path} is not valid JSON: {exc}")
         if not isinstance(data, dict):
             raise SystemExit(
                 f"CONFIG ERROR: fixture {path} top-level must be an object"
@@ -260,17 +295,49 @@ def check_fixture(
     """Return list of failure messages; empty list = pass."""
     failures: list[str] = []
     fixture_id = fixture["fixture_id"]
+    # golden_outputs comes from an untrusted fixture file. load_fixtures asserts
+    # the key is PRESENT but not its type; a non-mapping (e.g. a JSON list) would
+    # crash the `.items()` below with AttributeError. Reject it as a clean CONFIG
+    # ERROR (invalid fixture), exit 2.
+    golden_outputs = fixture["golden_outputs"]
+    if not isinstance(golden_outputs, dict):
+        raise SystemExit(
+            f"CONFIG ERROR: fixture {fixture_id} golden_outputs must be an object/"
+            f"mapping, got {type(golden_outputs).__name__}"
+        )
     observed_outputs = evaluator(fixture["input"])
     if not isinstance(observed_outputs, dict):
         return [
             f"{fixture_id}: evaluator returned {type(observed_outputs).__name__}, "
             f"expected dict[str, float]"
         ]
-    for metric_name, golden in fixture["golden_outputs"].items():
+    for metric_name, golden in golden_outputs.items():
+        # golden is an untrusted fixture value. load_fixtures validates
+        # golden_outputs is a mapping but NOT that each VALUE is numeric; a
+        # non-numeric golden (str/list/dict) flows into abs()/math.isnan() in
+        # within_tolerance() and sanity_check_tolerance() and crashes with
+        # TypeError. A malformed fixture VALUE is a CONFIG ERROR (exit 2),
+        # consistent with the non-mapping golden_outputs rejection above.
+        if not _is_number(golden):
+            raise SystemExit(
+                f"CONFIG ERROR: fixture {fixture_id} golden for metric "
+                f"'{metric_name}' must be numeric, got {type(golden).__name__}"
+            )
         observed = observed_outputs.get(metric_name)
         if observed is None:
             failures.append(
                 f"{fixture_id}: evaluator did not return metric {metric_name!r}"
+            )
+            continue
+        # observed is the evaluator's runtime return value. The dict-shape check
+        # above does not constrain its VALUES; a non-numeric observed (the
+        # evaluator misbehaving) flows into math.isnan(observed) and crashes.
+        # Treat it as a behavioral FAILURE (exit 1), consistent with the
+        # evaluator-returned-a-non-dict path above — not a CONFIG ERROR.
+        if not _is_number(observed):
+            failures.append(
+                f"{fixture_id}.{metric_name}: evaluator returned non-numeric "
+                f"value {observed!r} (expected a number)"
             )
             continue
         info = metric_idx.get(metric_name)
@@ -338,8 +405,17 @@ def main(argv: list[str]) -> int:
         sys.stderr.write(f"CONFIG ERROR: {args.metrics} does not exist\n")
         return 2
 
-    with args.metrics.open("r", encoding="utf-8") as f:
-        metrics_yaml = yaml.safe_load(f)
+    # An unreadable (OSError), non-UTF-8 (UnicodeDecodeError), or malformed
+    # (yaml.YAMLError) metrics.yaml is a clean CONFIG ERROR (exit 2), never a
+    # traceback.
+    try:
+        with args.metrics.open("r", encoding="utf-8") as f:
+            metrics_yaml = yaml.safe_load(f)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        sys.stderr.write(
+            f"CONFIG ERROR: {args.metrics} not readable/parseable: {exc}\n"
+        )
+        return 2
     if not isinstance(metrics_yaml, dict):
         sys.stderr.write("CONFIG ERROR: metrics.yaml did not parse as a mapping\n")
         return 2
@@ -350,11 +426,35 @@ def main(argv: list[str]) -> int:
             "Add it per §17.1.1.\n"
         )
         return 2
+    # A truthy non-mapping evaluator_equivalence (e.g. a YAML list or string) would
+    # survive `or {}` and later crash tolerance_for_metric's `.get("per_metric")`
+    # with AttributeError. Reject it as a clean CONFIG ERROR here.
+    if not isinstance(equivalence_cfg, dict):
+        sys.stderr.write(
+            "CONFIG ERROR: metrics.yaml evaluator_equivalence must be a mapping, "
+            f"got {type(equivalence_cfg).__name__}\n"
+        )
+        return 2
 
     metric_idx = metric_index(metrics_yaml)
     primary = metrics_yaml.get("primary_metric") or {}
+    # A truthy non-mapping primary_metric would survive `or {}` and crash the
+    # `.get()` calls below with AttributeError; coerce to {} so name/min_delta
+    # default to None (metric_index already guards its own copy).
+    primary = primary if isinstance(primary, dict) else {}
     primary_name = primary.get("name")
     primary_min_delta = primary.get("minimum_meaningful_delta")
+    # minimum_meaningful_delta flows into sanity_check_tolerance's
+    # abs(minimum_meaningful_delta) (the §17.1.1 tolerance ceiling). A present-
+    # but-non-numeric value (str/list/dict from an untrusted metrics.yaml) would
+    # crash abs() with TypeError; reject it here as a clean CONFIG ERROR. Absent
+    # (None) is tolerated — the sanity check is then simply skipped.
+    if primary_min_delta is not None and not _is_number(primary_min_delta):
+        sys.stderr.write(
+            "CONFIG ERROR: primary_metric.minimum_meaningful_delta must be "
+            f"numeric, got {type(primary_min_delta).__name__}\n"
+        )
+        return 2
 
     fixtures = load_fixtures(args.fixtures)
     evaluator = load_evaluator(args.evaluator)

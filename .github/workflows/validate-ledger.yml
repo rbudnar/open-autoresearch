@@ -61,15 +61,15 @@ jobs:
       # by running their suite with NO third-party deps installed.
       - name: Reference ledger tooling — stdlib-only (no deps)
         run: python3 -m unittest template.scripts.tests.test_ledger
-      # The §10.5 verifier (verify_request.py) parses YAML config and needs
-      # PyYAML, exactly like the validate-examples verifier jobs. Its tests
-      # subprocess the verifier, so install PyYAML for this step only.
-      - name: Verifier shard-load tests (verifier needs PyYAML)
+      # Everything else (the §10.5 verifier shard-load + malformed-input suites,
+      # the split-manifest / comparison-set identity tests, bootstrap_verify, and
+      # the scaffold malformed-input suite) parses YAML config and so needs
+      # PyYAML, exactly like the validate-examples verifier jobs. Run the WHOLE
+      # tests/ directory via unittest discover so new test modules
+      # (e.g. test_verifier_malformed_input, test_scaffold_malformed_input) are
+      # picked up automatically and never silently skipped on PRs. No jsonschema:
+      # the validator is stdlib (see _ledger_common), so PyYAML is the only dep.
+      - name: Full scaffold tests via discover (need PyYAML)
         run: |
           pip install pyyaml
-          python3 -m unittest template.scripts.tests.test_verifier_shard_load
-      # Split-manifest (§6.3.1 frozen|declarative) + verifier rule 11
-      # comparison-set identity. bootstrap_verify + the verifier need PyYAML, so
-      # this runs in the same PyYAML-installed step.
-      - name: Split manifest + comparison-set identity tests (need PyYAML)
-        run: python3 -m unittest template.scripts.tests.test_split_manifest
+          python3 -m unittest discover -s template/scripts/tests -p 'test_*.py'

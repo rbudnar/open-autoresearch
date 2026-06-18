@@ -81,8 +81,14 @@ LIST_SHAPED_KEYS: set[str] = {
 
 def load_questionnaire(path: Path) -> dict[str, Any]:
     """Load BOOTSTRAP_QUESTIONS.yaml and return the parsed dict."""
-    with open(path) as f:
-        data = yaml.safe_load(f)
+    # An unreadable (OSError), non-UTF-8 (UnicodeDecodeError), or malformed
+    # (yaml.YAMLError) questionnaire is a clean exit-2 SystemExit, never a
+    # traceback.
+    try:
+        with open(path, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise SystemExit(f"{path}: not readable/parseable: {exc}")
     if not isinstance(data, dict) or "groups" not in data:
         raise SystemExit(f"{path}: not a valid questionnaire (missing 'groups' key)")
     return data  # type: ignore[no-any-return]
@@ -91,7 +97,14 @@ def load_questionnaire(path: Path) -> dict[str, Any]:
 def collect_questions(questionnaire: dict[str, Any]) -> list[dict[str, Any]]:
     """Flatten all questions across all groups."""
     questions: list[dict[str, Any]] = []
-    for group in questionnaire.get("groups") or []:
+    # `groups` is untrusted YAML. A truthy non-list (e.g. `groups: 42` or a bare
+    # string) would survive `or []` and then either crash iteration with
+    # TypeError or silently iterate string characters. Coerce to a list so a
+    # malformed questionnaire yields zero questions rather than a traceback (the
+    # 'groups' KEY presence is already asserted in load_questionnaire).
+    groups = questionnaire.get("groups")
+    groups = groups if isinstance(groups, list) else []
+    for group in groups:
         if not isinstance(group, dict):
             continue
         group_questions = group.get("questions")
@@ -139,8 +152,13 @@ def extract_claimed_keys(
 
 def load_example_config(example_path: Path) -> dict[str, Any]:
     """Load a template/config/<file>.yaml.example file."""
-    with open(example_path) as f:
-        data = yaml.safe_load(f)
+    # An unreadable (OSError), non-UTF-8 (UnicodeDecodeError), or malformed
+    # (yaml.YAMLError) .example config is a clean SystemExit, never a traceback.
+    try:
+        with open(example_path, encoding="utf-8") as f:
+            data = yaml.safe_load(f)
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise SystemExit(f"{example_path}: not readable/parseable: {exc}")
     if not isinstance(data, dict):
         raise SystemExit(
             f"{example_path}: top-level YAML must be a mapping, got "
@@ -299,22 +317,30 @@ def main() -> int:
         type=Path,
         default=None,
         help=(
-            "Deprecated alias for --scaffold-root (the directory holding "
-            "BOOTSTRAP_QUESTIONS.yaml and config/)."
+            "DEPRECATED. The REPOSITORY root that CONTAINS the scaffold under "
+            "`template/` (i.e. the scaffold is `<repo-root>/template`). Retained "
+            "for old callers; prefer --scaffold-root, which names the scaffold "
+            "directory directly."
         ),
     )
     args = parser.parse_args()
 
     # The scaffold root is the directory that holds BOOTSTRAP_QUESTIONS.yaml and
     # config/. It is `template/` in this upstream repo and `autoresearch/` once
-    # the scaffold is vendored into a host. Resolve it relative to THIS script
-    # (scripts/ sits inside the scaffold) so the check runs identically from both
-    # layouts. --scaffold-root (or the deprecated --repo-root alias) overrides.
+    # the scaffold is vendored into a host. Three resolutions, most-specific first:
+    #   1. --scaffold-root X : X IS the scaffold (new, explicit).
+    #   2. --repo-root X     : DEPRECATED alias — X is the REPOSITORY root that
+    #      contains the scaffold under `template/`, so the scaffold is X/template.
+    #      This preserves the ORIGINAL --repo-root contract (old callers pass the
+    #      repo root, not the scaffold) instead of silently repointing it.
+    #   3. default (no flag) : the scaffold this script lives in (one level up
+    #      from scripts/) — works identically in `template/` upstream and
+    #      `autoresearch/` in a host install.
     scaffold: Path
     if args.scaffold_root is not None:
         scaffold = args.scaffold_root
     elif args.repo_root is not None:
-        scaffold = args.repo_root
+        scaffold = args.repo_root / "template"
     else:
         scaffold = Path(__file__).resolve().parent.parent
 

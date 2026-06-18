@@ -334,7 +334,14 @@ def main(argv: list[str]) -> int:
     now = dt.datetime.now(dt.timezone.utc)
     record = build_record(args, now)
 
-    schema = load_schema(args.schema)
+    try:
+        schema = load_schema(args.schema)
+    except (ValueError, OSError) as exc:
+        # load_schema raises a clean, typed ValueError on any open/read/decode
+        # failure (OSError/UnicodeDecodeError/json.JSONDecodeError). Convert it to
+        # a clean nonzero exit with a message rather than a raw traceback.
+        sys.stderr.write(f"CONFIG ERROR: {exc}\n")
+        return 2
     errors = validate_against_schema(record, schema)
     if errors:
         sys.stderr.write("SCHEMA VALIDATION FAILED:\n")

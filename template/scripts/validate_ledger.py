@@ -56,7 +56,11 @@ def load_records(ledger_dir: Path) -> list[tuple[Path, Any]]:
 def validate(ledger_dir: Path, schema_path: Path) -> tuple[bool, list[str]]:
     try:
         schema = load_schema(schema_path)
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (ValueError, OSError) as exc:
+        # load_schema converts OSError/UnicodeDecodeError/json.JSONDecodeError into
+        # a clean ValueError (UnicodeDecodeError + json.JSONDecodeError are already
+        # ValueError subclasses). OSError is kept for defensiveness. Either way a
+        # corrupt/inaccessible schema is a clean FAIL line, never a traceback.
         return False, [f"FAIL schema not loadable: {schema_path}: {exc}"]
     lines: list[str] = []
     ok_overall = True
@@ -135,7 +139,13 @@ def validate(ledger_dir: Path, schema_path: Path) -> tuple[bool, list[str]]:
         if isinstance(obj, dict):
             rid = obj.get("id")
             if isinstance(rid, str):
-                parents = obj.get("parent_ids") or []
+                # A truthy non-list parent_ids (e.g. `parent_ids: 42`) would make
+                # `or []` keep the scalar and then crash the comprehension with
+                # `TypeError: 'int' object is not iterable`. Coerce to a list the
+                # same way the orphan pass (~line 111) does so this second pass
+                # reaches the clean per-record FAIL line instead of a traceback.
+                parents = obj.get("parent_ids")
+                parents = parents if isinstance(parents, list) else []
                 graph[rid] = [
                     p
                     for p in parents
