@@ -84,7 +84,16 @@ def _parse_json_object_arg(raw: str, flag: str) -> dict[str, Any]:
 
 def read_protocol_version(path: Path) -> str:
     if path.exists():
-        return path.read_text(encoding="utf-8").strip()
+        # An unreadable (OSError) or non-UTF-8 (UnicodeDecodeError)
+        # --protocol-version-file is a clean CONFIG ERROR, never a traceback,
+        # matching the rest of this script's file-read contract.
+        try:
+            return path.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError) as exc:
+            raise SystemExit(
+                f"CONFIG ERROR: --protocol-version-file {path} not "
+                f"readable/decodable: {exc}"
+            )
     return "0.5"
 
 
@@ -191,6 +200,13 @@ def build_record(args: argparse.Namespace, now: dt.datetime) -> dict[str, Any]:
         "metrics": metrics,
     }
     if args.val_queries is not None:
+        # Non-negative at the write boundary: a negative count would later cancel
+        # ledger-derived exposure in the §17.6 anti-spoof sum.
+        if args.val_queries < 0:
+            raise SystemExit(
+                f"CONFIG ERROR: --val-queries must be non-negative (got "
+                f"{args.val_queries})"
+            )
         record["val_queries_incurred_by_this_run"] = args.val_queries
     if args.node_title:
         record["node_title"] = args.node_title
@@ -334,7 +350,14 @@ def main(argv: list[str]) -> int:
     now = dt.datetime.now(dt.timezone.utc)
     record = build_record(args, now)
 
-    schema = load_schema(args.schema)
+    try:
+        schema = load_schema(args.schema)
+    except (ValueError, OSError) as exc:
+        # load_schema raises a clean, typed ValueError on any open/read/decode
+        # failure (OSError/UnicodeDecodeError/json.JSONDecodeError). Convert it to
+        # a clean nonzero exit with a message rather than a raw traceback.
+        sys.stderr.write(f"CONFIG ERROR: {exc}\n")
+        return 2
     errors = validate_against_schema(record, schema)
     if errors:
         sys.stderr.write("SCHEMA VALIDATION FAILED:\n")

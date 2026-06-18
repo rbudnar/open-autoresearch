@@ -33,11 +33,11 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from _ledger_common import resolve_val_queries
+    from _ledger_common import is_safe_filename_stem, resolve_val_queries
     from regenerate_state import regenerate
 except ImportError:  # pragma: no cover - path shim for direct invocation
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from _ledger_common import resolve_val_queries
+    from _ledger_common import is_safe_filename_stem, resolve_val_queries
     from regenerate_state import regenerate
 
 NEW_PROTOCOL_VERSION = "0.5"
@@ -45,15 +45,29 @@ NEW_PROTOCOL_VERSION = "0.5"
 
 def read_jsonl(path: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            stripped = line.strip()
-            if not stripped:
-                continue
-            obj = json.loads(stripped)
-            if not isinstance(obj, dict):
-                raise SystemExit(f"ledger line is not an object: {stripped[:80]!r}")
-            records.append(obj)
+    # encoding="utf-8", errors="strict": a non-UTF-8 file raises
+    # UnicodeDecodeError during `for line in f` (iteration-time decode), NOT at
+    # json.loads. Wrap the open AND the iteration so both an unreadable file
+    # (OSError) and a non-UTF-8 one (UnicodeDecodeError) become a clean
+    # SystemExit, never a traceback. The inner json.JSONDecodeError guard keeps
+    # its line-level diagnostic.
+    try:
+        with path.open("r", encoding="utf-8", errors="strict") as f:
+            for line in f:
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                try:
+                    obj = json.loads(stripped)
+                except json.JSONDecodeError as e:
+                    raise SystemExit(
+                        f"ledger line is not valid JSON: {stripped[:80]!r} ({e})"
+                    )
+                if not isinstance(obj, dict):
+                    raise SystemExit(f"ledger line is not an object: {stripped[:80]!r}")
+                records.append(obj)
+    except (OSError, UnicodeDecodeError) as exc:
+        raise SystemExit(f"ledger file {path} not readable/decodable: {exc}")
     return records
 
 
@@ -98,7 +112,9 @@ def build_campaign(state_dir: Path) -> dict[str, Any]:
         try:
             with tree_path.open("r", encoding="utf-8") as f:
                 tree = json.load(f)
-        except (json.JSONDecodeError, OSError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            # A non-UTF-8 (UnicodeDecodeError) research_tree.json is as benign
+            # here as an unreadable/malformed one — fall back to no metadata.
             tree = {}
         if isinstance(tree, dict):
             for key in (
@@ -133,7 +149,9 @@ def migrate(state_dir: Path, force: bool) -> dict[str, Any]:
                 prior = json.load(f)
             if isinstance(prior, dict) and isinstance(prior.get("queries"), int):
                 prior_committed = prior["queries"]
-        except (json.JSONDecodeError, OSError):
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+            # A non-UTF-8 prior val_exposure.json is treated like a malformed or
+            # unreadable one: no usable prior counter to reconcile against.
             prior_committed = None
     reconcile_val_exposure(records, prior_committed)
 
@@ -147,14 +165,29 @@ def migrate(state_dir: Path, force: bool) -> dict[str, Any]:
         rid = rec.get("id")
         if not isinstance(rid, str):
             raise SystemExit(f"record missing string id: {rec!r}")
-        shard = ledger_dir / f"{rid}.json"
-        if shard.exists() and not force:
+        # The legacy v0.4 id becomes a shard filename. An unsafe id would either
+        # escape state/ledger/ (path separators / `..`) and be invisible to
+        # regenerate()'s reload — a silent record drop — or traceback at the
+        # filesystem boundary (embedded NUL -> ValueError, overlong -> OSError).
+        # The shared predicate rejects all of those; the write is still wrapped
+        # below as defense in depth.
+        if not is_safe_filename_stem(rid):
             raise SystemExit(
-                f"REFUSING to clobber existing shard {shard} (pass --force)"
+                f"record id is not a safe shard filename (only [A-Za-z0-9._-], "
+                f"<=200 chars, no path separators or '..'): {rid!r}"
             )
-        shard.write_text(
-            json.dumps(rec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-        )
+        shard = ledger_dir / f"{rid}.json"
+        try:
+            if shard.exists() and not force:
+                raise SystemExit(
+                    f"REFUSING to clobber existing shard {shard} (pass --force)"
+                )
+            shard.write_text(
+                json.dumps(rec, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
+            )
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"cannot write ledger shard {shard}: {exc}")
 
     campaign_path = state_dir / "campaign.json"
     if not campaign_path.exists() or force:

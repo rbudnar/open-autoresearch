@@ -64,8 +64,50 @@ def compute_signature(packet: dict[str, Any], key: bytes) -> str:
     return hmac.new(key, canonical, hashlib.sha256).hexdigest()
 
 
+def _load_packet(packet_path: Path) -> dict[str, Any]:
+    """Read+parse a promotion packet, converting any open/read/decode failure into
+    a clean ``SystemExit`` (CONFIG ERROR), never a raw traceback.
+
+    Catches ``OSError`` (unreadable — permission denied, transient FS,
+    is-a-directory), ``UnicodeDecodeError`` (non-UTF-8 bytes), and
+    ``json.JSONDecodeError`` (malformed JSON), plus a non-object top level.
+    """
+    try:
+        data = json.loads(packet_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise SystemExit(
+            f"CONFIG ERROR: packet {packet_path} not readable/parseable: {exc}"
+        )
+    if not isinstance(data, dict):
+        raise SystemExit(f"CONFIG ERROR: packet {packet_path} is not a JSON object")
+    # The `verifier` block is read via chained `.get()` in compute_signature
+    # (verifier.get(k)) and both cmds (packet.get("verifier", {}).get(...)). A
+    # present-but-non-dict `verifier` (string/list from an untrusted packet) would
+    # crash those chains with AttributeError, so reject it here as a clean CONFIG
+    # ERROR. (Absent `verifier` is tolerated: cmd_sign reports it explicitly and
+    # cmd_verify treats it as unsigned.)
+    if "verifier" in data and not isinstance(data["verifier"], dict):
+        raise SystemExit(
+            "CONFIG ERROR: packet 'verifier' block is missing or not an object"
+        )
+    # verifier.signature is later subscripted (existing[:16] in cmd_sign,
+    # claimed[:16] in cmd_verify) and passed to hmac.compare_digest — all of
+    # which require a str. A present-but-non-string signature (int/list/dict from
+    # an untrusted packet) crashes those with TypeError, so reject it here as a
+    # clean CONFIG ERROR. (Absent or null signature is tolerated: cmd_sign signs
+    # it and cmd_verify treats it as unsigned.)
+    verifier_block = data.get("verifier")
+    if isinstance(verifier_block, dict):
+        signature = verifier_block.get("signature")
+        if signature is not None and not isinstance(signature, str):
+            raise SystemExit(
+                "CONFIG ERROR: packet 'verifier.signature' is not a string"
+            )
+    return data
+
+
 def cmd_sign(packet_path: Path, key: bytes) -> int:
-    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    packet = _load_packet(packet_path)
     existing = packet.get("verifier", {}).get("signature")
     if existing and existing != "unsigned":
         raise SystemExit(
@@ -76,15 +118,20 @@ def cmd_sign(packet_path: Path, key: bytes) -> int:
         raise SystemExit("CONFIG ERROR: packet has no 'verifier' block")
     new_sig = compute_signature(packet, key)
     packet["verifier"]["signature"] = new_sig
-    packet_path.write_text(
-        json.dumps(packet, indent=2, sort_keys=True), encoding="utf-8"
-    )
+    # An unwritable packet (read-only, full disk) is a clean CONFIG ERROR, not a
+    # traceback, matching the write guards in verify_request.write_packet_files.
+    try:
+        packet_path.write_text(
+            json.dumps(packet, indent=2, sort_keys=True), encoding="utf-8"
+        )
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"CONFIG ERROR: cannot write packet {packet_path}: {exc}")
     sys.stdout.write(f"Signed {packet_path}\n")
     return 0
 
 
 def cmd_verify(packet_path: Path, key: bytes) -> int:
-    packet = json.loads(packet_path.read_text(encoding="utf-8"))
+    packet = _load_packet(packet_path)
     claimed = packet.get("verifier", {}).get("signature", "")
     if not claimed or claimed == "unsigned":
         sys.stderr.write(f"FAIL: packet {packet_path} is unsigned; cannot verify.\n")

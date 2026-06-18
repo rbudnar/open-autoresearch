@@ -184,7 +184,14 @@ def check_no_fill_me(host_root: Path) -> list[tuple[bool, str]]:
         p = config_dir / f
         if not p.is_file():
             continue  # already reported as a missing-file failure
-        text = p.read_text()
+        # errors="replace": a binary/non-UTF8 config must report a FAIL line, not
+        # crash with UnicodeDecodeError. An unreadable config (OSError) is the
+        # same — a FAIL line, never a traceback.
+        try:
+            text = p.read_text(errors="replace")
+        except OSError as e:
+            results.append(report(False, f"no <FILL_ME> in {f}", f"not readable: {e}"))
+            continue
         if "<FILL_ME>" in text:
             n = text.count("<FILL_ME>")
             results.append(
@@ -201,7 +208,9 @@ def check_bootstrap_answers(host_root: Path) -> tuple[bool, str]:
     if not p.is_file():
         return report(False, "bootstrap-answers.yaml exists", f"missing: {p}")
     try:
-        data = yaml.safe_load(p.read_text())
+        data = yaml.safe_load(p.read_text(errors="replace"))
+    except OSError as e:
+        return report(False, "bootstrap-answers.yaml exists", f"not readable: {e}")
     except yaml.YAMLError as e:
         return report(False, "bootstrap-answers.yaml exists", f"YAML parse error: {e}")
     if not isinstance(data, dict):
@@ -308,7 +317,8 @@ def _check_frozen_manifest(data: dict) -> list[tuple[bool, str]]:
             )
             continue
         size = split_data["size_bytes"]
-        if not isinstance(size, int) or size <= 0:
+        # bool is an int subclass; `size_bytes: true` must not pass as size 1.
+        if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
             results.append(
                 report(
                     False,
@@ -449,7 +459,9 @@ def check_manifest(host_root: Path) -> list[tuple[bool, str]]:
         return results
     try:
         data = json.loads(p.read_text())
-    except json.JSONDecodeError as e:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+        # An unreadable (OSError) or non-UTF-8 (UnicodeDecodeError) manifest is a
+        # FAIL line, not a crash — consistent with the malformed-JSON path.
         results.append(report(False, "MANIFEST.json parses", str(e)))
         return results
     if not isinstance(data, dict):
@@ -521,7 +533,10 @@ def _check_manifest_schema(data: dict) -> tuple[bool, str]:
     """
     try:
         schema = load_schema(SPLIT_MANIFEST_SCHEMA)
-    except (OSError, json.JSONDecodeError) as exc:
+    except (ValueError, OSError) as exc:
+        # load_schema converts OSError/UnicodeDecodeError/json.JSONDecodeError into
+        # a clean ValueError; a non-UTF-8 or unreadable bundled schema is a FAIL
+        # line here, never a traceback.
         return report(
             False, "MANIFEST.json schema loadable", f"{SPLIT_MANIFEST_SCHEMA}: {exc}"
         )
@@ -588,7 +603,9 @@ def check_fixtures(host_root: Path, allow_partial: bool) -> list[tuple[bool, str
     for fp in files:
         try:
             data = json.loads(fp.read_text())
-        except json.JSONDecodeError as e:
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as e:
+            # An unreadable (OSError) or non-UTF-8 (UnicodeDecodeError) fixture is
+            # a FAIL line, not a crash — consistent with the malformed-JSON path.
             results.append(report(False, f"fixture parses: {fp.name}", str(e)))
             continue
         if not isinstance(data, dict):
@@ -634,8 +651,11 @@ def check_protocol_version(host_root: Path) -> list[tuple[bool, str]]:
         if not p.is_file():
             continue
         try:
-            data = yaml.safe_load(p.read_text())
-        except yaml.YAMLError:
+            data = yaml.safe_load(p.read_text(errors="replace"))
+        except (OSError, yaml.YAMLError):
+            # An unreadable (OSError) or unparseable config is skipped here, like
+            # a non-dict one — the materialized-config and bootstrap-answers
+            # checks above own the hard FAIL on those files.
             continue
         if not isinstance(data, dict):
             continue
@@ -659,9 +679,19 @@ def check_protocol_version(host_root: Path) -> list[tuple[bool, str]]:
     # PROTOCOL_VERSION is a bare text file copied from template/PROTOCOL_VERSION.
     pv_file = host_root / "autoresearch" / "PROTOCOL_VERSION"
     if pv_file.is_file():
-        content = pv_file.read_text().strip()
         rel = pv_file.relative_to(host_root)
-        if content == EXPECTED_PROTOCOL_VERSION:
+        # The host's copied PROTOCOL_VERSION: an unreadable (OSError) or non-UTF-8
+        # (UnicodeDecodeError) file is a FAIL line, never a traceback.
+        try:
+            content = pv_file.read_text().strip()
+        except (OSError, UnicodeDecodeError) as e:
+            results.append(
+                report(False, f"protocol_version=0.5 in {rel}", f"not readable: {e}")
+            )
+            content = None
+        if content is None:
+            pass
+        elif content == EXPECTED_PROTOCOL_VERSION:
             results.append(report(True, f"protocol_version=0.5 in {rel}"))
         else:
             results.append(
@@ -680,7 +710,10 @@ def maybe_partial(host_root: Path) -> bool:
         return False
     try:
         data = yaml.safe_load(p.read_text())
-    except yaml.YAMLError:
+    except (OSError, UnicodeDecodeError, yaml.YAMLError):
+        # Best-effort: an unreadable, non-UTF-8, or unparseable answers file
+        # means we cannot confirm a partial bootstrap, so default to False (the
+        # hard checks above own the FAIL line for a broken answers file).
         return False
     if not isinstance(data, dict):
         return False

@@ -21,7 +21,9 @@ insertion order. The whole sharded-ledger design depends on this guarantee.
 from __future__ import annotations
 
 import json
+import math
 import os
+import re
 import sys
 from typing import Any
 
@@ -61,12 +63,18 @@ def resolve_val_queries(entry: dict[str, Any]) -> int:
     (``val_queries_incurred_by_this_run``) and the AE record shape
     (``metrics.validation_set_queries``).
     """
+    if not isinstance(entry, dict):
+        return 0
     direct = entry.get("val_queries_incurred_by_this_run")
     if isinstance(direct, bool):
         # bool is an int subclass; a stray True/False is not a query count.
         direct = None
     if isinstance(direct, int):
-        return direct
+        # Clamp negative to 0. A negative count is malformed, and the verifier's
+        # §17.6 anti-spoof check sums these (ledger_derived); a negative shard
+        # must NOT be able to CANCEL real exposure and slip a request under the
+        # budget. (validate_ledger separately flags it via the schema minimum.)
+        return max(0, direct)
 
     metrics = entry.get("metrics")
     if isinstance(metrics, dict):
@@ -74,7 +82,7 @@ def resolve_val_queries(entry: dict[str, Any]) -> int:
         if isinstance(nested, bool):
             nested = None
         if isinstance(nested, int):
-            return nested
+            return max(0, nested)
 
     return 0
 
@@ -133,15 +141,59 @@ _JSON_TYPE_CHECKS = {
     "array": lambda v: isinstance(v, list),
     "string": lambda v: isinstance(v, str),
     "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
-    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    # json.loads accepts NaN/Infinity by default; a non-finite number must NOT
+    # validate (it would freeze a non-deterministic/invalid split rule or metric
+    # as "passing"). A Python int can never be non-finite, so only "number"
+    # needs the math.isfinite gate.
+    "number": (
+        lambda v: isinstance(v, (int, float))
+        and not isinstance(v, bool)
+        and math.isfinite(v)
+    ),
     "boolean": lambda v: isinstance(v, bool),
     "null": lambda v: v is None,
 }
 
 
+_SAFE_FILENAME_STEM_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def is_safe_filename_stem(value: Any, max_length: int = 200) -> bool:
+    """True iff ``value`` is safe to use as a SINGLE path component (a packet or
+    ledger-shard filename stem).
+
+    Untrusted ids (verifier ``request_id``, legacy v0.4 ledger ``id``) become
+    filenames. A value that is not a conservative stem either escapes the target
+    dir (path separators, ``..``) or tracebacks at the filesystem boundary:
+    an embedded NUL raises ``ValueError: embedded null byte`` and an overlong
+    name raises ``OSError: File name too long``. One allowlist closes all of
+    those: 1..``max_length`` chars from ``[A-Za-z0-9._-]`` (which excludes path
+    separators, NUL/control chars, and whitespace), minus the directory aliases
+    ``.``/``..``. ``max_length`` defaults to 200 so the longest derived filename
+    (``<stem>-promotion-packet.json``) stays well under the 255-byte limit."""
+    if not isinstance(value, str) or value in (".", ".."):
+        return False
+    if not (1 <= len(value) <= max_length):
+        return False
+    return _SAFE_FILENAME_STEM_RE.fullmatch(value) is not None
+
+
 def load_schema(schema_path: "os.PathLike[str] | str") -> dict[str, Any]:
-    with open(schema_path, "r", encoding="utf-8") as f:
-        return json.load(f)
+    """Load a JSON Schema document, raising a clean, typed ``ValueError`` on any
+    open/read/decode failure.
+
+    Every failure mode of reading an external schema file — ``OSError`` (missing,
+    permission denied, is-a-directory), ``UnicodeDecodeError`` (non-UTF-8 bytes),
+    and ``json.JSONDecodeError`` (malformed JSON) — is converted into a single
+    ``ValueError`` carrying the path and the underlying cause. Callers catch
+    ``ValueError`` (or the broader set) and convert it to their own clean-error
+    form, so a corrupt/inaccessible schema never surfaces as a raw traceback.
+    """
+    try:
+        with open(schema_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"schema {schema_path} not loadable: {exc}") from exc
 
 
 def _check_type(value: Any, type_spec: Any) -> bool:

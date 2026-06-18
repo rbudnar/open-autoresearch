@@ -161,7 +161,7 @@ attempt). Then, for each fixture:
 After writing the fixtures, run the verifier (it checks-only — no
 recording):
 ```
-python template/scripts/behavioral_equivalence.py \
+python autoresearch/scripts/behavioral_equivalence.py \
   --metrics autoresearch/config/metrics.yaml \
   --fixtures evaluation/fixtures \
   --evaluator <module.path>:<compute_fn>
@@ -177,7 +177,7 @@ Commit: `chore(autoresearch): seed behavioral-equivalence fixtures`.
 **8. Verify and hand off.**
 First, run the bootstrap smoke test:
 ```
-python template/scripts/bootstrap_verify.py <host-repo-root>
+python autoresearch/scripts/bootstrap_verify.py <host-repo-root>
 ```
 Exit 0 = every required file/key is present and well-formed. Exit 1 = read
 the printed `[FAIL]` lines, fix what's missing, re-run. Don't proceed to
@@ -261,7 +261,7 @@ A successful bootstrap leaves the host repo with:
 - `evaluation/fixtures/*.json` with 3–5 fixture files (or a recorded
   `partial` flag in `bootstrap-answers.yaml` if fewer), and the
   behavioral-equivalence script exits 0 against them.
-- `template/scripts/bootstrap_verify.py <host-repo-root>` exits 0 (all
+- `autoresearch/scripts/bootstrap_verify.py <host-repo-root>` exits 0 (all
   required files present, no `<FILL_ME>` placeholders left, all schemas
   match).
 - A clean commit history on the integration branch with one commit per

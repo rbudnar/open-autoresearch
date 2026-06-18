@@ -66,8 +66,18 @@ def load_records(ledger_dir: Path) -> list[dict[str, Any]]:
     if not ledger_dir.is_dir():
         return records
     for path in sorted(ledger_dir.glob("*.json")):
-        with path.open("r", encoding="utf-8") as f:
-            obj = json.load(f)
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                obj = json.load(f)
+        except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            # Mirror validate_ledger.load_records: a malformed/non-UTF8/unreadable
+            # shard is skipped (with a warning) rather than crashing the
+            # regeneration. validate_ledger.py is the surface that FAILS on such a
+            # shard.
+            sys.stderr.write(
+                f"WARNING: skipping malformed ledger shard {path.name}: {exc}\n"
+            )
+            continue
         if isinstance(obj, dict):
             records.append(obj)
     # Sort by id for deterministic output.
@@ -79,8 +89,18 @@ def load_campaign(state_dir: Path) -> dict[str, Any]:
     path = state_dir / "campaign.json"
     if not path.exists():
         return {}
-    with path.open("r", encoding="utf-8") as f:
-        obj = json.load(f)
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            obj = json.load(f)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        # Consistent with load_records' skip-with-warning: an unreadable,
+        # non-UTF-8, or malformed campaign.json degrades to no campaign metadata
+        # rather than crashing the regeneration with a traceback.
+        sys.stderr.write(
+            f"WARNING: campaign.json not readable/parseable ({exc}); "
+            f"proceeding with no campaign metadata\n"
+        )
+        return {}
     return obj if isinstance(obj, dict) else {}
 
 
@@ -119,7 +139,9 @@ def read_manifest_val_set_version(state_dir: Path) -> "int | str | None":
         return None
     try:
         data = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        # A non-UTF-8 MANIFEST.json raises UnicodeDecodeError during read_text;
+        # treat it like an unreadable/malformed manifest (no usable value).
         return None
     if isinstance(data, dict):
         vsv = data.get("val_set_version")
@@ -157,7 +179,13 @@ def read_exposure_budget(state_dir: Path) -> int | None:
         path = config_dir / name
         if not path.is_file():
             continue
-        for raw in path.read_text(encoding="utf-8").splitlines():
+        # An unreadable (OSError) or non-UTF-8 (UnicodeDecodeError) metrics file
+        # yields no budget rather than crashing regeneration with a traceback.
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return None
+        for raw in text.splitlines():
             # Top-level key only: no leading whitespace, no comment line.
             if raw.startswith("val_set_exposure_budget:"):
                 value = raw.split(":", 1)[1].split("#", 1)[0].strip()
@@ -234,13 +262,15 @@ def build_research_tree(
             lessons = (
                 rec.get("lessons", []) if isinstance(rec.get("lessons"), list) else []
             )
+        parents = rec.get("parent_ids")
+        parents = parents if isinstance(parents, list) else []
         nodes[rid] = {
             "id": rid,
             "title": title,
             "branch": rec.get("branch", ""),
             "status": rec.get("status", ""),
             "hypothesis": rec.get("hypothesis", ""),
-            "parent_ids": list(rec.get("parent_ids", []) or []),
+            "parent_ids": [p for p in parents if isinstance(p, str)],
             "lessons": list(lessons),
         }
         children.setdefault(rid, [])
@@ -249,8 +279,13 @@ def build_research_tree(
         rid = rec.get("id")
         if not isinstance(rid, str):
             continue
-        parents = rec.get("parent_ids", []) or []
-        real_parents = [p for p in parents if p != BASELINE_SENTINEL and p in nodes]
+        parents = rec.get("parent_ids")
+        parents = parents if isinstance(parents, list) else []
+        real_parents = [
+            p
+            for p in parents
+            if isinstance(p, str) and p != BASELINE_SENTINEL and p in nodes
+        ]
         if not real_parents:
             roots.append(rid)
         for p in real_parents:

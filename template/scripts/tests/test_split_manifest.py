@@ -39,11 +39,14 @@ import regenerate_state as rs  # noqa: E402
 import verify_request as vr  # noqa: E402
 from _ledger_common import load_schema, validate_against_schema  # noqa: E402
 
-REPO_ROOT = SCRIPTS_DIR.parent.parent
-SPLIT_SCHEMA = REPO_ROOT / "template" / "schema" / "split_manifest.schema.json"
+# schema/ sits next to scripts/ inside the scaffold (`template/` upstream,
+# `autoresearch/` in a host install), so resolve it relative to scripts/ — not via
+# a repo-root + `template/` prefix that only exists upstream.
+SCHEMA_DIR = SCRIPTS_DIR.parent / "schema"
+SPLIT_SCHEMA = SCHEMA_DIR / "split_manifest.schema.json"
 VERIFIER = SCRIPTS_DIR / "verifier" / "verify_request.py"
 REGEN_SCRIPT = SCRIPTS_DIR / "regenerate_state.py"
-RECORD_SCHEMA = REPO_ROOT / "template" / "schema" / "experiment_record.schema.json"
+RECORD_SCHEMA = SCHEMA_DIR / "experiment_record.schema.json"
 
 
 # A COMPLETE Guard-B dataset fingerprint (all of source/version/date_window/
