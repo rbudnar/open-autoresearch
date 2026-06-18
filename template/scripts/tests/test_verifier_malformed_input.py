@@ -1414,5 +1414,121 @@ class TestMaturityYamlInjection(unittest.TestCase):
             self.assertNotEqual(frontmatter.get("not_deployable"), False)
 
 
+class TestRule9PrimaryDirectionComparison(unittest.TestCase):
+    """Codex round 6 [High]: rule 9 checked the primary metric was present+finite
+    but never that the candidate BEATS the baseline, so a worse (or `failed`)
+    candidate with a finite metric could promote. rule 9 now requires the
+    candidate to beat baseline by minimum_meaningful_delta in the configured
+    direction (the deterministic part of §13.2.1; full CI re-derivation stays the
+    implementer's job)."""
+
+    MIN = {
+        "primary_metric": {
+            "name": "validation_nll",
+            "direction": "minimize",
+            "minimum_meaningful_delta": 0.005,
+        }
+    }
+
+    def _ctx(self, baseline_val, candidate_val, metrics=None):
+        ledger = {
+            "b0": {
+                "entry": _valid_record(
+                    "20260101-000000-aaa000", metrics={"validation_nll": baseline_val}
+                ),
+                "canonical_bytes": b"{}",
+            },
+            "c0": {
+                "entry": _valid_record(
+                    "20260101-000000-bbb000", metrics={"validation_nll": candidate_val}
+                ),
+                "canonical_bytes": b"{}",
+            },
+            "br0": {
+                "entry": _valid_record("20260101-000000-ccc000"),
+                "canonical_bytes": b"{}",
+            },
+            "ab0": {
+                "entry": _valid_record("20260101-000000-ddd000", metrics={}),
+                "canonical_bytes": b"{}",
+            },
+        }
+        return vr.VerifierContext(
+            request=_base_request(),
+            request_path=Path("/nonexistent/proposals/req.json"),
+            ledger=ledger,
+            metrics=metrics if metrics is not None else self.MIN,
+            enforcement={},
+            unsigned=True,
+        )
+
+    def test_worse_candidate_rejected(self):
+        # minimize: candidate 999 is far worse than baseline 0.5.
+        ok, reason = vr.rule_9_statistics_recomputed(self._ctx(0.5, 999.0))
+        self.assertFalse(ok)
+        self.assertIn("does not beat baseline", reason)
+
+    def test_improvement_within_delta_rejected(self):
+        # candidate only 0.001 better < min_delta 0.005.
+        ok, reason = vr.rule_9_statistics_recomputed(self._ctx(0.847, 0.846))
+        self.assertFalse(ok)
+        self.assertIn("does not beat baseline", reason)
+
+    def test_beats_by_delta_passes(self):
+        ok, reason = vr.rule_9_statistics_recomputed(self._ctx(0.847, 0.825))
+        self.assertTrue(ok, reason)
+
+    def test_maximize_direction(self):
+        maximize = {
+            "primary_metric": {
+                "name": "validation_nll",
+                "direction": "maximize",
+                "minimum_meaningful_delta": 0.01,
+            }
+        }
+        # maximize: candidate must exceed baseline by >= 0.01.
+        ok, _ = vr.rule_9_statistics_recomputed(self._ctx(0.80, 0.805, maximize))
+        self.assertFalse(ok)  # only +0.005
+        ok, _ = vr.rule_9_statistics_recomputed(self._ctx(0.80, 0.82, maximize))
+        self.assertTrue(ok)  # +0.02
+
+
+class TestCampaignRootFromLedger(unittest.TestCase):
+    """Codex round 6 [High]: deriving the evidence-boundary root from the
+    agent-influenceable --request location let a shallow request path expand the
+    boundary to '/'. The root is now the operator-controlled campaign_root
+    (from --ledger)."""
+
+    def _ctx(self, campaign_root):
+        return vr.VerifierContext(
+            request={},
+            request_path=Path("/tmp/shallow-req.json"),  # parent.parent == '/'
+            ledger={},
+            metrics={},
+            enforcement={},
+            unsigned=True,
+            campaign_root=campaign_root,
+        )
+
+    def test_root_is_campaign_not_request(self):
+        ctx = self._ctx(Path("/some/campaign"))
+        # Resolves against campaign_root, NOT request_path.parent.parent ('/').
+        self.assertEqual(
+            vr._resolve_reference_path(ctx, "reports/x.md"),
+            Path("/some/campaign/reports/x.md"),
+        )
+        # An escape relative to the campaign root is still rejected.
+        self.assertIsNone(vr._resolve_reference_path(ctx, "../escape.md"))
+        self.assertIsNone(vr._resolve_reference_path(ctx, "/etc/passwd"))
+
+    def test_shallow_request_does_not_widen_boundary(self):
+        # With campaign_root set, a ref that WOULD be 'inside' '/' (the shallow
+        # request's parent.parent) but is outside the campaign is not reachable:
+        # it resolves under the campaign root instead.
+        ctx = self._ctx(Path("/some/campaign"))
+        resolved = vr._resolve_reference_path(ctx, "tmp/outside.md")
+        self.assertEqual(resolved, Path("/some/campaign/tmp/outside.md"))
+
+
 if __name__ == "__main__":
     unittest.main()

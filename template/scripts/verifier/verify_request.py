@@ -218,8 +218,14 @@ def _resolve_reference_path(ctx: "VerifierContext", path_ref: str) -> "Path | No
     escapes the root (``..`` / symlink). Referenced evidence (skeptic review,
     rehashed artifacts) MUST live inside the auditable campaign tree — otherwise
     an agent can satisfy the verifier's hash/skeptic gates with an artifact
-    outside the tree (a path-traversal / evidence-boundary bypass)."""
-    root = ctx.request_path.parent.parent.resolve()
+    outside the tree (a path-traversal / evidence-boundary bypass).
+
+    The root is the OPERATOR-controlled campaign_root (from --ledger) when set;
+    deriving it from the agent-influenceable --request location would let a
+    shallow request path (e.g. /tmp/req.json -> root '/') expand the boundary.
+    Falls back to request_path.parent.parent only in unit tests."""
+    base = ctx.campaign_root if ctx.campaign_root is not None else ctx.request_path.parent.parent
+    root = base.resolve()
     candidate = Path(path_ref)
     if candidate.is_absolute():
         return None
@@ -317,6 +323,13 @@ class VerifierContext:
     metrics: dict[str, Any]
     enforcement: dict[str, Any]
     unsigned: bool
+    # The campaign root that bounds path references (skeptic review, rehashed
+    # artifacts). Derived in main() from the OPERATOR-controlled --ledger
+    # (<campaign>/state/ledger -> <campaign>), NOT from the agent-influenceable
+    # --request location: a shallow request path must not be able to expand the
+    # evidence boundary. None only in unit tests, where _resolve_reference_path
+    # falls back to request_path.parent.parent.
+    campaign_root: "Path | None" = None
     # Set by rule 11 (comparison-set identity). WARN-not-gate: when the
     # candidate and baseline ran on different split identities this is True and
     # a note is surfaced on the packet; the request is NOT rejected for it.
@@ -684,23 +697,48 @@ def rule_9_statistics_recomputed(ctx: VerifierContext) -> tuple[bool, str | None
     )
     primary_name = primary_cfg.get("name") if isinstance(primary_cfg, dict) else None
     if isinstance(primary_name, str) and primary_name:
+
+        def _primary(lid: str) -> Any:
+            m = ctx.ledger[lid]["entry"].get("metrics")
+            return m.get(primary_name) if isinstance(m, dict) else None
+
         primary_evidence = [("baseline_run", baseline_ledger_id)] + [
             (f"candidate_runs[{i}]", r["ledger_id"])
             for i, r in enumerate(candidate_runs)
         ]
         for label, lid in primary_evidence:
-            entry_metrics = ctx.ledger[lid]["entry"].get("metrics")
-            value = (
-                entry_metrics.get(primary_name)
-                if isinstance(entry_metrics, dict)
-                else None
-            )
-            if not _is_finite_number(value):
+            if not _is_finite_number(_primary(lid)):
                 return False, (
                     f"{label} is missing a finite primary metric "
                     f"'{primary_name}' (§13.2.1 / §10.5: the verifier re-derives "
                     f"the decision from referenced ledger metrics)"
                 )
+
+        # §13.2.1 direction check: the candidate must actually BEAT the baseline
+        # by the configured minimum_meaningful_delta in the configured direction,
+        # else a worse (or `failed`) candidate with a finite metric could promote.
+        # This is the deterministic, point-estimate part of the decision rule;
+        # full CI/bootstrap/guardrail re-derivation from per-example predictions
+        # remains the implementer's job (see the docstring) — when direction /
+        # minimum_meaningful_delta are not configured, this check is skipped.
+        direction = primary_cfg.get("direction")
+        min_delta = primary_cfg.get("minimum_meaningful_delta")
+        if direction in ("minimize", "maximize") and _is_finite_number(min_delta) and min_delta > 0:
+            baseline_val = _primary(baseline_ledger_id)
+            for i, r in enumerate(candidate_runs):
+                cand_val = _primary(r["ledger_id"])
+                beats = (
+                    cand_val <= baseline_val - min_delta
+                    if direction == "minimize"
+                    else cand_val >= baseline_val + min_delta
+                )
+                if not beats:
+                    return False, (
+                        f"candidate_runs[{i}] primary metric '{primary_name}'="
+                        f"{cand_val} does not beat baseline {baseline_val} by "
+                        f"minimum_meaningful_delta {min_delta} "
+                        f"(direction={direction}); §13.2.1"
+                    )
     return True, None
 
 
@@ -1206,6 +1244,11 @@ def main(argv: list[str]) -> int:
         )
     signing_key = get_signing_key(args.unsigned)
 
+    # Bound path references to the OPERATOR-controlled campaign root. --ledger is
+    # <campaign>/state/ledger, so the campaign root is its grandparent. Using
+    # this (rather than the agent-influenceable --request location) prevents a
+    # shallow request path from expanding the evidence boundary.
+    campaign_root = args.ledger.resolve().parent.parent
     ctx = VerifierContext(
         request=request,
         request_path=args.request,
@@ -1213,6 +1256,7 @@ def main(argv: list[str]) -> int:
         metrics=metrics,
         enforcement=enforcement,
         unsigned=args.unsigned,
+        campaign_root=campaign_root,
     )
 
     rule_results: list[tuple[str, bool, str | None]] = []
