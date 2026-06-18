@@ -158,6 +158,25 @@ VALID_ENFORCEMENT_MECHANISMS = frozenset(
 )
 
 
+def _malformed_exposure_field(entry: dict[str, Any]) -> "str | None":
+    """Return a description if ``entry`` carries a PRESENT-but-malformed
+    val-exposure field (non-int, bool, or negative), else ``None``.
+
+    resolve_val_queries() resolves a malformed/absent field to 0; that is right
+    for ABSENT, but a PRESENT-but-malformed field (e.g. ``"100"`` or ``-5``) must
+    REJECT in the verifier — silently treating it as 0 under-reports the §17.6
+    ledger-derived exposure and lets a request slip under the holdout budget."""
+    direct = entry.get("val_queries_incurred_by_this_run")
+    if direct is not None and not (_is_int(direct) and direct >= 0):
+        return f"val_queries_incurred_by_this_run={direct!r}"
+    metrics = entry.get("metrics")
+    if isinstance(metrics, dict):
+        nested = metrics.get("validation_set_queries")
+        if nested is not None and not (_is_int(nested) and nested >= 0):
+            return f"metrics.validation_set_queries={nested!r}"
+    return None
+
+
 def _resolve_reference_path(ctx: "VerifierContext", path_ref: str) -> "Path | None":
     """Resolve a request reference path against the campaign root
     (``request_path.parent.parent``) and confirm it stays INSIDE that root.
@@ -453,10 +472,20 @@ def rule_6_val_exposure_not_exhausted(
     # Anti-spoof cross-check (§17.6): an agent must not under-report val exposure
     # to dodge the budget. Compute the ledger-derived exposure (sum of each
     # shard's resolve_val_queries) and REJECT if the claimed exposure is LESS
-    # than what the ledger records actually incurred.
-    ledger_derived = sum(
-        resolve_val_queries(rec["entry"]) for rec in ctx.ledger.values()
-    )
+    # than what the ledger records actually incurred. A PRESENT-but-malformed
+    # exposure field in any shard is rejected up front rather than silently
+    # resolving to 0 (which would under-report the total and bypass the budget).
+    ledger_derived = 0
+    for rec in ctx.ledger.values():
+        entry = rec.get("entry") if isinstance(rec, dict) else None
+        entry = entry if isinstance(entry, dict) else {}
+        bad = _malformed_exposure_field(entry)
+        if bad is not None:
+            return False, (
+                f"ledger shard carries a malformed val-exposure field ({bad}); "
+                f"refusing to treat it as zero (§17.6 anti-spoof)"
+            )
+        ledger_derived += resolve_val_queries(entry)
     if queries < ledger_derived:
         return False, (
             f"val exposure claim {queries} < ledger-derived total "
@@ -556,6 +585,34 @@ def rule_9_statistics_recomputed(ctx: VerifierContext) -> tuple[bool, str | None
         return False, "baseline_run ledger_id not found"
     if "metrics" not in baseline_entry["entry"]:
         return False, "baseline_run ledger entry has no 'metrics' block"
+    # §18 (promotion evidence) requires a baseline RERUN and at least one
+    # ablation, in addition to the candidate + baseline above. Without this an
+    # otherwise-valid request that simply OMITS this evidence could mint a
+    # deployable `promoted` packet. We require presence + a string ledger_id
+    # here; rule 2 rehashes each reference's content_sha256 against the ledger
+    # (catching a missing/altered shard), so this is a presence gate, not a
+    # second integrity pass.
+    baseline_rerun = refs.get("baseline_rerun")
+    if not isinstance(baseline_rerun, dict) or not isinstance(
+        baseline_rerun.get("ledger_id"), str
+    ):
+        return False, (
+            "references.baseline_rerun missing or has no string ledger_id "
+            "(§18 requires a baseline rerun before promotion)"
+        )
+    ablation_runs = refs.get("ablation_runs")
+    if not isinstance(ablation_runs, list) or not ablation_runs:
+        return False, (
+            "references.ablation_runs is empty or not a list "
+            "(§18 requires at least one ablation before promotion)"
+        )
+    for i, ablation_ref in enumerate(ablation_runs):
+        if not isinstance(ablation_ref, dict) or not isinstance(
+            ablation_ref.get("ledger_id"), str
+        ):
+            return False, (
+                f"ablation_runs[{i}] is not an object with a string ledger_id"
+            )
     return True, None
 
 
@@ -854,7 +911,15 @@ def build_packet(
     rule_failures = [(name, reason) for name, ok, reason in rule_results if not ok]
     enforcement_label = compute_enforcement_label(ctx)
     status = compute_status(ctx, rule_failures, enforcement_label)
+    # Coerce maturity to a safe int for the packet. The .md frontmatter
+    # interpolates it raw, so an untrusted string like
+    # "3\nstatus: promoted\nnot_deployable: false" would inject duplicate YAML
+    # keys into the rendered frontmatter (a human/tool parsing the .md would read
+    # a rejected request as promoted). rule 3 already rejects a non-int maturity
+    # (status=rejected); record 0 here when it is not a clean int.
     maturity = ctx.request.get("maturity_level_used", 0)
+    if not _is_int(maturity):
+        maturity = 0
     not_deployable = (
         enforcement_label == "in_band_only" or status == "low_evidence_promoted"
     )

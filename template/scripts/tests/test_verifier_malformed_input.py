@@ -79,6 +79,10 @@ def _base_request() -> dict:
         "references": {
             "baseline_run": {"ledger_id": "b0", "content_sha256": "x" * 64},
             "candidate_runs": [{"ledger_id": "c0", "content_sha256": "y" * 64}],
+            # §18 promotion evidence required by rule 9 (baseline rerun + at least
+            # one ablation), so the base request stays "well-formed-enough".
+            "baseline_rerun": {"ledger_id": "br0", "content_sha256": "z" * 64},
+            "ablation_runs": [{"ledger_id": "ab0", "content_sha256": "w" * 64}],
             "skeptic_review": {"path": "reports/skeptic.md"},
         },
         "claims": {
@@ -1113,9 +1117,11 @@ class TestRule5StackFactorialTruthiness(unittest.TestCase):
 
 class TestRule6NegativeLedgerExposure(unittest.TestCase):
     """Codex round 3 [High]: a negative ledger val-query count canceled real
-    exposure in the §17.6 anti-spoof sum (ledger_derived), letting an
-    under-reported claim pass rule 6. resolve_val_queries now clamps negatives to
-    0 so a malformed shard cannot cancel positive exposure."""
+    exposure in the §17.6 anti-spoof sum, letting an under-reported claim pass.
+    resolve_val_queries clamps negatives to 0 (round 3); round 4 then made rule 6
+    REJECT a present-but-malformed exposure field outright, so a negative shard is
+    now rejected directly rather than clamped — either way it cannot cancel
+    positive exposure."""
 
     def test_negative_shard_cannot_cancel_exposure(self):
         req = _base_request()
@@ -1134,9 +1140,10 @@ class TestRule6NegativeLedgerExposure(unittest.TestCase):
             },
         }
         ok, reason = vr.rule_6_val_exposure_not_exhausted(_ctx(req, ledger))
-        # ledger_derived = 50 + max(0, -1000) = 50; claim 0 < 50 -> under-report.
+        # The negative shard is now rejected as a malformed exposure field
+        # (stronger than the round-3 clamp); the bypass stays closed.
         self.assertFalse(ok)
-        self.assertIn("under-reports exposure", reason)
+        self.assertIn("malformed val-exposure", reason)
 
 
 class TestReferencePathTraversal(unittest.TestCase):
@@ -1170,6 +1177,129 @@ class TestReferencePathTraversal(unittest.TestCase):
         ok, reason = vr.rule_2_references_rehash(_ctx(req))
         self.assertFalse(ok)
         self.assertIn("escapes the campaign root", reason)
+
+
+class TestRule9RequiresPromotionEvidence(unittest.TestCase):
+    """Codex round 4 [High]: rule 9 only checked candidate_runs + baseline_run, so
+    a request omitting §18's required baseline_rerun / ablation_runs evidence
+    could still mint a deployable `promoted` packet. rule 9 now requires both."""
+
+    def _ledger(self):
+        return {
+            "c0": {"entry": {"id": "c0", "metrics": {}}, "canonical_bytes": b"{}"},
+            "b0": {"entry": {"id": "b0", "metrics": {}}, "canonical_bytes": b"{}"},
+        }
+
+    def test_complete_evidence_passes(self):
+        ok, reason = vr.rule_9_statistics_recomputed(
+            _ctx(_base_request(), self._ledger())
+        )
+        self.assertTrue(ok, reason)
+
+    def test_missing_baseline_rerun_rejected(self):
+        req = _base_request()
+        del req["references"]["baseline_rerun"]
+        ok, reason = vr.rule_9_statistics_recomputed(_ctx(req, self._ledger()))
+        self.assertFalse(ok)
+        self.assertIn("baseline_rerun", reason)
+
+    def test_missing_ablation_runs_rejected(self):
+        req = _base_request()
+        del req["references"]["ablation_runs"]
+        ok, reason = vr.rule_9_statistics_recomputed(_ctx(req, self._ledger()))
+        self.assertFalse(ok)
+        self.assertIn("ablation_runs", reason)
+
+    def test_empty_ablation_runs_rejected(self):
+        req = _base_request()
+        req["references"]["ablation_runs"] = []
+        ok, reason = vr.rule_9_statistics_recomputed(_ctx(req, self._ledger()))
+        self.assertFalse(ok)
+        self.assertIn("ablation", reason)
+
+
+class TestRule6MalformedLedgerExposure(unittest.TestCase):
+    """Codex round 4 [High]: a present-but-malformed (non-int / negative) ledger
+    val-exposure field resolved to 0, under-reporting the §17.6 ledger-derived
+    total. rule 6 now REJECTS a malformed exposure field rather than treat it as
+    zero (the round-3 fix only handled negatives)."""
+
+    def test_non_int_exposure_field_rejected(self):
+        req = _base_request()
+        req["claims"]["val_set_exposure_at_request"] = {
+            "queries_against_val_this_campaign": 0,
+            "exposure_budget": 1,
+        }
+        ledger = {
+            "c0": {
+                "entry": {"id": "c0", "val_queries_incurred_by_this_run": "100"},
+                "canonical_bytes": b"{}",
+            },
+        }
+        ok, reason = vr.rule_6_val_exposure_not_exhausted(_ctx(req, ledger))
+        self.assertFalse(ok)
+        self.assertIn("malformed val-exposure", reason)
+
+    def test_nested_malformed_exposure_rejected(self):
+        req = _base_request()
+        req["claims"]["val_set_exposure_at_request"] = {
+            "queries_against_val_this_campaign": 0,
+            "exposure_budget": 1,
+        }
+        ledger = {
+            "c0": {
+                "entry": {"id": "c0", "metrics": {"validation_set_queries": True}},
+                "canonical_bytes": b"{}",
+            },
+        }
+        ok, reason = vr.rule_6_val_exposure_not_exhausted(_ctx(req, ledger))
+        self.assertFalse(ok)
+        self.assertIn("malformed val-exposure", reason)
+
+
+class TestMaturityYamlInjection(unittest.TestCase):
+    """Codex round 4 [Medium]: an untrusted maturity_level_used string injected
+    YAML keys into the rendered .md packet frontmatter (a tool parsing the .md
+    would read a rejected request as promoted). build_packet now coerces maturity
+    to a safe int, so the frontmatter cannot carry injected keys."""
+
+    def test_build_packet_coerces_maturity(self):
+        req = _base_request()
+        req["maturity_level_used"] = "3\nstatus: promoted\nnot_deployable: false"
+        packet = vr.build_packet(
+            _ctx(req),
+            [("3_maturity_level_ge_3", False, "maturity_level_used is not an int")],
+            verifier_identity="unittest",
+            verifier_type="non_agent_ci",
+            signing_key=None,
+        )
+        self.assertEqual(packet["maturity_level"], 0)
+        self.assertEqual(packet["status"], "rejected")
+
+    def test_markdown_frontmatter_not_injectable(self):
+        import yaml  # available under the suite's pyyaml dep
+
+        req = _base_request()
+        req["maturity_level_used"] = "3\nstatus: promoted\nnot_deployable: false"
+        with tempfile.TemporaryDirectory(prefix="vr-mat-") as tmp:
+            work = Path(tmp)
+            ledger_dir = work / "ledger"
+            ledger_dir.mkdir()
+            (ledger_dir / "b0.json").write_text(
+                json.dumps({"id": "b0", "metrics": {}}), encoding="utf-8"
+            )
+            req_path = work / "req.json"
+            req_path.write_text(json.dumps(req), encoding="utf-8")
+            proc = _run_verifier(req_path, ledger_dir, work)
+            self.assertNotIn("Traceback (most recent call last)", proc.stderr)
+            md = list((work / "out").glob("*-promotion-packet.md"))[0].read_text(
+                encoding="utf-8"
+            )
+            frontmatter = yaml.safe_load(md.split("---")[1])
+            # The injected duplicate keys must NOT have flipped the machine-read
+            # frontmatter to a promoted / deployable view.
+            self.assertEqual(frontmatter.get("status"), "rejected")
+            self.assertNotEqual(frontmatter.get("not_deployable"), False)
 
 
 if __name__ == "__main__":
