@@ -300,6 +300,15 @@ def load_ledger(ledger_dir: Path) -> dict[str, dict[str, Any]]:
             raise SystemExit(
                 f"CONFIG ERROR: ledger shard {shard.name} 'id' is not a string"
             )
+        # The shard filename stem MUST equal the internal id — validate_ledger.py
+        # enforces this invariant, and the verifier must not promote from ledger
+        # state the repo's own validator rejects. A mismatch indicates tampered /
+        # mislabeled ledger state, so fail closed at load.
+        if shard.stem != entry_id:
+            raise SystemExit(
+                f"CONFIG ERROR: ledger shard {shard.name} filename stem "
+                f"{shard.stem!r} != internal id {entry_id!r}"
+            )
         if entry_id in out:
             raise SystemExit(
                 f"CONFIG ERROR: duplicate ledger entry id {entry_id!r} "
@@ -692,53 +701,74 @@ def rule_9_statistics_recomputed(ctx: VerifierContext) -> tuple[bool, str | None
     # Primary metric present + finite on candidate + baseline (the §13.2.1
     # comparison evidence). Ablation/rerun shapes vary (factorial_cells etc.), so
     # they are not required to carry the primary metric here.
+    # The decision config (metrics.yaml primary_metric) MUST be complete and
+    # valid: name (non-empty string), direction (minimize|maximize), and a
+    # positive finite minimum_meaningful_delta. A missing/malformed decision
+    # config must FAIL CLOSED — silently skipping the §13.2.1 comparison would
+    # let a worse candidate promote on a malformed metrics.yaml.
     primary_cfg = (
         ctx.metrics.get("primary_metric") if isinstance(ctx.metrics, dict) else None
     )
-    primary_name = primary_cfg.get("name") if isinstance(primary_cfg, dict) else None
-    if isinstance(primary_name, str) and primary_name:
+    if not isinstance(primary_cfg, dict):
+        return False, (
+            "metrics.yaml has no primary_metric block; the verifier cannot "
+            "re-derive the §13.2.1 decision (fail-closed)"
+        )
+    primary_name = primary_cfg.get("name")
+    if not isinstance(primary_name, str) or not primary_name:
+        return False, "primary_metric.name must be a non-empty string"
+    direction = primary_cfg.get("direction")
+    if direction not in ("minimize", "maximize"):
+        return False, (
+            f"primary_metric.direction must be 'minimize' or 'maximize' "
+            f"(got {direction!r}); the verifier will not skip the §13.2.1 "
+            f"comparison and silently promote"
+        )
+    min_delta = primary_cfg.get("minimum_meaningful_delta")
+    if not (_is_finite_number(min_delta) and min_delta > 0):
+        return False, (
+            f"primary_metric.minimum_meaningful_delta must be a positive finite "
+            f"number (got {min_delta!r})"
+        )
 
-        def _primary(lid: str) -> Any:
-            m = ctx.ledger[lid]["entry"].get("metrics")
-            return m.get(primary_name) if isinstance(m, dict) else None
+    def _primary(lid: str) -> Any:
+        m = ctx.ledger[lid]["entry"].get("metrics")
+        return m.get(primary_name) if isinstance(m, dict) else None
 
-        primary_evidence = [("baseline_run", baseline_ledger_id)] + [
-            (f"candidate_runs[{i}]", r["ledger_id"])
-            for i, r in enumerate(candidate_runs)
-        ]
-        for label, lid in primary_evidence:
-            if not _is_finite_number(_primary(lid)):
-                return False, (
-                    f"{label} is missing a finite primary metric "
-                    f"'{primary_name}' (§13.2.1 / §10.5: the verifier re-derives "
-                    f"the decision from referenced ledger metrics)"
-                )
+    # Primary metric present + finite on candidate + baseline (the §13.2.1
+    # comparison evidence). Ablation/rerun shapes vary, so they are not required
+    # to carry the primary metric here.
+    primary_evidence = [("baseline_run", baseline_ledger_id)] + [
+        (f"candidate_runs[{i}]", r["ledger_id"]) for i, r in enumerate(candidate_runs)
+    ]
+    for label, lid in primary_evidence:
+        if not _is_finite_number(_primary(lid)):
+            return False, (
+                f"{label} is missing a finite primary metric '{primary_name}' "
+                f"(§13.2.1 / §10.5: the verifier re-derives the decision from "
+                f"referenced ledger metrics)"
+            )
 
-        # §13.2.1 direction check: the candidate must actually BEAT the baseline
-        # by the configured minimum_meaningful_delta in the configured direction,
-        # else a worse (or `failed`) candidate with a finite metric could promote.
-        # This is the deterministic, point-estimate part of the decision rule;
-        # full CI/bootstrap/guardrail re-derivation from per-example predictions
-        # remains the implementer's job (see the docstring) — when direction /
-        # minimum_meaningful_delta are not configured, this check is skipped.
-        direction = primary_cfg.get("direction")
-        min_delta = primary_cfg.get("minimum_meaningful_delta")
-        if direction in ("minimize", "maximize") and _is_finite_number(min_delta) and min_delta > 0:
-            baseline_val = _primary(baseline_ledger_id)
-            for i, r in enumerate(candidate_runs):
-                cand_val = _primary(r["ledger_id"])
-                beats = (
-                    cand_val <= baseline_val - min_delta
-                    if direction == "minimize"
-                    else cand_val >= baseline_val + min_delta
-                )
-                if not beats:
-                    return False, (
-                        f"candidate_runs[{i}] primary metric '{primary_name}'="
-                        f"{cand_val} does not beat baseline {baseline_val} by "
-                        f"minimum_meaningful_delta {min_delta} "
-                        f"(direction={direction}); §13.2.1"
-                    )
+    # §13.2.1 direction check (deterministic, point-estimate): the candidate must
+    # actually BEAT the baseline by minimum_meaningful_delta in the configured
+    # direction, else a worse (or `failed`) candidate could promote. Full
+    # CI/bootstrap/guardrail re-derivation from per-example predictions remains
+    # the implementer's job (see the docstring).
+    baseline_val = _primary(baseline_ledger_id)
+    for i, r in enumerate(candidate_runs):
+        cand_val = _primary(r["ledger_id"])
+        beats = (
+            cand_val <= baseline_val - min_delta
+            if direction == "minimize"
+            else cand_val >= baseline_val + min_delta
+        )
+        if not beats:
+            return False, (
+                f"candidate_runs[{i}] primary metric '{primary_name}'={cand_val} "
+                f"does not beat baseline {baseline_val} by "
+                f"minimum_meaningful_delta {min_delta} (direction={direction}); "
+                f"§13.2.1"
+            )
     return True, None
 
 

@@ -1233,19 +1233,32 @@ class TestRule9RequiresPromotionEvidence(unittest.TestCase):
     Codex round 5 [High]: rule 9 now also schema-validates every referenced shard
     and requires a finite primary metric on the candidate + baseline evidence."""
 
-    # ctx.metrics drives the primary-metric check (round 5).
-    PRIMARY = {"primary_metric": {"name": "validation_nll"}}
+    # ctx.metrics drives the primary-metric + direction check. rule 9 now
+    # requires a COMPLETE decision config (round 7), so include direction +
+    # min-delta and make the candidate beat the baseline.
+    PRIMARY = {
+        "primary_metric": {
+            "name": "validation_nll",
+            "direction": "minimize",
+            "minimum_meaningful_delta": 0.005,
+        }
+    }
 
     def _full_ledger(self) -> dict:
         # Keyed by _base_request's reference ids; each a schema-valid record.
-        # Ablation evidence may carry empty metrics (no primary metric required).
+        # Candidate (0.825) beats baseline (0.847) by > min-delta. Ablation
+        # evidence may carry empty metrics (no primary metric required).
         return {
             "b0": {
-                "entry": _valid_record("20260101-000000-aaa000"),
+                "entry": _valid_record(
+                    "20260101-000000-aaa000", metrics={"validation_nll": 0.847}
+                ),
                 "canonical_bytes": b"{}",
             },
             "c0": {
-                "entry": _valid_record("20260101-000000-bbb000"),
+                "entry": _valid_record(
+                    "20260101-000000-bbb000", metrics={"validation_nll": 0.825}
+                ),
                 "canonical_bytes": b"{}",
             },
             "br0": {
@@ -1492,6 +1505,38 @@ class TestRule9PrimaryDirectionComparison(unittest.TestCase):
         ok, _ = vr.rule_9_statistics_recomputed(self._ctx(0.80, 0.82, maximize))
         self.assertTrue(ok)  # +0.02
 
+    def test_incomplete_decision_config_fails_closed(self):
+        # Codex round 7 [High]: a missing/malformed primary_metric decision config
+        # must FAIL CLOSED (not skip the comparison) even when the candidate is
+        # actually worse than baseline (0.5 vs 999).
+        bad_configs = [
+            ({}, "primary_metric"),  # no primary_metric block
+            ({"primary_metric": {"direction": "minimize",
+                                 "minimum_meaningful_delta": 0.005}}, "name"),
+            ({"primary_metric": {"name": "validation_nll",
+                                 "minimum_meaningful_delta": 0.005}}, "direction"),
+            ({"primary_metric": {"name": "validation_nll", "direction": "sideways",
+                                 "minimum_meaningful_delta": 0.005}}, "direction"),
+            ({"primary_metric": {"name": "validation_nll", "direction": "minimize"}},
+             "minimum_meaningful_delta"),
+            ({"primary_metric": {"name": "validation_nll", "direction": "minimize",
+                                 "minimum_meaningful_delta": float("nan")}},
+             "minimum_meaningful_delta"),
+            ({"primary_metric": {"name": "validation_nll", "direction": "minimize",
+                                 "minimum_meaningful_delta": True}},
+             "minimum_meaningful_delta"),
+            ({"primary_metric": {"name": "validation_nll", "direction": "minimize",
+                                 "minimum_meaningful_delta": 0}},
+             "minimum_meaningful_delta"),
+        ]
+        for metrics, needle in bad_configs:
+            with self.subTest(metrics=metrics):
+                ok, reason = vr.rule_9_statistics_recomputed(
+                    self._ctx(0.5, 999.0, metrics)
+                )
+                self.assertFalse(ok)
+                self.assertIn(needle, reason)
+
 
 class TestCampaignRootFromLedger(unittest.TestCase):
     """Codex round 6 [High]: deriving the evidence-boundary root from the
@@ -1528,6 +1573,33 @@ class TestCampaignRootFromLedger(unittest.TestCase):
         ctx = self._ctx(Path("/some/campaign"))
         resolved = vr._resolve_reference_path(ctx, "tmp/outside.md")
         self.assertEqual(resolved, Path("/some/campaign/tmp/outside.md"))
+
+
+class TestLoadLedgerStemIdInvariant(unittest.TestCase):
+    """Codex round 7 [High]: the verifier promoted from ledger shards that
+    validate_ledger.py rejects for filename-stem != internal id. load_ledger now
+    enforces the same invariant (fail-closed at load)."""
+
+    def test_stem_id_mismatch_rejected(self):
+        with tempfile.TemporaryDirectory(prefix="vr-stem-") as tmp:
+            d = Path(tmp)
+            (d / "wrong-name.json").write_text(
+                json.dumps({"id": "20260101-000000-aaa000", "metrics": {}}),
+                encoding="utf-8",
+            )
+            with self.assertRaises(SystemExit) as cm:
+                vr.load_ledger(d)
+            self.assertIn("filename stem", str(cm.exception))
+
+    def test_matching_stem_loads(self):
+        with tempfile.TemporaryDirectory(prefix="vr-stem-ok-") as tmp:
+            d = Path(tmp)
+            (d / "20260101-000000-aaa000.json").write_text(
+                json.dumps({"id": "20260101-000000-aaa000", "metrics": {}}),
+                encoding="utf-8",
+            )
+            ledger = vr.load_ledger(d)
+            self.assertIn("20260101-000000-aaa000", ledger)
 
 
 if __name__ == "__main__":
