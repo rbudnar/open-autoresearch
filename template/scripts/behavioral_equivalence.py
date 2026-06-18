@@ -292,10 +292,18 @@ def load_evaluator(spec: str) -> EvaluatorFn:
             f"CONFIG ERROR: --evaluator must be 'module:function' (got {spec!r})"
         )
     module_path, func_name = spec.split(":", 1)
+    # Both halves must be non-empty: a spec like ':compute' or 'mod:' would pass
+    # an empty module/function name to importlib (ValueError: Empty module name)
+    # or getattr, raising a raw traceback instead of a clean CONFIG ERROR.
+    if not module_path or not func_name:
+        raise SystemExit(
+            f"CONFIG ERROR: --evaluator must be 'module:function' with both "
+            f"parts non-empty (got {spec!r})"
+        )
     try:
         module = importlib.import_module(module_path)
-    except ImportError as e:
-        raise SystemExit(f"CONFIG ERROR: cannot import {module_path}: {e}") from e
+    except (ImportError, ValueError) as e:
+        raise SystemExit(f"CONFIG ERROR: cannot import {module_path!r}: {e}") from e
     func = getattr(module, func_name, None)
     if func is None or not callable(func):
         raise SystemExit(f"CONFIG ERROR: {module_path} has no callable {func_name!r}")

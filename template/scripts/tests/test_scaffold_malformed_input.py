@@ -1131,5 +1131,18 @@ class TestSchemaValidatorNonFiniteNumber(unittest.TestCase):
         self.assertEqual(validate_against_schema(3, {"type": "number"}), [])
 
 
+class TestBehavioralEquivalenceEvaluatorSpec(unittest.TestCase):
+    """Codex round 5 [Medium]: an --evaluator spec with an empty half (':compute',
+    'mod:') passed an empty module/function name to importlib and raised a raw
+    ValueError traceback. Now a clean CONFIG ERROR."""
+
+    def test_empty_half_or_missing_colon(self):
+        for bad in (":compute", "mod:", ":", ""):
+            with self.subTest(bad=bad):
+                with self.assertRaises(SystemExit) as cm:
+                    be.load_evaluator(bad)
+                self.assertIn("module:function", str(cm.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

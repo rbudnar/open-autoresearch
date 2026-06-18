@@ -97,6 +97,28 @@ def _base_request() -> dict:
     }
 
 
+def _valid_record(rid: str, metrics: "dict | None" = None) -> dict:
+    """A minimal schema-valid experiment_record. rule 9 now schema-validates every
+    referenced shard, so test ledger entries must be valid; `id` must match the
+    schema pattern ^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}(-[a-z0-9-]+)?$. Pass
+    metrics={} for ablation-style evidence that need not carry the primary
+    metric."""
+    return {
+        "protocol_version": "0.5",
+        "id": rid,
+        "timestamp": "2026-01-01T00:00:00Z",
+        "branch": "test",
+        "hypothesis": "test hypothesis",
+        "parent_ids": [],
+        "status": "branch_winner",
+        "metrics": {"validation_nll": 0.8} if metrics is None else metrics,
+        # Satisfy the schema's anyOf provenance branch (source_commit form).
+        "source_commit": "abc123",
+        "source_branch": "test",
+        "resolvable_from_main": False,
+    }
+
+
 # Every rule that the audit hardened. Each is invoked on malformed input and must
 # return a (bool, reason) tuple WITHOUT raising.
 _GUARDED_RULES = [
@@ -897,6 +919,31 @@ class TestSignPacketMalformed(unittest.TestCase):
             self.assertIsNone(loaded["verifier"]["signature"])
             self.assertEqual(sp.cmd_sign(p, _SIGN_KEY), 0)
 
+    def test_unwritable_packet_sign_is_clean_error(self):
+        # Codex round 5 [Medium]: signing a read-only packet raised a raw
+        # PermissionError; cmd_sign now wraps the write -> clean CONFIG ERROR.
+        if _IS_ROOT:
+            self.skipTest("chmod-based permission test is a no-op as root")
+        with tempfile.TemporaryDirectory(prefix="sp-ro-") as tmp:
+            p = self._write(
+                tmp,
+                {
+                    "verifier": {
+                        "type": "non_agent_ci",
+                        "identity": "ci-1",
+                        "signed_at": "2026-01-01T00:00:00+00:00",
+                        "signature": "unsigned",
+                    }
+                },
+            )
+            p.chmod(0o400)
+            try:
+                with self.assertRaises(SystemExit) as cm:
+                    sp.cmd_sign(p, _SIGN_KEY)
+                self.assertIn("cannot write", str(cm.exception))
+            finally:
+                p.chmod(0o644)
+
     def test_well_formed_packet_still_loads(self):
         # Behavior preserved on valid input: a dict verifier loads fine and the
         # round-trip sign->verify succeeds.
@@ -1182,40 +1229,105 @@ class TestReferencePathTraversal(unittest.TestCase):
 class TestRule9RequiresPromotionEvidence(unittest.TestCase):
     """Codex round 4 [High]: rule 9 only checked candidate_runs + baseline_run, so
     a request omitting §18's required baseline_rerun / ablation_runs evidence
-    could still mint a deployable `promoted` packet. rule 9 now requires both."""
+    could still mint a deployable `promoted` packet. rule 9 now requires both.
+    Codex round 5 [High]: rule 9 now also schema-validates every referenced shard
+    and requires a finite primary metric on the candidate + baseline evidence."""
 
-    def _ledger(self):
+    # ctx.metrics drives the primary-metric check (round 5).
+    PRIMARY = {"primary_metric": {"name": "validation_nll"}}
+
+    def _full_ledger(self) -> dict:
+        # Keyed by _base_request's reference ids; each a schema-valid record.
+        # Ablation evidence may carry empty metrics (no primary metric required).
         return {
-            "c0": {"entry": {"id": "c0", "metrics": {}}, "canonical_bytes": b"{}"},
-            "b0": {"entry": {"id": "b0", "metrics": {}}, "canonical_bytes": b"{}"},
+            "b0": {
+                "entry": _valid_record("20260101-000000-aaa000"),
+                "canonical_bytes": b"{}",
+            },
+            "c0": {
+                "entry": _valid_record("20260101-000000-bbb000"),
+                "canonical_bytes": b"{}",
+            },
+            "br0": {
+                "entry": _valid_record("20260101-000000-ccc000"),
+                "canonical_bytes": b"{}",
+            },
+            "ab0": {
+                "entry": _valid_record("20260101-000000-ddd000", metrics={}),
+                "canonical_bytes": b"{}",
+            },
         }
 
-    def test_complete_evidence_passes(self):
-        ok, reason = vr.rule_9_statistics_recomputed(
-            _ctx(_base_request(), self._ledger())
+    def _ctx(self, req: dict, ledger: "dict | None" = None) -> "vr.VerifierContext":
+        return vr.VerifierContext(
+            request=req,
+            request_path=Path("/nonexistent/proposals/req.json"),
+            ledger=ledger if ledger is not None else self._full_ledger(),
+            metrics=self.PRIMARY,
+            enforcement={},
+            unsigned=True,
         )
+
+    def test_complete_evidence_passes(self):
+        ok, reason = vr.rule_9_statistics_recomputed(self._ctx(_base_request()))
         self.assertTrue(ok, reason)
 
     def test_missing_baseline_rerun_rejected(self):
         req = _base_request()
         del req["references"]["baseline_rerun"]
-        ok, reason = vr.rule_9_statistics_recomputed(_ctx(req, self._ledger()))
+        ok, reason = vr.rule_9_statistics_recomputed(self._ctx(req))
         self.assertFalse(ok)
         self.assertIn("baseline_rerun", reason)
 
     def test_missing_ablation_runs_rejected(self):
         req = _base_request()
         del req["references"]["ablation_runs"]
-        ok, reason = vr.rule_9_statistics_recomputed(_ctx(req, self._ledger()))
+        ok, reason = vr.rule_9_statistics_recomputed(self._ctx(req))
         self.assertFalse(ok)
         self.assertIn("ablation_runs", reason)
 
     def test_empty_ablation_runs_rejected(self):
         req = _base_request()
         req["references"]["ablation_runs"] = []
-        ok, reason = vr.rule_9_statistics_recomputed(_ctx(req, self._ledger()))
+        ok, reason = vr.rule_9_statistics_recomputed(self._ctx(req))
         self.assertFalse(ok)
         self.assertIn("ablation", reason)
+
+    def test_schema_invalid_referenced_shard_rejected(self):
+        # A referenced candidate shard missing required schema fields rejects
+        # (the verifier must not promote from evidence validate_ledger rejects).
+        ledger = self._full_ledger()
+        ledger["c0"] = {
+            "entry": {"id": "c0", "metrics": {}},  # not schema-valid
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(self._ctx(_base_request(), ledger))
+        self.assertFalse(ok)
+        self.assertIn("fails schema", reason)
+
+    def test_metric_empty_evidence_rejected(self):
+        # Schema-valid candidate but with empty metrics (no primary metric) -> no
+        # §13.2.1 evidence -> reject rather than mint a deployable packet.
+        ledger = self._full_ledger()
+        ledger["c0"] = {
+            "entry": _valid_record("20260101-000000-bbb000", metrics={}),
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(self._ctx(_base_request(), ledger))
+        self.assertFalse(ok)
+        self.assertIn("finite primary metric", reason)
+
+    def test_nonfinite_primary_metric_rejected(self):
+        ledger = self._full_ledger()
+        ledger["b0"] = {
+            "entry": _valid_record(
+                "20260101-000000-aaa000", metrics={"validation_nll": float("nan")}
+            ),
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(self._ctx(_base_request(), ledger))
+        self.assertFalse(ok)
+        self.assertIn("finite primary metric", reason)
 
 
 class TestRule6MalformedLedgerExposure(unittest.TestCase):

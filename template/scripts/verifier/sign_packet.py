@@ -118,9 +118,14 @@ def cmd_sign(packet_path: Path, key: bytes) -> int:
         raise SystemExit("CONFIG ERROR: packet has no 'verifier' block")
     new_sig = compute_signature(packet, key)
     packet["verifier"]["signature"] = new_sig
-    packet_path.write_text(
-        json.dumps(packet, indent=2, sort_keys=True), encoding="utf-8"
-    )
+    # An unwritable packet (read-only, full disk) is a clean CONFIG ERROR, not a
+    # traceback, matching the write guards in verify_request.write_packet_files.
+    try:
+        packet_path.write_text(
+            json.dumps(packet, indent=2, sort_keys=True), encoding="utf-8"
+        )
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"CONFIG ERROR: cannot write packet {packet_path}: {exc}")
     sys.stdout.write(f"Signed {packet_path}\n")
     return 0
 

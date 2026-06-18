@@ -38,6 +38,7 @@ import datetime as dt
 import hashlib
 import hmac
 import json
+import math
 import os
 import re
 import sys
@@ -59,6 +60,7 @@ try:
     from _ledger_common import (
         _canonical_record_bytes,
         is_safe_filename_stem,
+        load_schema,
         resolve_val_queries,
         validate_against_schema,
     )
@@ -67,6 +69,7 @@ except ImportError:  # pragma: no cover - path shim for direct invocation
     from _ledger_common import (
         _canonical_record_bytes,
         is_safe_filename_stem,
+        load_schema,
         resolve_val_queries,
         validate_against_schema,
     )
@@ -175,6 +178,36 @@ def _malformed_exposure_field(entry: dict[str, Any]) -> "str | None":
         if nested is not None and not (_is_int(nested) and nested >= 0):
             return f"metrics.validation_set_queries={nested!r}"
     return None
+
+
+# experiment_record.schema.json lives under schema/ — a sibling of scripts/ in
+# both the template (template/schema/) and host (autoresearch/schema/) layouts.
+# The verifier is the promotion GATE, so it must not sign a deployable packet
+# from referenced ledger evidence that the repo's own schema (and
+# validate_ledger.py) would reject.
+_RECORD_SCHEMA_PATH = (
+    Path(__file__).resolve().parent.parent.parent
+    / "schema"
+    / "experiment_record.schema.json"
+)
+
+
+def _load_record_schema() -> "dict[str, Any] | None":
+    """Load experiment_record.schema.json, or None if it cannot be loaded."""
+    try:
+        return load_schema(_RECORD_SCHEMA_PATH)
+    except (ValueError, OSError):
+        return None
+
+
+def _is_finite_number(value: Any) -> bool:
+    """True iff ``value`` is a finite int/float (bool excluded) — a usable
+    metric value for the §13.2.1 comparison."""
+    return (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and math.isfinite(value)
+    )
 
 
 def _resolve_reference_path(ctx: "VerifierContext", path_ref: str) -> "Path | None":
@@ -613,6 +646,61 @@ def rule_9_statistics_recomputed(ctx: VerifierContext) -> tuple[bool, str | None
             return False, (
                 f"ablation_runs[{i}] is not an object with a string ledger_id"
             )
+
+    # The verifier must not mint a deployable packet from ledger evidence that
+    # the repo's own validator (validate_ledger.py) would reject, nor from
+    # metric-empty evidence. (a) Validate every referenced shard against
+    # experiment_record.schema.json. (b) Require the configured primary metric to
+    # be present and FINITE on the candidate + baseline evidence used for the
+    # §13.2.1 comparison — rule 9's mandate is "the referenced entries CONTAIN
+    # the metric values claimed", and `metrics: {}` contains none.
+    schema = _load_record_schema()
+    if schema is None:
+        return False, (
+            "cannot load experiment_record.schema.json to validate referenced "
+            "ledger evidence"
+        )
+    referenced: list[tuple[str, str]] = [("baseline_run", baseline_ledger_id)]
+    referenced += [
+        (f"candidate_runs[{i}]", r["ledger_id"]) for i, r in enumerate(candidate_runs)
+    ]
+    referenced.append(("baseline_rerun", baseline_rerun["ledger_id"]))
+    referenced += [
+        (f"ablation_runs[{i}]", r["ledger_id"]) for i, r in enumerate(ablation_runs)
+    ]
+    for label, lid in referenced:
+        rec = ctx.ledger.get(lid)
+        if rec is None:
+            return False, f"{label} ledger_id {lid!r} not found"
+        errors = validate_against_schema(rec["entry"], schema)
+        if errors:
+            return False, f"{label} ledger shard fails schema: {errors[0]}"
+
+    # Primary metric present + finite on candidate + baseline (the §13.2.1
+    # comparison evidence). Ablation/rerun shapes vary (factorial_cells etc.), so
+    # they are not required to carry the primary metric here.
+    primary_cfg = (
+        ctx.metrics.get("primary_metric") if isinstance(ctx.metrics, dict) else None
+    )
+    primary_name = primary_cfg.get("name") if isinstance(primary_cfg, dict) else None
+    if isinstance(primary_name, str) and primary_name:
+        primary_evidence = [("baseline_run", baseline_ledger_id)] + [
+            (f"candidate_runs[{i}]", r["ledger_id"])
+            for i, r in enumerate(candidate_runs)
+        ]
+        for label, lid in primary_evidence:
+            entry_metrics = ctx.ledger[lid]["entry"].get("metrics")
+            value = (
+                entry_metrics.get(primary_name)
+                if isinstance(entry_metrics, dict)
+                else None
+            )
+            if not _is_finite_number(value):
+                return False, (
+                    f"{label} is missing a finite primary metric "
+                    f"'{primary_name}' (§13.2.1 / §10.5: the verifier re-derives "
+                    f"the decision from referenced ledger metrics)"
+                )
     return True, None
 
 
