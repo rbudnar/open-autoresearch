@@ -1285,6 +1285,36 @@ class TestRule9RequiresPromotionEvidence(unittest.TestCase):
         ok, reason = vr.rule_9_statistics_recomputed(self._ctx(_base_request()))
         self.assertTrue(ok, reason)
 
+    def test_baseline_rerun_aliasing_baseline_rejected(self):
+        # Codex round 8 [High]: a baseline rerun that IS the baseline shard.
+        req = _base_request()
+        req["references"]["baseline_rerun"]["ledger_id"] = "b0"  # == baseline_run
+        ok, reason = vr.rule_9_statistics_recomputed(self._ctx(req))
+        self.assertFalse(ok)
+        self.assertIn("baseline_rerun aliases", reason)
+
+    def test_ablation_aliasing_candidate_rejected(self):
+        req = _base_request()
+        req["references"]["ablation_runs"][0]["ledger_id"] = "c0"  # == candidate
+        ok, reason = vr.rule_9_statistics_recomputed(self._ctx(req))
+        self.assertFalse(ok)
+        self.assertIn("aliases other evidence", reason)
+
+    def test_ablation_aliasing_baseline_rejected(self):
+        req = _base_request()
+        req["references"]["ablation_runs"][0]["ledger_id"] = "b0"  # == baseline
+        ok, reason = vr.rule_9_statistics_recomputed(self._ctx(req))
+        self.assertFalse(ok)
+        self.assertIn("aliases other evidence", reason)
+
+    def test_baseline_rerun_may_equal_candidate(self):
+        # level3 pattern: the candidate record also carries the baseline-rerun
+        # data, so baseline_rerun == candidate is allowed (must NOT reject).
+        req = _base_request()
+        req["references"]["baseline_rerun"]["ledger_id"] = "c0"  # == candidate
+        ok, reason = vr.rule_9_statistics_recomputed(self._ctx(req))
+        self.assertTrue(ok, reason)
+
     def test_missing_baseline_rerun_rejected(self):
         req = _base_request()
         del req["references"]["baseline_rerun"]

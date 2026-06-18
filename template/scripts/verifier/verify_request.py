@@ -669,6 +669,34 @@ def rule_9_statistics_recomputed(ctx: VerifierContext) -> tuple[bool, str | None
                 f"ablation_runs[{i}] is not an object with a string ledger_id"
             )
 
+    # §18 evidence must be INDEPENDENT records, not aliases of already-accepted
+    # baseline/candidate shards — otherwise the rerun/ablation gates are
+    # satisfiable by reusing existing evidence. baseline_rerun must not BE the
+    # baseline shard; each ablation must be distinct from the baseline, every
+    # candidate, the baseline_rerun, and the other ablations. NOTE:
+    # baseline_rerun MAY equal a candidate — the canonical level3 example records
+    # the candidate metrics and the baseline-rerun-under-new-evaluator data in
+    # one shard, so a strict baseline_rerun != candidate rule would wrongly
+    # reject it.
+    candidate_ids = [r["ledger_id"] for r in candidate_runs]
+    rerun_id = baseline_rerun["ledger_id"]
+    if rerun_id == baseline_ledger_id:
+        return False, (
+            "references.baseline_rerun aliases baseline_run; a baseline rerun "
+            "must be an independent record (§18)"
+        )
+    forbidden_for_ablation = {baseline_ledger_id, rerun_id, *candidate_ids}
+    seen_ablations: set[str] = set()
+    for i, ablation_ref in enumerate(ablation_runs):
+        aid = ablation_ref["ledger_id"]
+        if aid in forbidden_for_ablation or aid in seen_ablations:
+            return False, (
+                f"ablation_runs[{i}] ledger_id {aid!r} aliases other evidence "
+                f"(baseline / candidate / baseline_rerun / another ablation); "
+                f"ablations must be independent records (§18)"
+            )
+        seen_ablations.add(aid)
+
     # The verifier must not mint a deployable packet from ledger evidence that
     # the repo's own validator (validate_ledger.py) would reject, nor from
     # metric-empty evidence. (a) Validate every referenced shard against
