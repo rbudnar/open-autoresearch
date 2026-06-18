@@ -181,13 +181,16 @@
     },
     "val_queries_incurred_by_this_run": {
       "type": "integer",
-      "description": "Primary val-exposure derivation input (PROTOCOL §17.6)."
+      "minimum": 0,
+      "description": "Primary val-exposure derivation input (PROTOCOL §17.6). Non-negative: a negative count must not cancel ledger-derived exposure in the verifier's anti-spoof sum."
     },
     "val_queries_total_at_start": {
-      "type": "integer"
+      "type": "integer",
+      "minimum": 0
     },
     "val_queries_total_at_end": {
-      "type": "integer"
+      "type": "integer",
+      "minimum": 0
     }
   }
 }

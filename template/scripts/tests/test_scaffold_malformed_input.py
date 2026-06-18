@@ -46,6 +46,7 @@ from _ledger_common import (  # noqa: E402
     is_safe_filename_stem,
     load_schema,
     resolve_val_queries,
+    validate_against_schema,
 )
 
 BE_SCRIPT = SCRIPTS_DIR / "behavioral_equivalence.py"
@@ -1061,6 +1062,73 @@ class TestIsSafeFilenameStem(unittest.TestCase):
         ):
             with self.subTest(bad=bad):
                 self.assertFalse(is_safe_filename_stem(bad))
+
+
+class TestResolveValQueriesNegativeClamp(unittest.TestCase):
+    """Codex round 3 [High]: a negative val-query count must clamp to 0 so it
+    cannot cancel real exposure in the verifier's §17.6 anti-spoof sum."""
+
+    def test_negative_direct_clamped(self):
+        self.assertEqual(
+            resolve_val_queries({"val_queries_incurred_by_this_run": -5}), 0
+        )
+
+    def test_negative_nested_clamped(self):
+        self.assertEqual(
+            resolve_val_queries({"metrics": {"validation_set_queries": -7}}), 0
+        )
+
+    def test_positive_preserved(self):
+        self.assertEqual(
+            resolve_val_queries({"val_queries_incurred_by_this_run": 12}), 12
+        )
+
+
+class TestValQueriesSchemaMinimum(unittest.TestCase):
+    """Codex round 3 [High]: the experiment_record schema now requires the
+    val-query fields to be >= 0, so validate_ledger flags a negative shard."""
+
+    def test_schema_declares_nonnegative_val_queries(self):
+        schema = json.loads(
+            (SCRIPTS_DIR.parent / "schema" / "experiment_record.schema.json")
+            .read_text(encoding="utf-8")
+        )
+        props = schema["properties"]
+        for field in (
+            "val_queries_incurred_by_this_run",
+            "val_queries_total_at_start",
+            "val_queries_total_at_end",
+        ):
+            self.assertEqual(props[field].get("minimum"), 0, field)
+
+
+class TestSchemaValidatorNonFiniteNumber(unittest.TestCase):
+    """Codex round 3 [Medium]: json.loads accepts NaN/Infinity; the structural
+    validator's 'number' type now requires math.isfinite, so a non-finite split-
+    rule / metric field cannot validate as passing (which bootstrap freezes)."""
+
+    def test_non_finite_number_invalid(self):
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(bad=bad):
+                errors = validate_against_schema(bad, {"type": "number"})
+                self.assertTrue(errors, f"{bad!r} should be invalid")
+
+    def test_non_finite_nested_number_invalid(self):
+        errors = validate_against_schema(
+            {"start": float("nan"), "end": 100},
+            {
+                "type": "object",
+                "properties": {
+                    "start": {"type": "number"},
+                    "end": {"type": "number"},
+                },
+            },
+        )
+        self.assertTrue(errors)
+
+    def test_finite_number_valid(self):
+        self.assertEqual(validate_against_schema(1.5, {"type": "number"}), [])
+        self.assertEqual(validate_against_schema(3, {"type": "number"}), [])
 
 
 if __name__ == "__main__":

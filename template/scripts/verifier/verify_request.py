@@ -158,6 +158,27 @@ VALID_ENFORCEMENT_MECHANISMS = frozenset(
 )
 
 
+def _resolve_reference_path(ctx: "VerifierContext", path_ref: str) -> "Path | None":
+    """Resolve a request reference path against the campaign root
+    (``request_path.parent.parent``) and confirm it stays INSIDE that root.
+
+    Returns the resolved ``Path``, or ``None`` if ``path_ref`` is absolute or
+    escapes the root (``..`` / symlink). Referenced evidence (skeptic review,
+    rehashed artifacts) MUST live inside the auditable campaign tree — otherwise
+    an agent can satisfy the verifier's hash/skeptic gates with an artifact
+    outside the tree (a path-traversal / evidence-boundary bypass)."""
+    root = ctx.request_path.parent.parent.resolve()
+    candidate = Path(path_ref)
+    if candidate.is_absolute():
+        return None
+    resolved = (root / candidate).resolve()
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        return None
+    return resolved
+
+
 def _skeptic_verdict(text: str) -> "str | None":
     """Extract the skeptic-review ``verdict`` from a markdown document.
 
@@ -308,9 +329,13 @@ def rule_2_references_rehash(ctx: VerifierContext) -> tuple[bool, str | None]:
             if not isinstance(path_ref, str):
                 mismatches.append(f"{label}: path is not a string")
                 return
-            file_path = Path(path_ref)
-            if not file_path.is_absolute():
-                file_path = ctx.request_path.parent.parent / path_ref
+            file_path = _resolve_reference_path(ctx, path_ref)
+            if file_path is None:
+                mismatches.append(
+                    f"{label}: path={path_ref} is absolute or escapes the "
+                    f"campaign root"
+                )
+                return
             if not file_path.exists():
                 missing.append(f"{label}: path={path_ref} not found at {file_path}")
                 return
@@ -388,10 +413,15 @@ def rule_5_stack_requires_factorial(ctx: VerifierContext) -> tuple[bool, str | N
     ablation = ablation if isinstance(ablation, dict) else {}
     change_type = ablation.get("change_type")
     factorial = ablation.get("factorial_grid_completed")
-    if change_type == "stack" and not factorial:
+    # Require the boolean True, not merely a truthy value: a string "false"
+    # (or any non-bool) would otherwise satisfy `not factorial == False` and let
+    # a stack change skip the §16.1.2 factorial-grid evidence. Mirrors rule 7's
+    # `passed is not True` gate.
+    if change_type == "stack" and factorial is not True:
         return False, (
-            "change_type=stack but factorial_grid_completed=false; §16.1.2 "
-            "requires a factorial grid before promoting a stack"
+            f"change_type=stack but factorial_grid_completed is not true "
+            f"(got {factorial!r}); §16.1.2 requires a factorial grid before "
+            f"promoting a stack"
         )
     return True, None
 
@@ -466,9 +496,12 @@ def rule_8_skeptic_verdict_clean(ctx: VerifierContext) -> tuple[bool, str | None
         return False, "references.skeptic_review.path missing"
     if not isinstance(path_ref, str):
         return False, "references.skeptic_review.path is not a string"
-    skeptic_path = Path(path_ref)
-    if not skeptic_path.is_absolute():
-        skeptic_path = ctx.request_path.parent.parent / path_ref
+    skeptic_path = _resolve_reference_path(ctx, path_ref)
+    if skeptic_path is None:
+        return False, (
+            "references.skeptic_review.path is absolute or escapes the campaign "
+            "root"
+        )
     if not skeptic_path.exists():
         return False, f"skeptic review file not found: {skeptic_path}"
     # An unreadable (OSError) or non-UTF-8 (UnicodeDecodeError) skeptic-review

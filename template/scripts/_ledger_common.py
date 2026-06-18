@@ -21,6 +21,7 @@ insertion order. The whole sharded-ledger design depends on this guarantee.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import sys
@@ -69,7 +70,11 @@ def resolve_val_queries(entry: dict[str, Any]) -> int:
         # bool is an int subclass; a stray True/False is not a query count.
         direct = None
     if isinstance(direct, int):
-        return direct
+        # Clamp negative to 0. A negative count is malformed, and the verifier's
+        # §17.6 anti-spoof check sums these (ledger_derived); a negative shard
+        # must NOT be able to CANCEL real exposure and slip a request under the
+        # budget. (validate_ledger separately flags it via the schema minimum.)
+        return max(0, direct)
 
     metrics = entry.get("metrics")
     if isinstance(metrics, dict):
@@ -77,7 +82,7 @@ def resolve_val_queries(entry: dict[str, Any]) -> int:
         if isinstance(nested, bool):
             nested = None
         if isinstance(nested, int):
-            return nested
+            return max(0, nested)
 
     return 0
 
@@ -136,7 +141,15 @@ _JSON_TYPE_CHECKS = {
     "array": lambda v: isinstance(v, list),
     "string": lambda v: isinstance(v, str),
     "integer": lambda v: isinstance(v, int) and not isinstance(v, bool),
-    "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
+    # json.loads accepts NaN/Infinity by default; a non-finite number must NOT
+    # validate (it would freeze a non-deterministic/invalid split rule or metric
+    # as "passing"). A Python int can never be non-finite, so only "number"
+    # needs the math.isfinite gate.
+    "number": (
+        lambda v: isinstance(v, (int, float))
+        and not isinstance(v, bool)
+        and math.isfinite(v)
+    ),
     "boolean": lambda v: isinstance(v, bool),
     "null": lambda v: v is None,
 }

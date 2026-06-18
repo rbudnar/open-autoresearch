@@ -652,17 +652,28 @@ class TestRule8SkepticFileIOErrors(unittest.TestCase):
     """rule_8: a non-UTF-8 or unreadable skeptic-review file -> (False, reason),
     never a traceback."""
 
-    def _ctx_with_skeptic(self, skeptic_abs: Path) -> "vr.VerifierContext":
+    def _ctx_with_skeptic_root(self, root: Path, rel: str) -> "vr.VerifierContext":
+        # The skeptic file must live INSIDE the campaign root (path-containment
+        # is now enforced), so reference it by a RELATIVE path and point
+        # request_path at <root>/proposals/req.json (root == parent.parent).
         req = _base_request()
-        req["references"] = {"skeptic_review": {"path": str(skeptic_abs)}}
-        return _ctx(req)
+        req["references"] = {"skeptic_review": {"path": rel}}
+        return vr.VerifierContext(
+            request=req,
+            request_path=root / "proposals" / "req.json",
+            ledger={},
+            metrics={},
+            enforcement={},
+            unsigned=True,
+        )
 
     def test_non_utf8_skeptic_file(self):
         with tempfile.TemporaryDirectory(prefix="vr-skep-") as tmp:
-            skeptic = Path(tmp) / "skeptic.md"
-            skeptic.write_bytes(_NON_UTF8)
+            root = Path(tmp)
+            (root / "reports").mkdir()
+            (root / "reports" / "skeptic.md").write_bytes(_NON_UTF8)
             ok, reason = vr.rule_8_skeptic_verdict_clean(
-                self._ctx_with_skeptic(skeptic)
+                self._ctx_with_skeptic_root(root, "reports/skeptic.md")
             )
             self.assertFalse(ok)
             self.assertIn("not readable/decodable", reason)
@@ -671,12 +682,14 @@ class TestRule8SkepticFileIOErrors(unittest.TestCase):
         if _IS_ROOT:
             self.skipTest("chmod-based permission test is a no-op as root")
         with tempfile.TemporaryDirectory(prefix="vr-skep-perm-") as tmp:
-            skeptic = Path(tmp) / "skeptic.md"
+            root = Path(tmp)
+            (root / "reports").mkdir()
+            skeptic = root / "reports" / "skeptic.md"
             skeptic.write_text("---\nverdict: no_objection\n---\n", encoding="utf-8")
             skeptic.chmod(0o000)
             try:
                 ok, reason = vr.rule_8_skeptic_verdict_clean(
-                    self._ctx_with_skeptic(skeptic)
+                    self._ctx_with_skeptic_root(root, "reports/skeptic.md")
                 )
                 self.assertFalse(ok)
                 self.assertIn("not readable/decodable", reason)
@@ -1054,6 +1067,109 @@ class TestEndToEndRequestIdFilenameSafety(unittest.TestCase):
                     self.assertEqual(
                         escaped, [], f"no packet should be written for {bad!r}"
                     )
+
+
+class TestRule5StackFactorialTruthiness(unittest.TestCase):
+    """Codex round 3 [High]: rule 5 used `not factorial`, so a truthy non-bool
+    (the string "false", 1, a list) let a stack change skip the §16.1.2
+    factorial-grid evidence. It now requires `factorial_grid_completed is True`."""
+
+    def test_truthy_nonbool_factorial_rejected(self):
+        for bad in ("false", "true", 1, ["x"], {"k": "v"}):
+            with self.subTest(bad=bad):
+                req = _base_request()
+                req["claims"]["ablation"] = {
+                    "change_type": "stack",
+                    "factorial_grid_completed": bad,
+                }
+                ok, reason = vr.rule_5_stack_requires_factorial(_ctx(req))
+                self.assertFalse(ok)
+                self.assertIn("factorial_grid_completed is not true", reason)
+
+    def test_missing_factorial_rejected(self):
+        req = _base_request()
+        req["claims"]["ablation"] = {"change_type": "stack"}
+        ok, _ = vr.rule_5_stack_requires_factorial(_ctx(req))
+        self.assertFalse(ok)
+
+    def test_true_factorial_passes(self):
+        req = _base_request()
+        req["claims"]["ablation"] = {
+            "change_type": "stack",
+            "factorial_grid_completed": True,
+        }
+        ok, _ = vr.rule_5_stack_requires_factorial(_ctx(req))
+        self.assertTrue(ok)
+
+    def test_non_stack_passes_regardless(self):
+        req = _base_request()
+        req["claims"]["ablation"] = {
+            "change_type": "single",
+            "factorial_grid_completed": "false",
+        }
+        ok, _ = vr.rule_5_stack_requires_factorial(_ctx(req))
+        self.assertTrue(ok)
+
+
+class TestRule6NegativeLedgerExposure(unittest.TestCase):
+    """Codex round 3 [High]: a negative ledger val-query count canceled real
+    exposure in the §17.6 anti-spoof sum (ledger_derived), letting an
+    under-reported claim pass rule 6. resolve_val_queries now clamps negatives to
+    0 so a malformed shard cannot cancel positive exposure."""
+
+    def test_negative_shard_cannot_cancel_exposure(self):
+        req = _base_request()
+        req["claims"]["val_set_exposure_at_request"] = {
+            "queries_against_val_this_campaign": 0,
+            "exposure_budget": 50,
+        }
+        ledger = {
+            "a": {
+                "entry": {"id": "a", "val_queries_incurred_by_this_run": 50},
+                "canonical_bytes": b"{}",
+            },
+            "b": {
+                "entry": {"id": "b", "val_queries_incurred_by_this_run": -1000},
+                "canonical_bytes": b"{}",
+            },
+        }
+        ok, reason = vr.rule_6_val_exposure_not_exhausted(_ctx(req, ledger))
+        # ledger_derived = 50 + max(0, -1000) = 50; claim 0 < 50 -> under-report.
+        self.assertFalse(ok)
+        self.assertIn("under-reports exposure", reason)
+
+
+class TestReferencePathTraversal(unittest.TestCase):
+    """Codex round 3 [High]: references.*.path was resolved against the campaign
+    root but never checked for containment, so `../escaped` or an absolute path
+    let an agent satisfy the verifier's rehash/skeptic gates with an artifact
+    OUTSIDE the auditable campaign tree. Both rule 2 and rule 8 now reject it."""
+
+    def test_resolve_reference_path_helper(self):
+        ctx = _ctx({})
+        for bad in ("../escaped", "/etc/passwd", "a/../../x"):
+            with self.subTest(bad=bad):
+                self.assertIsNone(vr._resolve_reference_path(ctx, bad))
+        # A relative path inside the root resolves (existence not required here).
+        self.assertIsNotNone(vr._resolve_reference_path(ctx, "reports/x.md"))
+
+    def test_skeptic_path_escape_rejected(self):
+        for bad in ("../escaped-skeptic.md", "/etc/passwd", "a/../../x"):
+            with self.subTest(bad=bad):
+                req = _base_request()
+                req["references"]["skeptic_review"] = {"path": bad}
+                ok, reason = vr.rule_8_skeptic_verdict_clean(_ctx(req))
+                self.assertFalse(ok)
+                self.assertIn("escapes the campaign root", reason)
+
+    def test_rule2_path_escape_rejected(self):
+        req = _base_request()
+        req["references"] = {
+            "artifact": {"content_sha256": "a" * 64, "path": "../escaped.bin"}
+        }
+        ok, reason = vr.rule_2_references_rehash(_ctx(req))
+        self.assertFalse(ok)
+        self.assertIn("escapes the campaign root", reason)
 
 
 if __name__ == "__main__":

@@ -200,6 +200,13 @@ def build_record(args: argparse.Namespace, now: dt.datetime) -> dict[str, Any]:
         "metrics": metrics,
     }
     if args.val_queries is not None:
+        # Non-negative at the write boundary: a negative count would later cancel
+        # ledger-derived exposure in the §17.6 anti-spoof sum.
+        if args.val_queries < 0:
+            raise SystemExit(
+                f"CONFIG ERROR: --val-queries must be non-negative (got "
+                f"{args.val_queries})"
+            )
         record["val_queries_incurred_by_this_run"] = args.val_queries
     if args.node_title:
         record["node_title"] = args.node_title
