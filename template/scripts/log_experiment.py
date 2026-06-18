@@ -84,7 +84,16 @@ def _parse_json_object_arg(raw: str, flag: str) -> dict[str, Any]:
 
 def read_protocol_version(path: Path) -> str:
     if path.exists():
-        return path.read_text(encoding="utf-8").strip()
+        # An unreadable (OSError) or non-UTF-8 (UnicodeDecodeError)
+        # --protocol-version-file is a clean CONFIG ERROR, never a traceback,
+        # matching the rest of this script's file-read contract.
+        try:
+            return path.read_text(encoding="utf-8").strip()
+        except (OSError, UnicodeDecodeError) as exc:
+            raise SystemExit(
+                f"CONFIG ERROR: --protocol-version-file {path} not "
+                f"readable/decodable: {exc}"
+            )
     return "0.5"
 
 

@@ -901,5 +901,150 @@ class TestSignPacketMalformed(unittest.TestCase):
             self.assertEqual(sp.cmd_verify(p, _SIGN_KEY), 0)
 
 
+class TestRule3MaturityBool(unittest.TestCase):
+    """Codex#4 sibling: maturity_level_used as a JSON bool. bool is an int
+    subclass, so the old isinstance(int) accepted True/False; _is_int excludes
+    it -> a clean rejection instead of a boolean masquerading as a level."""
+
+    def test_bool_maturity_rejected(self):
+        for bad in (True, False):
+            with self.subTest(bad=bad):
+                req = _base_request()
+                req["maturity_level_used"] = bad
+                ok, reason = vr.rule_3_maturity_level_ge_3(_ctx(req))
+                self.assertFalse(ok)
+                self.assertIn("not an int", reason)
+
+
+class TestRule6ExposureBoolAndNegative(unittest.TestCase):
+    """Codex#4 [Medium] fail-open: bool queries/budget (false/true == 0/1) passed
+    the int check and could reach a deployable promoted packet. _is_int excludes
+    bool; explicit non-negative bounds reject malformed negative counts."""
+
+    def test_bool_exposure_rejected(self):
+        req = _base_request()
+        req["claims"]["val_set_exposure_at_request"] = {
+            "queries_against_val_this_campaign": False,
+            "exposure_budget": True,
+        }
+        ok, reason = vr.rule_6_val_exposure_not_exhausted(_ctx(req))
+        self.assertFalse(ok)
+        self.assertIn("requires int", reason)
+
+    def test_negative_exposure_rejected(self):
+        req = _base_request()
+        req["claims"]["val_set_exposure_at_request"] = {
+            "queries_against_val_this_campaign": -1,
+            "exposure_budget": 10,
+        }
+        ok, reason = vr.rule_6_val_exposure_not_exhausted(_ctx(req))
+        self.assertFalse(ok)
+        self.assertIn("non-negative", reason)
+
+
+class TestEndToEndEnforcementMechanismValidation(unittest.TestCase):
+    """Codex#1 [High] fail-open: a malformed enforcement.yaml (`mechanism:
+    not_real` / `[]` / a bool) was treated as real out-of-band enforcement and
+    could mint a deployable `promoted` packet. main() now fails closed (CONFIG
+    ERROR, no packet) on an unrecognized/non-string mechanism."""
+
+    def _run(self, mechanism_yaml: str):
+        with tempfile.TemporaryDirectory(prefix="mal-enf-") as tmp:
+            work = Path(tmp)
+            ledger_dir = work / "ledger"
+            ledger_dir.mkdir()
+            (ledger_dir / "b0.json").write_text(
+                json.dumps({"id": "b0", "metrics": {}}), encoding="utf-8"
+            )
+            metrics = work / "metrics.yaml"
+            metrics.write_text("protocol_version: '0.5'\n", encoding="utf-8")
+            enforcement = work / "enforcement.yaml"
+            enforcement.write_text(
+                f"mechanism: {mechanism_yaml}\n", encoding="utf-8"
+            )
+            out_dir = work / "out"
+            out_dir.mkdir()
+            req_path = work / "req.json"
+            req_path.write_text(json.dumps(_base_request()), encoding="utf-8")
+            proc = subprocess.run(
+                [
+                    sys.executable,
+                    str(VERIFIER),
+                    "--request",
+                    str(req_path),
+                    "--ledger",
+                    str(ledger_dir),
+                    "--metrics",
+                    str(metrics),
+                    "--enforcement",
+                    str(enforcement),
+                    "--out-dir",
+                    str(out_dir),
+                    "--verifier-identity",
+                    "unittest-enf",
+                    "--unsigned",
+                ],
+                capture_output=True,
+                text=True,
+            )
+            return proc, list(out_dir.glob("*-promotion-packet.json"))
+
+    def test_unknown_mechanism_fails_closed(self):
+        # str-not-in-enum, a YAML list, a bool, and a whitespace string.
+        for bad in ("not_real", "[]", "true", "'  '"):
+            with self.subTest(bad=bad):
+                proc, packets = self._run(bad)
+                self.assertNotIn(
+                    "Traceback (most recent call last)", proc.stderr
+                )
+                self.assertNotEqual(proc.returncode, 0, f"stderr={proc.stderr!r}")
+                self.assertIn("enforcement.mechanism must be one of", proc.stderr)
+                self.assertEqual(
+                    packets, [], "no deployable packet on malformed mechanism"
+                )
+
+    def test_valid_mechanism_none_still_runs(self):
+        # Regression: a VALID mechanism still produces a packet.
+        proc, packets = self._run("none")
+        self.assertNotIn("Traceback (most recent call last)", proc.stderr)
+        self.assertTrue(
+            packets, f"valid mechanism should write a packet; stderr={proc.stderr!r}"
+        )
+
+
+class TestEndToEndRequestIdFilenameSafety(unittest.TestCase):
+    """Codex#2 [High]: request_id is the packet filename stem. `a/b` tracebacked
+    (missing parent dir) and `../escaped` wrote OUTSIDE --out-dir. main() now
+    rejects an unsafe request_id (CONFIG ERROR) before writing anything."""
+
+    def test_unsafe_request_id_rejected(self):
+        for bad in ("bad/id", "../escaped", "..", ".", "a/../b"):
+            with self.subTest(bad=bad):
+                with tempfile.TemporaryDirectory(prefix="mal-rid-") as tmp:
+                    work = Path(tmp)
+                    ledger_dir = work / "ledger"
+                    ledger_dir.mkdir()
+                    (ledger_dir / "b0.json").write_text(
+                        json.dumps({"id": "b0", "metrics": {}}), encoding="utf-8"
+                    )
+                    req = _base_request()
+                    req["request_id"] = bad
+                    req_path = work / "req.json"
+                    req_path.write_text(json.dumps(req), encoding="utf-8")
+                    proc = _run_verifier(req_path, ledger_dir, work)
+                    self.assertNotIn(
+                        "Traceback (most recent call last)", proc.stderr
+                    )
+                    self.assertNotEqual(
+                        proc.returncode, 0, f"stderr={proc.stderr!r}"
+                    )
+                    self.assertIn("request_id must be", proc.stderr)
+                    # Nothing written anywhere under work (no escape, no partial).
+                    escaped = list(work.rglob("*promotion-packet*"))
+                    self.assertEqual(
+                        escaped, [], f"no packet should be written for {bad!r}"
+                    )
+
+
 if __name__ == "__main__":
     unittest.main()

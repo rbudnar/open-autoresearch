@@ -103,6 +103,22 @@ def _is_number(value: Any) -> bool:
 # --- Tolerance lookup ---------------------------------------------------------
 
 
+def _checked_eval_dtype(metric_name: str, block: dict[str, Any]) -> str:
+    """Return ``block['eval_dtype']`` (default 'fp32'), validated as a non-empty
+    string. eval_dtype is later used as a dict KEY
+    (``defaults_by_dtype.get(eval_dtype)`` in tolerance_for_metric), so a
+    non-string value (e.g. a YAML list ``[fp32]``) raises
+    ``TypeError: unhashable type``. Reject it here, at the source, as a clean
+    CONFIG ERROR."""
+    dtype = block.get("eval_dtype", "fp32")
+    if not isinstance(dtype, str) or not dtype:
+        raise SystemExit(
+            f"CONFIG ERROR: metric '{metric_name}' eval_dtype must be a "
+            f"non-empty string, got {dtype!r}"
+        )
+    return dtype
+
+
 def metric_index(metrics_yaml: dict[str, Any]) -> dict[str, dict[str, str]]:
     """Build {metric_name: {direction, aggregation, eval_dtype}} index."""
     out: dict[str, dict[str, str]] = {}
@@ -115,7 +131,7 @@ def metric_index(metrics_yaml: dict[str, Any]) -> dict[str, dict[str, str]]:
         out[primary_name] = {
             "direction": primary.get("direction", ""),
             "aggregation": primary.get("aggregation", ""),
-            "eval_dtype": primary.get("eval_dtype", "fp32"),
+            "eval_dtype": _checked_eval_dtype(primary_name, primary),
         }
     for group in ("secondary_metrics", "guardrails"):
         entries = metrics_yaml.get(group)
@@ -129,7 +145,7 @@ def metric_index(metrics_yaml: dict[str, Any]) -> dict[str, dict[str, str]]:
             out[entry["name"]] = {
                 "direction": entry.get("direction", ""),
                 "aggregation": entry.get("aggregation", ""),
-                "eval_dtype": entry.get("eval_dtype", "fp32"),
+                "eval_dtype": _checked_eval_dtype(entry["name"], entry),
             }
     return out
 

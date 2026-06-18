@@ -165,6 +165,15 @@ def migrate(state_dir: Path, force: bool) -> dict[str, Any]:
         rid = rec.get("id")
         if not isinstance(rid, str):
             raise SystemExit(f"record missing string id: {rec!r}")
+        # The legacy v0.4 id becomes a shard filename. An id with path separators
+        # or `..` (e.g. `../escaped`) would write OUTSIDE state/ledger/ and then
+        # be invisible to regenerate()'s `state/ledger/*.json` reload — a silent
+        # record drop. Require a single safe path component.
+        if rid in ("", ".", "..") or Path(rid).name != rid:
+            raise SystemExit(
+                f"record id is not a safe shard filename (no path separators "
+                f"or '..'): {rid!r}"
+            )
         shard = ledger_dir / f"{rid}.json"
         if shard.exists() and not force:
             raise SystemExit(

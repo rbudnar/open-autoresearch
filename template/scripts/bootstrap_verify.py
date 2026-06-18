@@ -317,7 +317,8 @@ def _check_frozen_manifest(data: dict) -> list[tuple[bool, str]]:
             )
             continue
         size = split_data["size_bytes"]
-        if not isinstance(size, int) or size <= 0:
+        # bool is an int subclass; `size_bytes: true` must not pass as size 1.
+        if isinstance(size, bool) or not isinstance(size, int) or size <= 0:
             results.append(
                 report(
                     False,

@@ -38,6 +38,7 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 
 import behavioral_equivalence as be  # noqa: E402
 import check_questionnaire_drift as cqd  # noqa: E402
+import log_experiment as le  # noqa: E402
 import migrate_ledger_v04_to_v05 as mig  # noqa: E402
 import regenerate_state as rs  # noqa: E402
 import validate_ledger as vl  # noqa: E402
@@ -878,6 +879,101 @@ class TestDriftRootResolution(unittest.TestCase):
             self.assertEqual(
                 proc.returncode, 2, f"out={proc.stdout!r} err={proc.stderr!r}"
             )
+
+
+class TestBehavioralEquivalenceEvalDtypeNonString(unittest.TestCase):
+    """Codex#5/G2: eval_dtype is used as a dict KEY
+    (defaults_by_dtype.get(eval_dtype)); a non-string (e.g. a YAML list `[fp32]`)
+    raises `TypeError: unhashable type`. metric_index now rejects a non-string /
+    empty eval_dtype as a clean CONFIG ERROR at the source."""
+
+    def test_primary_non_string_eval_dtype(self):
+        for bad in (["fp32"], {"d": "fp32"}, 32, "", True):
+            with self.subTest(bad=bad):
+                with self.assertRaises(SystemExit) as cm:
+                    be.metric_index(
+                        {"primary_metric": {"name": "acc", "eval_dtype": bad}}
+                    )
+                self.assertIn(
+                    "eval_dtype must be a non-empty string", str(cm.exception)
+                )
+
+    def test_secondary_non_string_eval_dtype(self):
+        with self.assertRaises(SystemExit) as cm:
+            be.metric_index(
+                {
+                    "primary_metric": {"name": "acc"},
+                    "secondary_metrics": [{"name": "f1", "eval_dtype": ["fp16"]}],
+                }
+            )
+        self.assertIn("eval_dtype must be a non-empty string", str(cm.exception))
+
+
+class TestLogExperimentProtocolVersionIO(unittest.TestCase):
+    """Codex#6: --protocol-version-file was read outside a clean-error guard; a
+    non-UTF-8 file raised a raw UnicodeDecodeError. Now a clean CONFIG ERROR."""
+
+    def test_non_utf8_protocol_version_file(self):
+        with tempfile.TemporaryDirectory(prefix="le-pv-") as tmp:
+            p = Path(tmp) / "PROTOCOL_VERSION"
+            p.write_bytes(_NON_UTF8)
+            with self.assertRaises(SystemExit) as cm:
+                le.read_protocol_version(p)
+            self.assertIn("not readable/decodable", str(cm.exception))
+
+    def test_unreadable_protocol_version_file(self):
+        if _IS_ROOT:
+            self.skipTest("chmod-based permission test is a no-op as root")
+        with tempfile.TemporaryDirectory(prefix="le-pv2-") as tmp:
+            p = Path(tmp) / "PROTOCOL_VERSION"
+            p.write_text("0.5", encoding="utf-8")
+            p.chmod(0o000)
+            try:
+                with self.assertRaises(SystemExit) as cm:
+                    le.read_protocol_version(p)
+                self.assertIn("not readable/decodable", str(cm.exception))
+            finally:
+                p.chmod(0o644)
+
+    def test_missing_protocol_version_file_defaults(self):
+        # Regression: an absent file still returns the 0.5 default (no raise).
+        with tempfile.TemporaryDirectory(prefix="le-pv3-") as tmp:
+            self.assertEqual(
+                le.read_protocol_version(Path(tmp) / "nope"), "0.5"
+            )
+
+
+class TestMigrateLedgerIdPathTraversal(unittest.TestCase):
+    """Codex#3 [High]: a legacy v0.4 ledger id with path separators / `..` was
+    used directly as a shard filename, writing OUTSIDE state/ledger/ and silently
+    dropping the record from regenerate()'s `state/ledger/*.json` reload. migrate
+    now rejects an unsafe id (SystemExit) before any escaping write."""
+
+    def test_traversal_id_rejected(self):
+        for bad in ("../escaped", "a/b", "..", "."):
+            with self.subTest(bad=bad):
+                with tempfile.TemporaryDirectory(prefix="mig-trav-") as tmp:
+                    state = Path(tmp) / "state"
+                    state.mkdir()
+                    (state / "experiment_ledger.jsonl").write_text(
+                        json.dumps(
+                            {
+                                "id": bad,
+                                "protocol_version": "0.5",
+                                "timestamp": "2026-01-01T00:00:00Z",
+                                "parent_ids": [],
+                                "metrics": {},
+                            }
+                        )
+                        + "\n",
+                        encoding="utf-8",
+                    )
+                    with self.assertRaises(SystemExit) as cm:
+                        mig.migrate(state, force=True)
+                    self.assertIn("safe shard filename", str(cm.exception))
+                    # Nothing escaped the temp dir's state/ tree.
+                    escaped = list(Path(tmp).rglob("escaped*"))
+                    self.assertEqual(escaped, [], f"escaped writes: {escaped}")
 
 
 if __name__ == "__main__":

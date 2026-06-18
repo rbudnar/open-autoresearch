@@ -137,6 +137,38 @@ def load_json(path: Path) -> dict[str, Any]:
     return data
 
 
+def _is_int(value: Any) -> bool:
+    """True iff ``value`` is a real int (bool excluded). ``bool`` is an ``int``
+    subclass, so a JSON ``true``/``false`` would otherwise satisfy
+    ``isinstance(x, int)`` and let a boolean masquerade as an integer count/level
+    in the promotion rules. Single predicate so every rule's int check agrees."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+# The §3.1.1 out-of-band enforcement mechanisms the verifier recognizes. The
+# enforcement label (and therefore deployability) is derived from this value, so
+# an UNRECOGNIZED or non-string mechanism must FAIL CLOSED (rejected as a config
+# error) — treating any truthy value as real enforcement would let a malformed
+# enforcement.yaml mint a deployable `promoted` packet. Kept in lock-step with
+# template/config/enforcement.yaml.example.
+VALID_ENFORCEMENT_MECHANISMS = frozenset(
+    {"ci_enforced", "pre_receive", "oop_verifier", "container_ro", "none"}
+)
+
+
+def _is_safe_filename_stem(value: Any) -> bool:
+    """True iff ``value`` is a non-empty string usable as a single path component
+    (no directory separators, not ``.``/``..``/absolute). Untrusted ids that
+    become packet/shard filenames must pass this or a malformed request could
+    traceback (``a/b`` -> missing parent dir) or write OUTSIDE the output dir
+    (``../escaped``)."""
+    return (
+        isinstance(value, str)
+        and value not in ("", ".", "..")
+        and Path(value).name == value
+    )
+
+
 def _skeptic_verdict(text: str) -> "str | None":
     """Extract the skeptic-review ``verdict`` from a markdown document.
 
@@ -330,7 +362,7 @@ def rule_2_references_rehash(ctx: VerifierContext) -> tuple[bool, str | None]:
 
 def rule_3_maturity_level_ge_3(ctx: VerifierContext) -> tuple[bool, str | None]:
     level = ctx.request.get("maturity_level_used")
-    if not isinstance(level, int):
+    if not _is_int(level):
         return False, f"maturity_level_used is not an int: {level!r}"
     if level < 3:
         return False, (
@@ -384,10 +416,20 @@ def rule_6_val_exposure_not_exhausted(
     exposure = exposure if isinstance(exposure, dict) else {}
     queries = exposure.get("queries_against_val_this_campaign")
     budget = exposure.get("exposure_budget")
-    if not isinstance(queries, int) or not isinstance(budget, int):
+    # _is_int excludes bool: a JSON `true`/`false` is an int subclass and would
+    # otherwise satisfy the type check, letting `queries=false, budget=true`
+    # (i.e. 0 and 1) pass rule 6 and reach a deployable `promoted` packet.
+    if not _is_int(queries) or not _is_int(budget):
         return False, (
             f"val_set_exposure_at_request requires int queries + budget "
             f"(got queries={queries!r}, budget={budget!r})"
+        )
+    # Exposure counts/budgets are non-negative by definition; a negative value is
+    # a malformed claim, not a license to skip the budget comparison.
+    if queries < 0 or budget < 0:
+        return False, (
+            f"val_set_exposure_at_request queries/budget must be non-negative "
+            f"(got queries={queries}, budget={budget})"
         )
     # Anti-spoof cross-check (§17.6): an agent must not under-report val exposure
     # to dodge the budget. Compute the ledger-derived exposure (sum of each
@@ -838,11 +880,22 @@ def build_packet(
 def write_packet_files(
     out_dir: Path, request_id: str, packet: dict[str, Any]
 ) -> tuple[Path, Path]:
-    out_dir.mkdir(parents=True, exist_ok=True)
+    # request_id is validated as a safe filename stem in main(); the OSError
+    # guards below cover the remaining write failures (unwritable out-dir, full
+    # disk) so a packet-write failure is a clean CONFIG ERROR, not a traceback.
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise SystemExit(f"CONFIG ERROR: cannot create output dir {out_dir}: {exc}")
     base = f"{request_id}-promotion-packet"
     json_path = out_dir / f"{base}.json"
     md_path = out_dir / f"{base}.md"
-    json_path.write_text(json.dumps(packet, indent=2, sort_keys=True), encoding="utf-8")
+    try:
+        json_path.write_text(
+            json.dumps(packet, indent=2, sort_keys=True), encoding="utf-8"
+        )
+    except OSError as exc:
+        raise SystemExit(f"CONFIG ERROR: cannot write packet {json_path}: {exc}")
 
     md_lines = [
         "---",
@@ -897,7 +950,10 @@ def write_packet_files(
         "markdown is a human-readable rendering only.",
         "",
     ]
-    md_path.write_text("\n".join(md_lines), encoding="utf-8")
+    try:
+        md_path.write_text("\n".join(md_lines), encoding="utf-8")
+    except OSError as exc:
+        raise SystemExit(f"CONFIG ERROR: cannot write packet {md_path}: {exc}")
     return json_path, md_path
 
 
@@ -944,9 +1000,32 @@ def main(argv: list[str]) -> int:
     args = parser.parse_args(argv)
 
     request = load_json(args.request)
+    # request_id becomes the packet filename stem (`<id>-promotion-packet.json`).
+    # An untrusted id with path separators tracebacks (`a/b` -> missing parent)
+    # or escapes --out-dir (`../escaped`). Validate it up front; absent is
+    # tolerated (a safe default stem is used downstream).
+    if "request_id" in request and not _is_safe_filename_stem(request["request_id"]):
+        raise SystemExit(
+            "CONFIG ERROR: request_id must be a non-empty string usable as a "
+            "filename (no path separators, not '.'/'..'), got "
+            f"{request['request_id']!r}"
+        )
     ledger = load_ledger(args.ledger)
     metrics = load_yaml(args.metrics)
     enforcement = load_yaml(args.enforcement)
+    # The enforcement mechanism gates deployability (compute_enforcement_label /
+    # compute_status). An unrecognized or non-string mechanism must fail closed:
+    # otherwise a malformed enforcement.yaml (`mechanism: not_real` / `[]`) is
+    # treated as real out-of-band enforcement and yields a deployable `promoted`
+    # packet. load_yaml already guarantees `enforcement` is a mapping.
+    mechanism = enforcement.get("mechanism", "none")
+    if not isinstance(mechanism, str) or mechanism not in VALID_ENFORCEMENT_MECHANISMS:
+        raise SystemExit(
+            "CONFIG ERROR: enforcement.mechanism must be one of "
+            f"{sorted(VALID_ENFORCEMENT_MECHANISMS)}, got {mechanism!r}. An "
+            "unrecognized mechanism is rejected (fail-closed) so a malformed "
+            "config cannot mint a deployable promoted packet."
+        )
     signing_key = get_signing_key(args.unsigned)
 
     ctx = VerifierContext(
