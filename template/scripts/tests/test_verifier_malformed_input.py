@@ -1018,7 +1018,17 @@ class TestEndToEndRequestIdFilenameSafety(unittest.TestCase):
     rejects an unsafe request_id (CONFIG ERROR) before writing anything."""
 
     def test_unsafe_request_id_rejected(self):
-        for bad in ("bad/id", "../escaped", "..", ".", "a/../b"):
+        # traversal/separators, plus the filesystem-boundary cases codex round 2
+        # found: embedded NUL (write_text -> ValueError) and an overlong stem.
+        for bad in (
+            "bad/id",
+            "../escaped",
+            "..",
+            ".",
+            "a/../b",
+            "bad\x00id",
+            "x" * 201,
+        ):
             with self.subTest(bad=bad):
                 with tempfile.TemporaryDirectory(prefix="mal-rid-") as tmp:
                     work = Path(tmp)

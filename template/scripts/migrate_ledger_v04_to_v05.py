@@ -33,11 +33,11 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from _ledger_common import resolve_val_queries
+    from _ledger_common import is_safe_filename_stem, resolve_val_queries
     from regenerate_state import regenerate
 except ImportError:  # pragma: no cover - path shim for direct invocation
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from _ledger_common import resolve_val_queries
+    from _ledger_common import is_safe_filename_stem, resolve_val_queries
     from regenerate_state import regenerate
 
 NEW_PROTOCOL_VERSION = "0.5"
@@ -165,23 +165,29 @@ def migrate(state_dir: Path, force: bool) -> dict[str, Any]:
         rid = rec.get("id")
         if not isinstance(rid, str):
             raise SystemExit(f"record missing string id: {rec!r}")
-        # The legacy v0.4 id becomes a shard filename. An id with path separators
-        # or `..` (e.g. `../escaped`) would write OUTSIDE state/ledger/ and then
-        # be invisible to regenerate()'s `state/ledger/*.json` reload — a silent
-        # record drop. Require a single safe path component.
-        if rid in ("", ".", "..") or Path(rid).name != rid:
+        # The legacy v0.4 id becomes a shard filename. An unsafe id would either
+        # escape state/ledger/ (path separators / `..`) and be invisible to
+        # regenerate()'s reload — a silent record drop — or traceback at the
+        # filesystem boundary (embedded NUL -> ValueError, overlong -> OSError).
+        # The shared predicate rejects all of those; the write is still wrapped
+        # below as defense in depth.
+        if not is_safe_filename_stem(rid):
             raise SystemExit(
-                f"record id is not a safe shard filename (no path separators "
-                f"or '..'): {rid!r}"
+                f"record id is not a safe shard filename (only [A-Za-z0-9._-], "
+                f"<=200 chars, no path separators or '..'): {rid!r}"
             )
         shard = ledger_dir / f"{rid}.json"
-        if shard.exists() and not force:
-            raise SystemExit(
-                f"REFUSING to clobber existing shard {shard} (pass --force)"
+        try:
+            if shard.exists() and not force:
+                raise SystemExit(
+                    f"REFUSING to clobber existing shard {shard} (pass --force)"
+                )
+            shard.write_text(
+                json.dumps(rec, indent=2, ensure_ascii=False) + "\n",
+                encoding="utf-8",
             )
-        shard.write_text(
-            json.dumps(rec, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-        )
+        except (OSError, ValueError) as exc:
+            raise SystemExit(f"cannot write ledger shard {shard}: {exc}")
 
     campaign_path = state_dir / "campaign.json"
     if not campaign_path.exists() or force:

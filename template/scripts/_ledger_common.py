@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from typing import Any
 
@@ -139,6 +140,29 @@ _JSON_TYPE_CHECKS = {
     "boolean": lambda v: isinstance(v, bool),
     "null": lambda v: v is None,
 }
+
+
+_SAFE_FILENAME_STEM_RE = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def is_safe_filename_stem(value: Any, max_length: int = 200) -> bool:
+    """True iff ``value`` is safe to use as a SINGLE path component (a packet or
+    ledger-shard filename stem).
+
+    Untrusted ids (verifier ``request_id``, legacy v0.4 ledger ``id``) become
+    filenames. A value that is not a conservative stem either escapes the target
+    dir (path separators, ``..``) or tracebacks at the filesystem boundary:
+    an embedded NUL raises ``ValueError: embedded null byte`` and an overlong
+    name raises ``OSError: File name too long``. One allowlist closes all of
+    those: 1..``max_length`` chars from ``[A-Za-z0-9._-]`` (which excludes path
+    separators, NUL/control chars, and whitespace), minus the directory aliases
+    ``.``/``..``. ``max_length`` defaults to 200 so the longest derived filename
+    (``<stem>-promotion-packet.json``) stays well under the 255-byte limit."""
+    if not isinstance(value, str) or value in (".", ".."):
+        return False
+    if not (1 <= len(value) <= max_length):
+        return False
+    return _SAFE_FILENAME_STEM_RE.fullmatch(value) is not None
 
 
 def load_schema(schema_path: "os.PathLike[str] | str") -> dict[str, Any]:

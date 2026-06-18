@@ -42,7 +42,11 @@ import log_experiment as le  # noqa: E402
 import migrate_ledger_v04_to_v05 as mig  # noqa: E402
 import regenerate_state as rs  # noqa: E402
 import validate_ledger as vl  # noqa: E402
-from _ledger_common import load_schema, resolve_val_queries  # noqa: E402
+from _ledger_common import (  # noqa: E402
+    is_safe_filename_stem,
+    load_schema,
+    resolve_val_queries,
+)
 
 BE_SCRIPT = SCRIPTS_DIR / "behavioral_equivalence.py"
 DRIFT_SCRIPT = SCRIPTS_DIR / "check_questionnaire_drift.py"
@@ -316,14 +320,14 @@ class TestBehavioralEquivalenceTolerance(unittest.TestCase):
                         "fp32",
                         {"per_metric": {"m": {"rtol": bad, "atol": 1e-6}}},
                     )
-                self.assertIn("must be numeric", str(cm.exception))
+                self.assertIn("finite number", str(cm.exception))
 
     def test_per_metric_non_numeric_atol(self):
         with self.assertRaises(SystemExit) as cm:
             be.tolerance_for_metric(
                 "m", "fp32", {"per_metric": {"m": {"rtol": 1e-4, "atol": "nope"}}}
             )
-        self.assertIn("must be numeric", str(cm.exception))
+        self.assertIn("finite number", str(cm.exception))
 
     def test_dtype_defaults_non_numeric(self):
         # F-3/G3: the defaults_by_dtype branch also coerces with the guard.
@@ -335,7 +339,24 @@ class TestBehavioralEquivalenceTolerance(unittest.TestCase):
                         "fp32",
                         {"defaults_by_dtype": {"fp32": {"rtol": bad, "atol": 1e-6}}},
                     )
-                self.assertIn("must be numeric", str(cm.exception))
+                self.assertIn("finite number", str(cm.exception))
+
+    def test_non_finite_tolerance(self):
+        # Codex round 2 [High]: .nan/.inf tolerances must be a clean CONFIG ERROR.
+        for bad in (float("nan"), float("inf"), float("-inf")):
+            with self.subTest(bad=bad):
+                with self.assertRaises(SystemExit) as cm:
+                    be.tolerance_for_metric(
+                        "m", "fp32", {"per_metric": {"m": {"rtol": bad, "atol": 1e-6}}}
+                    )
+                self.assertIn("finite number", str(cm.exception))
+
+    def test_negative_tolerance(self):
+        with self.assertRaises(SystemExit) as cm:
+            be.tolerance_for_metric(
+                "m", "fp32", {"per_metric": {"m": {"rtol": -1e-4, "atol": 1e-6}}}
+            )
+        self.assertIn("non-negative", str(cm.exception))
 
 
 class TestBehavioralEquivalenceLoadFixtures(unittest.TestCase):
@@ -460,7 +481,17 @@ class TestBehavioralEquivalenceGoldenValueNonNumeric(unittest.TestCase):
     (SystemExit), consistent with the non-mapping golden_outputs rejection."""
 
     def test_non_numeric_golden(self):
-        for bad in ("abc", [1, 2], {"k": "v"}, True, None):
+        # non-numeric AND non-finite (.nan/.inf) golden values are CONFIG ERRORs.
+        for bad in (
+            "abc",
+            [1, 2],
+            {"k": "v"},
+            True,
+            None,
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+        ):
             with self.subTest(bad=bad):
                 fixture = {
                     "fixture_id": "fx1",
@@ -476,7 +507,7 @@ class TestBehavioralEquivalenceGoldenValueNonNumeric(unittest.TestCase):
                         None,
                         None,
                     )
-                self.assertIn("must be numeric", str(cm.exception))
+                self.assertIn("finite number", str(cm.exception))
 
 
 class TestBehavioralEquivalenceObservedNonNumeric(unittest.TestCase):
@@ -487,7 +518,8 @@ class TestBehavioralEquivalenceObservedNonNumeric(unittest.TestCase):
     distinct, already-covered 'metric not returned' case and is excluded here.)"""
 
     def test_non_numeric_observed(self):
-        for bad in ("abc", [1], {"k": "v"}, True):
+        # non-numeric AND non-finite (.nan/.inf) evaluator returns are failures.
+        for bad in ("abc", [1], {"k": "v"}, True, float("nan"), float("inf")):
             with self.subTest(bad=bad):
                 fixture = {
                     "fixture_id": "fx1",
@@ -554,6 +586,22 @@ class TestBehavioralEquivalenceMinDeltaNonNumeric(unittest.TestCase):
                 )
                 self.assertEqual(proc.returncode, 2, f"stderr={proc.stderr!r}")
                 self.assertIn("minimum_meaningful_delta must be", proc.stderr)
+
+    def test_min_delta_non_finite_or_nonpositive(self):
+        # Codex round 2 [High]: .nan/.inf defeat the §17.1.1 tolerance ceiling
+        # (`x > nan` is always False); 0/negative make it meaningless. All are
+        # rejected as a positive-finite CONFIG ERROR, not a silent pass.
+        for bad_yaml in (".nan", ".inf", "-.inf", "0", "-1"):
+            with self.subTest(bad=bad_yaml):
+                proc = self._run(bad_yaml)
+                self.assertNotIn(
+                    "Traceback (most recent call last)", proc.stderr
+                )
+                self.assertEqual(proc.returncode, 2, f"stderr={proc.stderr!r}")
+                self.assertIn(
+                    "minimum_meaningful_delta must be a positive finite number",
+                    proc.stderr,
+                )
 
 
 # --- CLASS D: I/O / encoding failures are clean errors, never tracebacks ------
@@ -950,7 +998,9 @@ class TestMigrateLedgerIdPathTraversal(unittest.TestCase):
     now rejects an unsafe id (SystemExit) before any escaping write."""
 
     def test_traversal_id_rejected(self):
-        for bad in ("../escaped", "a/b", "..", "."):
+        # traversal/separators, plus the filesystem-boundary tracebacks codex
+        # round 2 found: embedded NUL (ValueError) and an overlong id (OSError).
+        for bad in ("../escaped", "a/b", "..", ".", "bad\x00id", "x" * 201):
             with self.subTest(bad=bad):
                 with tempfile.TemporaryDirectory(prefix="mig-trav-") as tmp:
                     state = Path(tmp) / "state"
@@ -974,6 +1024,43 @@ class TestMigrateLedgerIdPathTraversal(unittest.TestCase):
                     # Nothing escaped the temp dir's state/ tree.
                     escaped = list(Path(tmp).rglob("escaped*"))
                     self.assertEqual(escaped, [], f"escaped writes: {escaped}")
+
+
+class TestIsSafeFilenameStem(unittest.TestCase):
+    """The shared _ledger_common predicate that backs both the verifier
+    request_id guard and the migrator ledger-id guard. One allowlist must reject
+    path separators, `.`/`..`, embedded NUL / control chars, whitespace, empty,
+    non-strings, and overlong stems while accepting normal ids."""
+
+    def test_accepts_normal_ids(self):
+        for ok in (
+            "foo",
+            "20260518-220000-bbb008-promotion-request",
+            "a.b_c-d",
+            "x" * 200,  # exactly the cap
+        ):
+            with self.subTest(ok=ok):
+                self.assertTrue(is_safe_filename_stem(ok))
+
+    def test_rejects_unsafe(self):
+        for bad in (
+            "",
+            ".",
+            "..",
+            "a/b",
+            "../escaped",
+            "a/../b",
+            "bad\x00id",  # embedded NUL -> ValueError at write time
+            "bad\nid",  # control char
+            "has space",
+            "x" * 201,  # over the cap
+            42,
+            None,
+            ["a"],
+            True,
+        ):
+            with self.subTest(bad=bad):
+                self.assertFalse(is_safe_filename_stem(bad))
 
 
 if __name__ == "__main__":

@@ -58,6 +58,7 @@ except ImportError:
 try:
     from _ledger_common import (
         _canonical_record_bytes,
+        is_safe_filename_stem,
         resolve_val_queries,
         validate_against_schema,
     )
@@ -65,6 +66,7 @@ except ImportError:  # pragma: no cover - path shim for direct invocation
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
     from _ledger_common import (
         _canonical_record_bytes,
+        is_safe_filename_stem,
         resolve_val_queries,
         validate_against_schema,
     )
@@ -154,19 +156,6 @@ def _is_int(value: Any) -> bool:
 VALID_ENFORCEMENT_MECHANISMS = frozenset(
     {"ci_enforced", "pre_receive", "oop_verifier", "container_ro", "none"}
 )
-
-
-def _is_safe_filename_stem(value: Any) -> bool:
-    """True iff ``value`` is a non-empty string usable as a single path component
-    (no directory separators, not ``.``/``..``/absolute). Untrusted ids that
-    become packet/shard filenames must pass this or a malformed request could
-    traceback (``a/b`` -> missing parent dir) or write OUTSIDE the output dir
-    (``../escaped``)."""
-    return (
-        isinstance(value, str)
-        and value not in ("", ".", "..")
-        and Path(value).name == value
-    )
 
 
 def _skeptic_verdict(text: str) -> "str | None":
@@ -894,7 +883,10 @@ def write_packet_files(
         json_path.write_text(
             json.dumps(packet, indent=2, sort_keys=True), encoding="utf-8"
         )
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
+        # ValueError covers an embedded NUL in the stem; OSError covers a full
+        # disk / overlong name. request_id is already stem-validated, so this is
+        # defense in depth.
         raise SystemExit(f"CONFIG ERROR: cannot write packet {json_path}: {exc}")
 
     md_lines = [
@@ -952,7 +944,7 @@ def write_packet_files(
     ]
     try:
         md_path.write_text("\n".join(md_lines), encoding="utf-8")
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         raise SystemExit(f"CONFIG ERROR: cannot write packet {md_path}: {exc}")
     return json_path, md_path
 
@@ -1004,10 +996,10 @@ def main(argv: list[str]) -> int:
     # An untrusted id with path separators tracebacks (`a/b` -> missing parent)
     # or escapes --out-dir (`../escaped`). Validate it up front; absent is
     # tolerated (a safe default stem is used downstream).
-    if "request_id" in request and not _is_safe_filename_stem(request["request_id"]):
+    if "request_id" in request and not is_safe_filename_stem(request["request_id"]):
         raise SystemExit(
             "CONFIG ERROR: request_id must be a non-empty string usable as a "
-            "filename (no path separators, not '.'/'..'), got "
+            "filename (only [A-Za-z0-9._-], <=200 chars, not '.'/'..'), got "
             f"{request['request_id']!r}"
         )
     ledger = load_ledger(args.ledger)

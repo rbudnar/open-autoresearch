@@ -88,16 +88,22 @@ EvaluatorFn = Callable[[Any], Any]
 
 
 def _is_number(value: Any) -> bool:
-    """True iff ``value`` is a real int/float metric value.
+    """True iff ``value`` is a FINITE real int/float metric value.
 
     The single numeric-membership predicate for this script: every site that
     feeds an untrusted value into ``abs()``/``math.isnan()``/``float()`` (golden
     fixture values, the evaluator's returns, minimum_meaningful_delta, declared
     tolerances) routes through here, so the "what counts as a number" rule is
     defined once. ``bool`` is excluded — it is an ``int`` subclass but a stray
-    ``true``/``false`` is never a valid metric value or tolerance.
+    ``true``/``false`` is never a valid metric value or tolerance. ``nan``/
+    ``inf``/``-inf`` are excluded too: a non-finite tolerance or
+    minimum_meaningful_delta silently defeats the §17.1.1 sanity check
+    (``effective_tol > 0.1 * abs(nan)`` is always False), so a wildly loose
+    tolerance would be accepted and a drifted evaluator could attest as passing.
     """
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return math.isfinite(value)
 
 
 # --- Tolerance lookup ---------------------------------------------------------
@@ -151,13 +157,19 @@ def metric_index(metrics_yaml: dict[str, Any]) -> dict[str, dict[str, str]]:
 
 
 def _tolerance_float(metric_name: str, kind: str, value: Any) -> float:
-    """Coerce a declared rtol/atol to float, failing with a clean CONFIG ERROR
-    (not a raw ValueError/TypeError traceback) when the metrics.yaml value is
-    non-numeric (e.g. ``rtol: "abc"`` or a list/mapping)."""
+    """Coerce a declared rtol/atol to a non-negative float, failing with a clean
+    CONFIG ERROR (not a raw ValueError/TypeError traceback) when the metrics.yaml
+    value is non-numeric (``rtol: "abc"`` / a list), non-finite (``.nan``/
+    ``.inf``), or negative."""
     if not _is_number(value):
         raise SystemExit(
-            f"CONFIG ERROR: tolerance for '{metric_name}' {kind} must be numeric "
-            f"(got {value!r})"
+            f"CONFIG ERROR: tolerance for '{metric_name}' {kind} must be a "
+            f"finite number (got {value!r})"
+        )
+    if value < 0:
+        raise SystemExit(
+            f"CONFIG ERROR: tolerance for '{metric_name}' {kind} must be "
+            f"non-negative (got {value!r})"
         )
     return float(value)
 
@@ -337,7 +349,7 @@ def check_fixture(
         if not _is_number(golden):
             raise SystemExit(
                 f"CONFIG ERROR: fixture {fixture_id} golden for metric "
-                f"'{metric_name}' must be numeric, got {type(golden).__name__}"
+                f"'{metric_name}' must be a finite number, got {golden!r}"
             )
         observed = observed_outputs.get(metric_name)
         if observed is None:
@@ -352,8 +364,8 @@ def check_fixture(
         # evaluator-returned-a-non-dict path above — not a CONFIG ERROR.
         if not _is_number(observed):
             failures.append(
-                f"{fixture_id}.{metric_name}: evaluator returned non-numeric "
-                f"value {observed!r} (expected a number)"
+                f"{fixture_id}.{metric_name}: evaluator returned non-finite/"
+                f"non-numeric value {observed!r} (expected a finite number)"
             )
             continue
         info = metric_idx.get(metric_name)
@@ -460,15 +472,19 @@ def main(argv: list[str]) -> int:
     primary = primary if isinstance(primary, dict) else {}
     primary_name = primary.get("name")
     primary_min_delta = primary.get("minimum_meaningful_delta")
-    # minimum_meaningful_delta flows into sanity_check_tolerance's
-    # abs(minimum_meaningful_delta) (the §17.1.1 tolerance ceiling). A present-
-    # but-non-numeric value (str/list/dict from an untrusted metrics.yaml) would
-    # crash abs() with TypeError; reject it here as a clean CONFIG ERROR. Absent
-    # (None) is tolerated — the sanity check is then simply skipped.
-    if primary_min_delta is not None and not _is_number(primary_min_delta):
+    # minimum_meaningful_delta is the §17.1.1 tolerance ceiling
+    # (effective_tol <= 0.1 * abs(min_delta)). A non-numeric value crashes abs()
+    # with TypeError; a non-finite (.nan/.inf) or non-positive value silently
+    # defeats the ceiling (`x > nan` is always False; `<= 0` makes every
+    # tolerance "too loose" or, with abs(), nonsensical). Require a positive
+    # finite number when present; absent (None) is tolerated — the sanity check
+    # is then simply skipped.
+    if primary_min_delta is not None and (
+        not _is_number(primary_min_delta) or primary_min_delta <= 0
+    ):
         sys.stderr.write(
-            "CONFIG ERROR: primary_metric.minimum_meaningful_delta must be "
-            f"numeric, got {type(primary_min_delta).__name__}\n"
+            "CONFIG ERROR: primary_metric.minimum_meaningful_delta must be a "
+            f"positive finite number, got {primary_min_delta!r}\n"
         )
         return 2
 
