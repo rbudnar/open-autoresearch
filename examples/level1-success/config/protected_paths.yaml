@@ -1,4 +1,4 @@
-protocol_version: "0.4"
+protocol_version: "0.5"
 
 # With enforcement.yaml mechanism: none, these are honor-system declarations
 # only. The campaign documents what would be protected if an out-of-band

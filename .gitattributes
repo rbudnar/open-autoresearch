@@ -1,0 +1,9 @@
+# Keep protocol docs, JSON, YAML, and scripts stable across platforms.
+* text=auto eol=lf
+
+# Preserve binary artifacts if future examples add small fixtures.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.zip binary

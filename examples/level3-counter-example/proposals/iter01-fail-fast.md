@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.4"
+protocol_version: "0.5"
 proposal_id: "20260518-100000-bbb001"
 branch: "loss_objective"
 parent_proposal_id: "baseline"

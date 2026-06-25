@@ -6,15 +6,23 @@ Thanks for considering a contribution. This repo's value comes from rigor, so co
 
 | Artifact | Editable by | Review required |
 |---|---|---|
+| `AGENTS.md`, `docs/README.md`, `docs/dogfooding.md`, `docs/testing.md`, `docs/runtime-safety.md`, `docs/harness-version.json`, `docs/harness-metrics-baseline.json`, `scripts/check_repo_harness.py`, `scripts/harness_metrics.py`, `scripts/quality_gate.py` | Maintainers + reviewed contributors | One CODEOWNER approval; repo harness check green |
 | `PROTOCOL.md` | Maintainers only via RFC | Two CODEOWNERS + RFC link in commit message |
 | `template/scripts/**` | Maintainers + reviewed contributors | CODEOWNERS approval |
-| `template/config/*.example.yaml` | Maintainers + reviewed contributors | CODEOWNERS approval |
+| `template/config/*.yaml.example` | Maintainers + reviewed contributors | CODEOWNERS approval |
 | `template/templates/*.md` | Maintainers + reviewed contributors | CODEOWNERS approval |
 | `examples/**` | Contributors | One CODEOWNERS approval; validate-examples CI green |
 | `docs/**` | Contributors | One maintainer review |
 | `README.md`, `MIGRATION.md`, `CHANGELOG.md` | Contributors | One maintainer review |
 
 CI enforces this via `.github/workflows/protect-protocol.yml` per `PROTOCOL.md` §3.1.1. The repo dogfoods its own protocol.
+
+Run `python scripts/quality_gate.py` after changing repo-facing harness
+guidance, protocol-version references, template config, example docs, verifier
+fixtures, or CI workflow routing. Use `python scripts/check_repo_harness.py`
+for a fast repo-harness invariant check and
+`python scripts/harness_metrics.py --baseline docs/harness-metrics-baseline.json`
+for the minimal local metrics baseline.
 
 ## Proposing a protocol change
 

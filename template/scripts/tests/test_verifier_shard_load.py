@@ -94,7 +94,7 @@ class TestReferencedHashesMatchGolden(unittest.TestCase):
         self.assertNotIn("ledger_id", skeptic)
         self.assertEqual(
             skeptic["content_sha256"],
-            "3fb818448fc0ec7d80f36ed42334d0de0871870c5606841637c881b969c9ce7f",
+            "f389c6ea0ce5c004eb3100c4c22d666573c8fcb9329ff79a890a6afeec1155b5",
         )
 
     def test_protocol_version_stamped_0_5(self):

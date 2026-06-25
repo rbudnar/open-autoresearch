@@ -94,9 +94,10 @@ budgets:
     L5: {max_llm_tokens:  8000000, max_tool_calls: 1500, max_gpu_hours: 30}
 
 # --- Memory bounds (§3.7, §17.5.4) --------------------------------------------
+# Protocol 0.5 uses immutable sharded records in state/ledger/; there is no
+# ledger rotation config.
 memory:
   max_playbook_tokens: 8000
-  ledger_rotation_iterations: 200
 
 # --- Current maturity level (§24) ---------------------------------------------
 # Bump this as you graduate from Level 1 to higher levels. Determines which run

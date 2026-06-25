@@ -1,6 +1,6 @@
 # examples/ — completed campaign artifacts
 
-Two example campaigns showing what AutoResearch++ v0.4 looks like in practice. Both run on a fictional toy task (a tiny synthetic regression model) to keep the protocol's shape visible without the noise of a real ML pipeline.
+Two example campaigns showing what AutoResearch++ v0.5 looks like in practice. Both run on a fictional toy task (a tiny synthetic regression model) to keep the protocol's shape visible without the noise of a real ML pipeline.
 
 ## Why two examples
 

@@ -1,4 +1,4 @@
-protocol_version: "0.4"
+protocol_version: "0.5"
 
 # CI-enforced enforcement: protected_paths.yaml is committed to a main branch
 # with branch protection; CODEOWNERS requires a non-agent reviewer for any

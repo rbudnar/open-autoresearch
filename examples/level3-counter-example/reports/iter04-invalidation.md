@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.4"
+protocol_version: "0.5"
 report_id: "20260518-150000-bbb004-invalidation"
 ledger_entry_id: "20260518-150000-bbb004-invalidation"
 event_type: "evaluator_drift_invalidation"
