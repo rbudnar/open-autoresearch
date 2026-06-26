@@ -297,6 +297,18 @@ def check_ledger_rotation_drift() -> None:
             fail(f"{path} still contains active stale ledger-rotation guidance: {snippet!r}")
 
 
+def check_migration_guidance_drift() -> None:
+    forbidden_snippets = [
+        (
+            "MIGRATION.md",
+            "Path-based hashes (e.g. a `skeptic_review` reference by file path) do NOT change.",
+        ),
+    ]
+    for path, snippet in forbidden_snippets:
+        if exists(path) and snippet in read(path):
+            fail(f"{path} still contains stale migration guidance: {snippet!r}")
+
+
 def check_ci_wiring() -> None:
     workflow = ".github/workflows/protect-protocol.yml"
     if not exists(workflow):
@@ -340,6 +352,7 @@ def main(argv: list[str] | None = None) -> int:
         check_metrics_baseline()
     check_version_consistency()
     check_ledger_rotation_drift()
+    check_migration_guidance_drift()
     check_ci_wiring()
 
     for warning in warnings:
