@@ -107,7 +107,7 @@ def github_pr_diff_range() -> list[str]:
     base = pull_request.get("base", {}).get("sha")
     head = pull_request.get("head", {}).get("sha")
     if isinstance(base, str) and isinstance(head, str):
-        return [base, head]
+        return [f"{base}...{head}"]
     return []
 
 
