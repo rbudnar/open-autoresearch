@@ -42,7 +42,7 @@ Each major bump ships:
 2. A `migrate_to_vX.Y.py` script template (idempotent, dry-run capable).
 3. A grace period where the new version reads old artifacts and emits deprecation warnings.
 
-The first migration entry is for v0.1 → v0.2: re-read every cited paper in §2 and update its status tag; add `protocol_version: 0.4` to all artifacts; pick a cost tier in §6.1.
+The current migration path is maintained in `MIGRATION.md`; v0.4 → v0.5 moves committed ledger source records into `state/ledger/<id>.json`, regenerates derived aggregates, and stamps migrated artifacts with `protocol_version: 0.5`.
 
 ### 0.4 "Implementation-ready" honesty
 
@@ -82,7 +82,7 @@ Do these in order. Each step references the section you need, but you only need 
 
 1. **Pick a cost tier (§6.1).** Time one full baseline run. Look up the tier. This single decision configures seed counts, evidence labels, and budgets throughout the rest of the protocol.
 2. **Declare enforcement (§3.1.1).** Pick one of the 4 enforcement patterns or `mechanism: none` (and accept the in-band-only label). Write `enforcement.yaml`. Without this step, anti-cheating is honor-system and you must communicate that honestly in every report.
-3. **Define the scorecard (§6.1).** Write `metrics.yaml` with: primary metric, 2-4 secondaries, 1-3 guardrails, the cost tier from step 1, the statistical defaults (§13.2.1 will fill in if you omit), `max_playbook_tokens`, ledger rotation interval.
+3. **Define the scorecard (§6.1).** Write `metrics.yaml` with: primary metric, 2-4 secondaries, 1-3 guardrails, the cost tier from step 1, the statistical defaults (§13.2.1 will fill in if you omit), `max_playbook_tokens`, validation-exposure budget, and campaign budgets.
 4. **Define splits (§6.3.1) and snapshot data (§6.3).** Write `data/splits/MANIFEST.json` — `mode: frozen` (content-hash the split files; the recommended default) or `mode: declarative` (a deterministic split rule + seed + `dataset_fingerprint`, for growing datasets). Either way the manifest is read-only via §3.1.1 enforcement.
 5. **Establish baseline (§6.3).** Run baseline at the cost-tier seed count. Save reproducibility metadata (§17.5.1). Write a baseline report including known weaknesses.
 6. **Write 3-5 golden fixtures (§17.1.1).** Pick 3-5 representative inputs; record the current evaluator's outputs as ground truth. This is your tripwire for evaluator drift.
@@ -214,7 +214,7 @@ A candidate is not promotable until the system has identified the minimal change
 
 Two memory stores:
 
-1. **Experiment ledger:** append-only, full detail, **rotated per §17.5.4** to prevent unbounded growth.
+1. **Experiment ledger:** append-only source records, one immutable `state/ledger/<id>.json` file per experiment (§14.1 / §17.5.4).
 2. **Research playbook:** compact, curated, bounded by `max_playbook_tokens` from `metrics.yaml`.
 
 ---
@@ -429,7 +429,6 @@ statistics:
 
 memory:
   max_playbook_tokens: 8000
-  ledger_rotation_iterations: 200
 ```
 
 ### 6.2 Lock evaluator and protected paths (per §3.1.1)
@@ -1533,7 +1532,7 @@ Rules:
 6. Use seed counts from the host's cost tier (§6.1).
 7. Maintain a research tree (§15).
 8. Update the immutable ledger and compact playbook after every run; respect
-   ledger rotation (§17.5.4) and playbook token budget.
+   the sharded-ledger source-of-truth model (§17.5.4) and playbook token budget.
 9. Treat surprising wins as suspicious until ablated and reproduced.
 10. Promotion requires ALL §18 gates (now 17 criteria) AND the achieved
     role-separation level (§5.0) MUST be recorded; a promotion packet (§10.5)
@@ -1707,7 +1706,7 @@ A team starting at Level 1 needs:
 - [ ] `metrics.yaml` with a cost tier (§6.1), per-metric direction, and exposure budget (§17.6)
 - [ ] baseline report + reproducibility metadata (§17.5.1)
 - [ ] proposal template (§10)
-- [ ] experiment ledger (with rotation per §17.5.4)
+- [ ] sharded experiment ledger (`state/ledger/<id>.json`; §17.5.4)
 - [ ] compact playbook (with token budget)
 - [ ] staged run script (smoke / proxy / full)
 - [ ] candidate-vs-baseline comparison using §13.2.1 default rule (direction-aware)
@@ -1735,7 +1734,7 @@ Do not add self-modifying meta-agents until these basics work.
 - single Research Director + non-LLM Experiment Runner
 - config/code patches only; one switch per candidate (§11.1.1)
 - evaluator boundary enforced per §3.1.1
-- ledger + playbook with rotation
+- sharded ledger + compact playbook
 - smoke / proxy / full evaluation
 - §13.2.1 statistical rule (direction-aware)
 - §17.1.1 behavioral-equivalence fixtures (tolerance-based)
@@ -1799,7 +1798,7 @@ Do not jump to Level 5 before Level 1-3 are reliable.
 - promoting single-seed wins (at any cost tier)
 - accepting surprising gains without ablation
 - relying on self-reported results when out-of-band enforcement is absent (§3.1.1)
-- unbounded memory growth (ledger rotates per §17.5.4)
+- unbounded memory growth (sharded immutable records plus bounded derived artifacts; §17.5.4)
 - literature-free architecture changes (in live mode)
 - claiming novelty without evidence (offline mode blocks novelty claims)
 - pretending in-band controls enforce when they're advisory (§17.1)

@@ -8,8 +8,11 @@
 # Protocol document — the centerpiece artifact. Two CODEOWNER approvals required
 # (enforced by branch protection rules, not by this file).
 /PROTOCOL.md                @rbudnar
+/.gitattributes             @rbudnar
+/AGENTS.md                  @rbudnar
 /MIGRATION.md               @rbudnar
 /CHANGELOG.md               @rbudnar
+/README.md                  @rbudnar
 
 # Schemas embedded in the protocol — changes to scaffolding that imply protocol
 # changes require maintainer review.
@@ -20,11 +23,26 @@
 
 # Reference scripts — verifier and behavioral-equivalence are security-relevant.
 /template/scripts/**        @rbudnar
+/scripts/check_repo_harness.py @rbudnar
+/scripts/harness_metrics.py @rbudnar
+/scripts/quality_gate.py    @rbudnar
+/scripts/weekly_quality_report.py @rbudnar
+/scripts/tests/**           @rbudnar
 
 # Example campaigns — must validate against the protocol via CI.
 /examples/**                @rbudnar
 
 # Docs — light review.
+/docs/README.md             @rbudnar
+/docs/architecture.md       @rbudnar
+/docs/dogfooding.md         @rbudnar
+/docs/harness-metrics-baseline.json @rbudnar
+/docs/harness-version.json  @rbudnar
+/docs/host-bootstrap-agents.md @rbudnar
+/docs/faq.md                @rbudnar
+/docs/runtime-safety.md     @rbudnar
+/docs/testing.md            @rbudnar
+/docs/plans/**              @rbudnar
 /docs/threat-model.md       @rbudnar
 /docs/adoption-levels.md    @rbudnar
 

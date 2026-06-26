@@ -87,14 +87,14 @@ class TestReferencedHashesMatchGolden(unittest.TestCase):
         for ref in self.refs["ablation_runs"]:
             self._check(ref)
 
-    def test_skeptic_review_is_path_based_unchanged(self):
+    def test_skeptic_review_path_hash_matches_migrated_artifact(self):
         # The path-based skeptic_review hash is NOT a ledger record; it must not
-        # carry a ledger_id and stays as the frozen path-content hash.
+        # carry a ledger_id and must match the migrated path-content hash.
         skeptic = self.refs["skeptic_review"]
         self.assertNotIn("ledger_id", skeptic)
         self.assertEqual(
             skeptic["content_sha256"],
-            "3fb818448fc0ec7d80f36ed42334d0de0871870c5606841637c881b969c9ce7f",
+            "1cf55f6754cc171c139ef50f3dd5a03026a9ab4c65d60524766632651596d0e9",
         )
 
     def test_protocol_version_stamped_0_5(self):

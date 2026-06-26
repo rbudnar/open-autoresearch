@@ -1,4 +1,4 @@
-protocol_version: "0.4"
+protocol_version: "0.5"
 cost_tier: small
 max_gpu_hours_per_candidate: 3
 
@@ -56,6 +56,5 @@ budgets:
 
 memory:
   max_playbook_tokens: 8000
-  ledger_rotation_iterations: 200
 
 maturity_level: 1

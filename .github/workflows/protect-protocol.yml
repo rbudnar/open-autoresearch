@@ -18,16 +18,35 @@ on:
   pull_request:
     paths:
       - 'PROTOCOL.md'
+      - '.gitattributes'
+      - 'AGENTS.md'
       - 'MIGRATION.md'
       - 'CHANGELOG.md'
+      - 'README.md'
       - 'template/PROTOCOL_VERSION'
       - 'template/schema/**'
       - 'template/config/**'
       - 'template/scripts/**'
       - 'template/templates/**'
       - 'examples/**'
+      - 'scripts/check_repo_harness.py'
+      - 'scripts/harness_metrics.py'
+      - 'scripts/quality_gate.py'
+      - 'scripts/weekly_quality_report.py'
+      - 'scripts/tests/**'
+      - 'docs/README.md'
+      - 'docs/architecture.md'
+      - 'docs/dogfooding.md'
+      - 'docs/harness-version.json'
+      - 'docs/harness-metrics-baseline.json'
+      - 'docs/host-bootstrap-agents.md'
+      - 'docs/faq.md'
+      - 'docs/runtime-safety.md'
+      - 'docs/testing.md'
+      - 'docs/plans/**'
       - 'docs/threat-model.md'
       - 'docs/adoption-levels.md'
+      - '.github/workflows/weekly-quality-report.yml'
       - 'CODEOWNERS'
       - '.github/workflows/**'
 
@@ -53,18 +72,37 @@ jobs:
           echo "Diffing $base...$head"
           changed_protected=$(git diff --name-only "$base" "$head" -- \
             'PROTOCOL.md' \
+            '.gitattributes' \
+            'AGENTS.md' \
             'MIGRATION.md' \
             'CHANGELOG.md' \
+            'README.md' \
             'template/PROTOCOL_VERSION' \
-            'template/schema/*' \
-            'template/config/*' \
-            'template/scripts/*' \
-            'template/templates/*' \
-            'examples/*' \
+            'template/schema/' \
+            'template/config/' \
+            'template/scripts/' \
+            'template/templates/' \
+            'examples/' \
+            'scripts/check_repo_harness.py' \
+            'scripts/harness_metrics.py' \
+            'scripts/quality_gate.py' \
+            'scripts/weekly_quality_report.py' \
+            'scripts/tests/' \
+            'docs/README.md' \
+            'docs/architecture.md' \
+            'docs/dogfooding.md' \
+            'docs/harness-version.json' \
+            'docs/harness-metrics-baseline.json' \
+            'docs/host-bootstrap-agents.md' \
+            'docs/faq.md' \
+            'docs/runtime-safety.md' \
+            'docs/testing.md' \
+            'docs/plans/' \
             'docs/threat-model.md' \
             'docs/adoption-levels.md' \
+            '.github/workflows/weekly-quality-report.yml' \
             'CODEOWNERS' \
-            '.github/workflows/*' \
+            '.github/workflows/' \
             || true)
           if [ -z "$changed_protected" ]; then
             echo "No protected paths changed."
@@ -89,6 +127,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install minimal deps
+        run: pip install pyyaml
+      - name: Repo quality gate
+        run: python scripts/quality_gate.py
       - name: PROTOCOL_VERSION file matches PROTOCOL.md header
         run: |
           set -euo pipefail

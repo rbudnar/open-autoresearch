@@ -1,6 +1,6 @@
 # examples/ — completed campaign artifacts
 
-Two example campaigns showing what AutoResearch++ v0.4 looks like in practice. Both run on a fictional toy task (a tiny synthetic regression model) to keep the protocol's shape visible without the noise of a real ML pipeline.
+Two example campaigns showing what AutoResearch++ v0.5 looks like in practice. Both run on a fictional toy task (a tiny synthetic regression model) to keep the protocol's shape visible without the noise of a real ML pipeline.
 
 ## Why two examples
 
@@ -30,19 +30,29 @@ Train a small MLP to predict a synthetic regression target. The val set has 10,0
 
 ## Re-running the verifier against the examples
 
-After signing key setup (see [`../template/scripts/verifier/`](../template/scripts/verifier/)):
+For the repo-maintainer smoke path, run:
+
+```bash
+python scripts/quality_gate.py --only-verifier
+```
+
+The equivalent direct verifier command is:
 
 ```bash
 # Level-3 example — should produce status: rejected, since the request
 # deliberately fails one of the §10.5 rules.
-OPEN_AUTORESEARCH_VERIFIER_KEY=<32+ byte secret> \
-  python ../template/scripts/verifier/verify_request.py \
-    --request level3-counter-example/proposals/iter-08-promotion-request.json \
-    --ledger level3-counter-example/state/experiment_ledger.jsonl \
-    --metrics level3-counter-example/config/metrics.yaml \
-    --enforcement level3-counter-example/config/enforcement.yaml \
-    --out-dir /tmp/oar-example-out \
-    --verifier-identity "smoke-test"
+python ../../template/scripts/regenerate_state.py --state-dir state/
+python ../../template/scripts/verifier/verify_request.py \
+  --request proposals/iter08-promotion-request.json \
+  --ledger state/ledger/ \
+  --metrics config/metrics.yaml \
+  --enforcement config/enforcement.yaml \
+  --out-dir /tmp/oar-example-out \
+  --verifier-identity "smoke-test" \
+  --unsigned
 ```
 
-The `validate-examples.yml` CI workflow in this repo runs exactly this and asserts the expected status.
+Run the direct command from `examples/level3-counter-example/`. The
+`--unsigned` mode intentionally emits an in-band-only, `not_deployable` packet
+for local smoke testing; signed verifier packets require the signing setup under
+[`../template/scripts/verifier/`](../template/scripts/verifier/).

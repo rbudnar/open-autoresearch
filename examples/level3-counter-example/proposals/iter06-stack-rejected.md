@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.4"
+protocol_version: "0.5"
 proposal_id: "20260518-170000-bbb006-stack-rejected"
 branch: "architecture+loss_objective"
 parent_proposal_id: "20260518-160000-bbb005-regrade"

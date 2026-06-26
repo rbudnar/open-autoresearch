@@ -4,9 +4,9 @@ A disciplined protocol for autonomous ML model improvement, plus the scaffolding
 
 > **AI agent reading this?** Start with [`AGENTS.md`](./AGENTS.md). It speaks to you directly and tells you exactly what to do, in what order, with which questions to ask the human.
 
-**Centerpiece:** [`PROTOCOL.md`](./PROTOCOL.md) — AutoResearch++ v0.4, a 1700-line specification for autonomous research loops with honest separation between in-band-advisory and out-of-band-enforced controls.
+**Centerpiece:** [`PROTOCOL.md`](./PROTOCOL.md) — AutoResearch++ v0.5, a 1700-line specification for autonomous research loops with honest separation between in-band-advisory and out-of-band-enforced controls.
 
-**Protocol version shipped:** `0.4` (final pre-1.0 candidate).
+**Protocol version shipped:** `0.5` (final pre-1.0 candidate).
 
 ---
 
@@ -35,7 +35,7 @@ A bootstrapping template that any AI coding/research agent — Claude Code, Code
 3. Pick an enforcement mechanism in `autoresearch/config/enforcement.yaml.example` and rename to `enforcement.yaml`. If you have no CI / no out-of-band machinery, set `mechanism: none` and accept that your campaign results will carry `enforcement: in-band-only` and `not_deployable: true`.
 4. Fill in `autoresearch/config/metrics.yaml.example` — cost tier, primary metric (with direction, aggregation, eval_dtype), guardrails, exposure budget, LLM/compute budgets. Rename to `metrics.yaml`.
 5. Freeze your splits (`§6.3.1` — write `data/splits/MANIFEST.json` with content hashes; protect the path).
-6. Write 3–5 golden fixtures for `behavioral_equivalence.py` (one or two representative inputs is fine to start).
+6. Write 3-5 golden fixtures for `behavioral_equivalence.py`.
 7. Run your first proposal under the Level-1 path. Highest available label at Level 1 is `level1_branch_winner`. Graduate to Level 3 (ablation + Skeptic + non-agent verifier) before attempting `promoted`.
 
 ## Reading order
@@ -47,6 +47,10 @@ A bootstrapping template that any AI coding/research agent — Claude Code, Code
 | Maintainer or contributor | `CONTRIBUTING.md` → `PROTOCOL.md` §0 (versioning policy) |
 | Curious about failure modes | `examples/level3-counter-example/` → `PROTOCOL.md` §22a |
 
+Repo maintainers should use [`docs/README.md`](./docs/README.md) as the docs
+router and run `python scripts/quality_gate.py` before closing harness,
+template, example, verifier, or workflow changes.
+
 ## Why this exists
 
 Karpathy's [autoresearch](https://github.com/karpathy/autoresearch) demonstrated the value of a tight autonomous loop. The 2026 literature (TREX, AlphaLab, MARS, AI Scientist v2, etc.) added tree search, durable memory, role specialization, and explicit ablation discipline. This protocol synthesizes those ideas with an opinionated stance on what's enforceable vs. honor-system.
@@ -55,7 +59,7 @@ The single largest distinction from prior art: this protocol **does not promise*
 
 ## Status
 
-`v0.4` is the final pre-1.0 protocol candidate. v1.0 will be tagged after at least three independent host projects have completed end-to-end campaigns and reported results.
+`v0.5` is the final pre-1.0 protocol candidate. v1.0 will be tagged after at least three independent host projects have completed end-to-end campaigns and reported results.
 
 The repo is dogfooded — `PROTOCOL.md`, the example artifacts, and the reference scripts are protected by `CODEOWNERS` and CI per `§3.1.1` of the protocol. See [`docs/threat-model.md`](./docs/threat-model.md).
 

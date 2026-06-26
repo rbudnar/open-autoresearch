@@ -60,7 +60,7 @@ It's symmetric, simple, and adequate when the verifier and the consumer of the p
 
 ## What if the protocol itself is wrong?
 
-The protocol is `v0.4`, marked pre-1.0, with explicit breaking-change provisions. If you find a real protocol-level flaw, open a Protocol RFC per `CONTRIBUTING.md`. We aim for the v1.0 release after at least three independent host projects have completed end-to-end campaigns.
+The protocol is `v0.5`, marked pre-1.0, with explicit breaking-change provisions. If you find a real protocol-level flaw, open a Protocol RFC per `CONTRIBUTING.md`. We aim for the v1.0 release after at least three independent host projects have completed end-to-end campaigns.
 
 ## Why no tests for the reference scripts?
 

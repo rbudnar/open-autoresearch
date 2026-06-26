@@ -4,7 +4,7 @@ A Level-3 campaign that **does not promote anything**. The counter-example exist
 
 ## What this teaches
 
-This campaign exercises every failure mode the v0.4 protocol is designed to surface:
+This campaign exercises every failure mode the v0.5 protocol is designed to surface:
 
 | Iteration | Failure mode demonstrated | §reference |
 |---|---|---|

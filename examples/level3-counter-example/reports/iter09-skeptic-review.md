@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.4"
+protocol_version: "0.5"
 review_id: "20260518-210000-bbb009"
 candidate_proposal_id: "20260518-130000-bbb003"
 candidate_ledger_entries:

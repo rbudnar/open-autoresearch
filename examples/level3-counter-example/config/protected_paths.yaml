@@ -1,4 +1,4 @@
-protocol_version: "0.4"
+protocol_version: "0.5"
 
 protected_paths:
   - data/splits/**

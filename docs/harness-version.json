@@ -1,0 +1,48 @@
+{
+  "templateVersion": "0.1.0",
+  "source": "github.com/rbudnar/harness-engineering-bootstrap",
+  "sourceRelease": "github:rbudnar/harness-engineering-bootstrap#main",
+  "installedAt": "2026-06-25",
+  "installMode": "bootstrap",
+  "officialInstallCommands": [
+    "npm exec --yes --package \"github:rbudnar/harness-engineering-bootstrap#main\" -- harness-bootstrap init -- --repo <repo> --json",
+    "node <heb-checkout>/scripts/harness-bootstrap-plan.mjs init --repo <repo> --json"
+  ],
+  "tagInstallAttempt": {
+    "sourceRelease": "github:rbudnar/harness-engineering-bootstrap#v0.1.0",
+    "status": "failed",
+    "reason": "The v0.1.0 tag does not contain package.json, so npm cannot install it as a package."
+  },
+  "acceptedControls": [
+    "AGENTS.md repo-maintainer entrypoint",
+    "docs/README.md task router",
+    "docs/architecture.md architecture orientation",
+    "docs/testing.md validation guide",
+    "docs/runtime-safety.md execution-surface guide",
+    "docs/dogfooding.md HEB-style admission gate",
+    "scripts/check_repo_harness.py harness validator",
+    "scripts/harness_metrics.py minimal local harness metrics",
+    "scripts/quality_gate.py canonical local quality gate",
+    "scripts/weekly_quality_report.py scheduled quality report",
+    ".github/workflows/weekly-quality-report.yml weekly automation"
+  ],
+  "rejectedOrDeferredModules": [
+    "data-contracts",
+    "repo-contracts",
+    "internal-data-store-docs",
+    "pr-workflow-metrics",
+    "long-running-handoff",
+    "url-context-map",
+    "evidence-packs",
+    "health-report",
+    "code-search-adapter"
+  ],
+  "validationEvidence": [
+    "python scripts/check_repo_harness.py",
+    "python scripts/harness_metrics.py --baseline docs/harness-metrics-baseline.json",
+    "python scripts/quality_gate.py",
+    "python scripts/weekly_quality_report.py --skip-full-scaffold-tests",
+    "Level-3 counter-example verifier returns rejected for val exposure"
+  ],
+  "rollback": "Revert the bootstrap PR and restore the previous AGENTS.md, docs, scripts, workflow, CODEOWNERS, and metadata surfaces."
+}

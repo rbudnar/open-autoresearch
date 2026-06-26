@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.4"
+protocol_version: "0.5"
 ablation_id: "20260518-190000-bbb007-factorial-report"
 candidate_proposal_id: "iter06-stack-rejected (decomposed into factorial)"
 ledger_entry_id: "20260518-190000-bbb007-factorial"

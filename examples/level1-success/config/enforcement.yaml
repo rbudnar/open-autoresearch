@@ -1,4 +1,4 @@
-protocol_version: "0.4"
+protocol_version: "0.5"
 
 # This example explicitly chooses `mechanism: none` to demonstrate honest
 # in-band-only operation. A real adoption would pick ci_enforced, pre_receive,

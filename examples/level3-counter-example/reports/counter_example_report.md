@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.4"
+protocol_version: "0.5"
 report_id: "20260518-230000-counter-example-meta"
 campaign_id: "level3-counter-example-2026-05-18"
 iterations_covered:
