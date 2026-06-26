@@ -48,6 +48,7 @@ REQUIRED_SURFACES = [
     "scripts/quality_gate.py",
     "scripts/weekly_quality_report.py",
     "scripts/tests/test_harness_metrics.py",
+    "scripts/tests/test_quality_gate.py",
     "scripts/tests/test_weekly_quality_report.py",
     ".github/workflows/protect-protocol.yml",
     ".github/workflows/weekly-quality-report.yml",

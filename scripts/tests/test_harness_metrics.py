@@ -53,6 +53,24 @@ class HarnessMetricsTests(unittest.TestCase):
     def test_required_files_match_harness_surfaces(self) -> None:
         self.assertEqual(harness_metrics.REQUIRED_FILES, check_repo_harness.REQUIRED_SURFACES)
 
+    def test_all_script_regression_tests_are_required_surfaces(self) -> None:
+        repo = Path(__file__).resolve().parents[2]
+        tracked = subprocess.run(
+            ["git", "ls-files", "-z", "--", "scripts/tests"],
+            cwd=repo,
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        test_files = {
+            rel
+            for rel in tracked.stdout.split("\0")
+            if rel and Path(rel).name.startswith("test_") and Path(rel).suffix == ".py"
+        }
+
+        self.assertLessEqual(test_files, set(check_repo_harness.REQUIRED_SURFACES))
+
     def test_baseline_shape_is_valid(self) -> None:
         failures = harness_metrics.validate_baseline(
             Path(__file__).resolve().parents[2] / "docs" / "harness-metrics-baseline.json"
