@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -28,6 +30,18 @@ class HarnessMetricsTests(unittest.TestCase):
         repo = Path(__file__).resolve().parents[2]
         scanned = {path.relative_to(repo).as_posix() for path in harness_metrics.markdown_files_for_scan(repo)}
         self.assertIn("AGENTS.md", scanned)
+
+    def test_markdown_scan_uses_tracked_files(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            repo = Path(tmp)
+            subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            (repo / "tracked.md").write_text("[ok](tracked.md)\n", encoding="utf-8")
+            (repo / "ignored.md").write_text("[bad](missing.md)\n", encoding="utf-8")
+            subprocess.run(["git", "add", "tracked.md"], cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+            scanned = {path.relative_to(repo).as_posix() for path in harness_metrics.markdown_files_for_scan(repo)}
+
+        self.assertEqual(scanned, {"tracked.md"})
 
     def test_baseline_shape_is_valid(self) -> None:
         failures = harness_metrics.validate_baseline(

@@ -107,13 +107,35 @@ def read_text(path: Path) -> str:
 
 
 def markdown_files_for_scan(repo: Path) -> list[Path]:
-    files: list[Path] = []
     resolved_repo = repo.resolve()
+    git_files = git_tracked_markdown_files(resolved_repo)
+    if git_files is not None:
+        return git_files
+
+    files: list[Path] = []
     for path in resolved_repo.rglob("*.md"):
         relative_parts = path.relative_to(resolved_repo).parts
         if ".git" in relative_parts or ".worktrees" in relative_parts:
             continue
         files.append(path)
+    return sorted(files)
+
+
+def git_tracked_markdown_files(repo: Path) -> list[Path] | None:
+    proc = subprocess.run(
+        ["git", "ls-files", "-z", "--", "*.md"],
+        cwd=repo,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if proc.returncode != 0:
+        return None
+    files = []
+    for raw in proc.stdout.split(b"\0"):
+        if not raw:
+            continue
+        rel = raw.decode("utf-8")
+        files.append(repo / rel)
     return sorted(files)
 
 
