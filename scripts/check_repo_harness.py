@@ -31,6 +31,28 @@ TEXT_ARTIFACT_SUFFIXES = {
     ".yml",
 }
 
+REQUIRED_SURFACES = [
+    ".gitattributes",
+    "AGENTS.md",
+    "CODEOWNERS",
+    "docs/README.md",
+    "docs/architecture.md",
+    "docs/dogfooding.md",
+    "docs/harness-metrics-baseline.json",
+    "docs/harness-version.json",
+    "docs/host-bootstrap-agents.md",
+    "docs/runtime-safety.md",
+    "docs/testing.md",
+    "scripts/check_repo_harness.py",
+    "scripts/harness_metrics.py",
+    "scripts/quality_gate.py",
+    "scripts/weekly_quality_report.py",
+    "scripts/tests/test_harness_metrics.py",
+    "scripts/tests/test_weekly_quality_report.py",
+    ".github/workflows/protect-protocol.yml",
+    ".github/workflows/weekly-quality-report.yml",
+]
+
 
 def read(path: str) -> str:
     return (REPO_ROOT / path).read_text(encoding="utf-8")
@@ -93,26 +115,7 @@ def extract_protocol_version() -> str | None:
 
 
 def check_required_surfaces() -> None:
-    for path in [
-        ".gitattributes",
-        "AGENTS.md",
-        "CODEOWNERS",
-        "docs/README.md",
-        "docs/architecture.md",
-        "docs/dogfooding.md",
-        "docs/harness-metrics-baseline.json",
-        "docs/harness-version.json",
-        "docs/host-bootstrap-agents.md",
-        "docs/runtime-safety.md",
-        "docs/testing.md",
-        "scripts/check_repo_harness.py",
-        "scripts/harness_metrics.py",
-        "scripts/quality_gate.py",
-        "scripts/weekly_quality_report.py",
-        "scripts/tests/test_harness_metrics.py",
-        "scripts/tests/test_weekly_quality_report.py",
-        ".github/workflows/weekly-quality-report.yml",
-    ]:
+    for path in REQUIRED_SURFACES:
         require_file(path)
 
 

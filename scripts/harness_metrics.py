@@ -13,25 +13,13 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
 
-REQUIRED_FILES = [
-    "AGENTS.md",
-    "CODEOWNERS",
-    "docs/README.md",
-    "docs/architecture.md",
-    "docs/dogfooding.md",
-    "docs/harness-version.json",
-    "docs/harness-metrics-baseline.json",
-    "docs/testing.md",
-    "docs/runtime-safety.md",
-    "scripts/check_repo_harness.py",
-    "scripts/harness_metrics.py",
-    "scripts/quality_gate.py",
-    "scripts/weekly_quality_report.py",
-    "scripts/tests/test_harness_metrics.py",
-    ".github/workflows/protect-protocol.yml",
-    ".github/workflows/weekly-quality-report.yml",
-]
+from check_repo_harness import REQUIRED_SURFACES
+
+REQUIRED_FILES = list(REQUIRED_SURFACES)
 
 
 def collect_metrics(repo: Path = REPO_ROOT, include_validator: bool = True) -> dict[str, object]:

@@ -16,6 +16,13 @@ assert SPEC and SPEC.loader
 sys.modules[SPEC.name] = harness_metrics
 SPEC.loader.exec_module(harness_metrics)
 
+CHECK_SCRIPT = Path(__file__).resolve().parents[1] / "check_repo_harness.py"
+CHECK_SPEC = importlib.util.spec_from_file_location("check_repo_harness", CHECK_SCRIPT)
+check_repo_harness = importlib.util.module_from_spec(CHECK_SPEC)
+assert CHECK_SPEC and CHECK_SPEC.loader
+sys.modules[CHECK_SPEC.name] = check_repo_harness
+CHECK_SPEC.loader.exec_module(check_repo_harness)
+
 
 class HarnessMetricsTests(unittest.TestCase):
     def test_collect_metrics_has_required_shape(self) -> None:
@@ -42,6 +49,9 @@ class HarnessMetricsTests(unittest.TestCase):
             scanned = {path.relative_to(repo).as_posix() for path in harness_metrics.markdown_files_for_scan(repo)}
 
         self.assertEqual(scanned, {"tracked.md"})
+
+    def test_required_files_match_harness_surfaces(self) -> None:
+        self.assertEqual(harness_metrics.REQUIRED_FILES, check_repo_harness.REQUIRED_SURFACES)
 
     def test_baseline_shape_is_valid(self) -> None:
         failures = harness_metrics.validate_baseline(
