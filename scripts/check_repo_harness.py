@@ -273,6 +273,11 @@ def check_version_consistency() -> None:
         ("README.md", f"AutoResearch++ v{protocol_version}", "README centerpiece version"),
         ("README.md", f"Protocol version shipped:** `{protocol_version}`", "README shipped version"),
         ("examples/README.md", f"AutoResearch++ v{protocol_version}", "examples README version"),
+        (
+            "docs/host-bootstrap-agents.md",
+            f'protocol_version: "{protocol_version}"',
+            "host bootstrap current protocol stamp",
+        ),
     ]
     for path, snippet, reason in expected_snippets:
         require_contains(path, snippet, reason)
@@ -299,6 +304,17 @@ def check_version_consistency() -> None:
                 f"{', '.join(stale_versions)}; expected {protocol_version}"
             )
 
+    active_doc_drift = [
+        ("docs/host-bootstrap-agents.md", "v0.4 closes it structurally"),
+        ("docs/host-bootstrap-agents.md", "below the v0.4 default"),
+    ]
+    for path, snippet in active_doc_drift:
+        if exists(path) and snippet in read(path):
+            fail(
+                f"{path} still describes active bootstrap behavior with "
+                f"stale Protocol 0.4 wording: {snippet!r}"
+            )
+
 
 def check_ledger_rotation_drift() -> None:
     forbidden_snippets = [
@@ -310,6 +326,7 @@ def check_ledger_rotation_drift() -> None:
         ("PROTOCOL.md", "experiment ledger (with rotation"),
         ("PROTOCOL.md", "ledger + playbook with rotation"),
         ("template/config/metrics.yaml.example", "ledger_rotation_iterations"),
+        ("template/config/metrics.yaml.example", "ledger rotation config"),
         ("examples/level1-success/config/metrics.yaml", "ledger_rotation_iterations"),
         ("examples/level3-counter-example/config/metrics.yaml", "ledger_rotation_iterations"),
     ]

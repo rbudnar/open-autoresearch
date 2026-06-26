@@ -225,15 +225,15 @@ the protocol's guarantees fail.
   upstream URL.
 - **Don't self-attest promotion packets.** The process that generates a
   `promotion_request` and the process that emits a `promotion_packet` must
-  be distinct. v0.3 had a self-attest hole; v0.4 closes it structurally
-  (see `PROTOCOL.md` §10.5). If your runtime can only run a single process,
-  set `enforcement.mechanism: none` honestly. Don't paper over it.
-- **Don't downgrade `evaluator_equivalence.rtol`** below the v0.4 default
-  (1e-4 for fp32) without recording the reason in `bootstrap-answers.yaml`
-  AND in a project ADR. The default is calibrated to catch ~1e-3 behavioral
-  drift while passing reduction-order changes; tightening it without
-  justification produces false positives that train the team to ignore the
-  signal.
+  be distinct (see `PROTOCOL.md` §10.5). Protocol 0.5 preserves that
+  structural separation. If your runtime can only run a single process, set
+  `enforcement.mechanism: none` honestly. Don't paper over it.
+- **Don't downgrade `evaluator_equivalence.rtol`** below the Protocol 0.5
+  default (1e-4 for fp32) without recording the reason in
+  `bootstrap-answers.yaml` AND in a project ADR. The default is calibrated to
+  catch ~1e-3 behavioral drift while passing reduction-order changes;
+  tightening it without justification produces false positives that train the
+  team to ignore the signal.
 - **Don't claim a `promoted` label** from the loop unless
   `enforcement.mechanism != none` AND a non-agent verifier emitted the
   packet. The protocol's label vocabulary uses `level1_branch_winner` /
