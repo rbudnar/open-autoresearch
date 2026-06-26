@@ -71,11 +71,12 @@ exists in the host repo.** If it does, the host is in one of three states:
     yet): ask the human whether to clean-slate or resume. If resume,
     diff their `autoresearch/` against the canonical `template/` and ask
     per-file before overwriting.
-  - **Mid-campaign state** (`state/experiment_ledger.jsonl` has entries,
-    OR `bootstrap-answers.yaml` exists): **stop immediately.** This is
-    not a bootstrap — it's a re-bootstrap, which is a separate workflow
-    (see `docs/adoption-levels.md` for the migration path). Don't
-    overwrite live campaign state.
+  - **Mid-campaign state** (`state/ledger/*.json` has entries,
+    `state/experiment_ledger.jsonl` has entries, OR
+    `bootstrap-answers.yaml` exists): **stop immediately.** This is not a
+    bootstrap — it's a re-bootstrap, which is a separate workflow (see
+    `docs/adoption-levels.md` for the migration path). Don't overwrite
+    live campaign state.
   - **Fresh** (no `autoresearch/` directory): proceed.
 Once you've confirmed it's safe to write, copy this repo's `template/`
 directory into the host repo as `autoresearch/`. Don't rename

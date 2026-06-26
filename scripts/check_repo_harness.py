@@ -17,6 +17,19 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
+TEXT_ARTIFACT_SUFFIXES = {
+    ".cfg",
+    ".csv",
+    ".json",
+    ".jsonl",
+    ".md",
+    ".py",
+    ".toml",
+    ".txt",
+    ".yaml",
+    ".yml",
+}
+
 
 def read(path: str) -> str:
     return (REPO_ROOT / path).read_text(encoding="utf-8")
@@ -49,6 +62,10 @@ def require_contains(path: str, snippet: str, reason: str) -> None:
         return
     if snippet not in read(path):
         fail(f"{path} must contain {snippet!r} ({reason})")
+
+
+def is_text_artifact(path: Path) -> bool:
+    return path.suffix.lower() in TEXT_ARTIFACT_SUFFIXES
 
 
 def extract_protocol_version() -> str | None:
@@ -245,7 +262,7 @@ def check_version_consistency() -> None:
     )
 
     for path in sorted((REPO_ROOT / "examples").rglob("*")):
-        if not path.is_file():
+        if not path.is_file() or not is_text_artifact(path):
             continue
         rel = path.relative_to(REPO_ROOT).as_posix()
         text = path.read_text(encoding="utf-8")

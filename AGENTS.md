@@ -73,5 +73,5 @@ For reference-script changes, also run the relevant Python tests under
 `template/scripts/tests/` and the help/parse checks from
 `.github/workflows/validate-examples.yml`.
 
-For verifier or example changes, run the Level-3 counter-example verifier path
-described in `examples/README.md`.
+For verifier or example changes, run `python scripts/quality_gate.py --only-verifier`;
+`examples/README.md` shows the equivalent v0.5 command shape.

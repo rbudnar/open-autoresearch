@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,19 @@ REFERENCE_SCRIPTS = [
     "template/scripts/migrate_ledger_v04_to_v05.py",
 ]
 
+TEXT_ARTIFACT_SUFFIXES = {
+    ".cfg",
+    ".csv",
+    ".json",
+    ".jsonl",
+    ".md",
+    ".py",
+    ".toml",
+    ".txt",
+    ".yaml",
+    ".yml",
+}
+
 
 def run(args: list[str], cwd: Path | None = None, expect: int = 0) -> subprocess.CompletedProcess[str]:
     print(f"$ {' '.join(args)}")
@@ -46,9 +60,55 @@ def run(args: list[str], cwd: Path | None = None, expect: int = 0) -> subprocess
     return proc
 
 
+def git_capture(args: list[str]) -> str:
+    proc = subprocess.run(
+        ["git", *args],
+        cwd=REPO_ROOT,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    if proc.returncode != 0:
+        return ""
+    return proc.stdout.strip()
+
+
 def check_git_diff() -> None:
     if (REPO_ROOT / ".git").exists() or (REPO_ROOT / ".git").is_file():
+        pr_range = github_pr_diff_range()
+        if pr_range:
+            run(["git", "diff", "--check", *pr_range])
+        elif git_capture(["rev-parse", "--verify", "origin/main"]):
+            proc = subprocess.run(
+                ["git", "diff", "--quiet", "origin/main...HEAD"],
+                cwd=REPO_ROOT,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            if proc.returncode == 1:
+                run(["git", "diff", "--check", "origin/main...HEAD"])
         run(["git", "diff", "--check"])
+
+
+def github_pr_diff_range() -> list[str]:
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+    if not event_path:
+        return []
+    path = Path(event_path)
+    if not path.exists():
+        return []
+    try:
+        event = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    pull_request = event.get("pull_request")
+    if not isinstance(pull_request, dict):
+        return []
+    base = pull_request.get("base", {}).get("sha")
+    head = pull_request.get("head", {}).get("sha")
+    if isinstance(base, str) and isinstance(head, str):
+        return [base, head]
+    return []
 
 
 def check_repo_harness() -> None:
@@ -77,7 +137,7 @@ def check_example_versions() -> None:
     protocol_version = (REPO_ROOT / "template/PROTOCOL_VERSION").read_text(encoding="utf-8").strip()
     bad: list[str] = []
     for path in sorted((REPO_ROOT / "examples").rglob("*")):
-        if not path.is_file():
+        if not path.is_file() or not is_text_artifact(path):
             continue
         text = path.read_text(encoding="utf-8")
         if f'protocol_version: "0.4"' in text or f'"protocol_version":"0.4"' in text:
@@ -99,6 +159,10 @@ def check_example_versions() -> None:
     if bad:
         raise SystemExit("stale example protocol versions:\n- " + "\n- ".join(sorted(set(bad))))
     print(f"OK: example artifact protocol_version stamps match {protocol_version}")
+
+
+def is_text_artifact(path: Path) -> bool:
+    return path.suffix.lower() in TEXT_ARTIFACT_SUFFIXES
 
 
 def check_example_ledgers() -> None:

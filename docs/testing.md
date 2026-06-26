@@ -7,9 +7,10 @@ python scripts/quality_gate.py
 ```
 
 Run it after repo-harness, protocol-version, template, example, verifier, or CI
-routing changes. It runs the repo harness check, `git diff --check`, reference
-script parse/help checks, example protocol-version checks, and the Level-3
-counter-example verifier rejection path.
+routing changes. It runs the repo harness check, committed PR/base whitespace
+checks when a diff range is available, working-tree `git diff --check`,
+reference script parse/help checks, example protocol-version checks, and the
+Level-3 counter-example verifier rejection path.
 
 ## Focused Checks
 
