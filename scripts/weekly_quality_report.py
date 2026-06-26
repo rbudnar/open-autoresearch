@@ -75,7 +75,8 @@ DEFAULT_CHECKS = [
 
 
 def default_output_dir(env: dict[str, str] | None = None) -> str:
-    env = env or os.environ
+    if env is None:
+        env = os.environ
     if env.get("GITHUB_ACTIONS") == "true":
         return ".harness"
     return str(Path(tempfile.gettempdir()) / "open-autoresearch-weekly-quality-report")
