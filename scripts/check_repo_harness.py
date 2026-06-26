@@ -96,6 +96,7 @@ def check_required_surfaces() -> None:
     for path in [
         ".gitattributes",
         "AGENTS.md",
+        "CODEOWNERS",
         "docs/README.md",
         "docs/architecture.md",
         "docs/dogfooding.md",

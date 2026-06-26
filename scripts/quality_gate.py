@@ -87,6 +87,7 @@ def check_git_diff() -> None:
             )
             if proc.returncode == 1:
                 run(["git", "diff", "--check", "origin/main...HEAD"])
+        run(["git", "diff", "--cached", "--check"])
         run(["git", "diff", "--check"])
 
 
