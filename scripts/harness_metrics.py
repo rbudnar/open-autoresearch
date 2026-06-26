@@ -112,7 +112,7 @@ def markdown_files_for_scan(repo: Path) -> list[Path]:
 
 def git_tracked_markdown_files(repo: Path) -> list[Path] | None:
     proc = subprocess.run(
-        ["git", "ls-files", "-z", "--", "*.md"],
+        ["git", "ls-files", "-z"],
         cwd=repo,
         stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL,
@@ -124,6 +124,8 @@ def git_tracked_markdown_files(repo: Path) -> list[Path] | None:
         if not raw:
             continue
         rel = raw.decode("utf-8")
+        if Path(rel).suffix != ".md":
+            continue
         files.append(repo / rel)
     return sorted(files)
 

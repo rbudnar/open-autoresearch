@@ -43,12 +43,21 @@ class HarnessMetricsTests(unittest.TestCase):
             repo = Path(tmp)
             subprocess.run(["git", "init"], cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             (repo / "tracked.md").write_text("[ok](tracked.md)\n", encoding="utf-8")
+            (repo / "docs").mkdir()
+            (repo / "docs" / "nested.md").write_text("[ok](../tracked.md)\n", encoding="utf-8")
+            (repo / "notes.txt").write_text("not markdown\n", encoding="utf-8")
             (repo / "ignored.md").write_text("[bad](missing.md)\n", encoding="utf-8")
-            subprocess.run(["git", "add", "tracked.md"], cwd=repo, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            subprocess.run(
+                ["git", "add", "tracked.md", "docs/nested.md", "notes.txt"],
+                cwd=repo,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
 
             scanned = {path.relative_to(repo).as_posix() for path in harness_metrics.markdown_files_for_scan(repo)}
 
-        self.assertEqual(scanned, {"tracked.md"})
+        self.assertEqual(scanned, {"docs/nested.md", "tracked.md"})
 
     def test_required_files_match_harness_surfaces(self) -> None:
         self.assertEqual(harness_metrics.REQUIRED_FILES, check_repo_harness.REQUIRED_SURFACES)

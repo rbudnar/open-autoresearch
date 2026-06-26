@@ -97,6 +97,21 @@ class WeeklyQualityReportTests(unittest.TestCase):
             self.assertIn(f"report_json={weekly_quality_report.slash(json_path)}", text)
             self.assertIn(f"report_md={weekly_quality_report.slash(md_path)}", text)
 
+    def test_run_check_reports_timeout_as_failed_check(self) -> None:
+        spec = weekly_quality_report.CheckSpec(
+            id="slow",
+            name="Slow check",
+            command=[sys.executable, "-c", "import time; time.sleep(30)"],
+            display="slow",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            result = weekly_quality_report.run_check(spec, Path(tmp), timeout_seconds=1)
+
+        self.assertFalse(result["passed"])
+        self.assertTrue(result["timedOut"])
+        self.assertEqual(result["exitCode"], 124)
+        self.assertIn("Timed out after 1 seconds.", result["stderrTail"])
+
 
 if __name__ == "__main__":
     unittest.main()

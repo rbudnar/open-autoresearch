@@ -21,6 +21,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
+CHECK_TIMEOUT_SECONDS = 15 * 60
 
 
 @dataclass(frozen=True)
@@ -95,26 +96,48 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-def run_check(spec: CheckSpec, repo: Path) -> dict[str, object]:
+def run_check(spec: CheckSpec, repo: Path, timeout_seconds: int = CHECK_TIMEOUT_SECONDS) -> dict[str, object]:
     started = time.perf_counter()
-    proc = subprocess.run(
-        spec.command,
-        cwd=repo,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    try:
+        proc = subprocess.run(
+            spec.command,
+            cwd=repo,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=timeout_seconds,
+        )
+        exit_code = proc.returncode
+        stdout = proc.stdout
+        stderr = proc.stderr
+        timed_out = False
+    except subprocess.TimeoutExpired as exc:
+        exit_code = 124
+        stdout = as_text(exc.stdout)
+        timeout_message = f"Timed out after {timeout_seconds} seconds."
+        stderr_parts = [as_text(exc.stderr), timeout_message]
+        stderr = "\n".join(part for part in stderr_parts if part)
+        timed_out = True
     duration_ms = int((time.perf_counter() - started) * 1000)
     return {
         "id": spec.id,
         "name": spec.name,
         "command": spec.display,
-        "exitCode": proc.returncode,
+        "exitCode": exit_code,
         "durationMs": duration_ms,
-        "passed": proc.returncode == 0,
-        "stdoutTail": tail(proc.stdout),
-        "stderrTail": tail(proc.stderr),
+        "passed": exit_code == 0,
+        "timedOut": timed_out,
+        "stdoutTail": tail(stdout),
+        "stderrTail": tail(stderr),
     }
+
+
+def as_text(value: str | bytes | None) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return value
 
 
 def build_report(

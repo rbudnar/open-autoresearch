@@ -78,16 +78,16 @@ jobs:
             'CHANGELOG.md' \
             'README.md' \
             'template/PROTOCOL_VERSION' \
-            'template/schema/*' \
-            'template/config/*' \
-            'template/scripts/*' \
-            'template/templates/*' \
-            'examples/*' \
+            'template/schema/' \
+            'template/config/' \
+            'template/scripts/' \
+            'template/templates/' \
+            'examples/' \
             'scripts/check_repo_harness.py' \
             'scripts/harness_metrics.py' \
             'scripts/quality_gate.py' \
             'scripts/weekly_quality_report.py' \
-            'scripts/tests/*' \
+            'scripts/tests/' \
             'docs/README.md' \
             'docs/architecture.md' \
             'docs/dogfooding.md' \
@@ -97,12 +97,12 @@ jobs:
             'docs/faq.md' \
             'docs/runtime-safety.md' \
             'docs/testing.md' \
-            'docs/plans/*' \
+            'docs/plans/' \
             'docs/threat-model.md' \
             'docs/adoption-levels.md' \
             '.github/workflows/weekly-quality-report.yml' \
             'CODEOWNERS' \
-            '.github/workflows/*' \
+            '.github/workflows/' \
             || true)
           if [ -z "$changed_protected" ]; then
             echo "No protected paths changed."
