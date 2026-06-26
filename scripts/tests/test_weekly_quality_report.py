@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import tempfile
 import unittest
@@ -74,6 +75,27 @@ class WeeklyQualityReportTests(unittest.TestCase):
             self.assertTrue(json_path.exists())
             self.assertTrue(md_path.exists())
             self.assertIn("Weekly Quality Report", md_path.read_text(encoding="utf-8"))
+
+    def test_write_github_outputs_supports_out_of_tree_report_paths(self) -> None:
+        report = weekly_quality_report.build_report([], "2026-06-25")
+        with tempfile.TemporaryDirectory() as repo_dir, tempfile.TemporaryDirectory() as out_dir:
+            repo = Path(repo_dir)
+            json_path, md_path = weekly_quality_report.write_report(report, repo, out_dir)
+            output_path = repo / "github-output.txt"
+            previous_output = os.environ.get("GITHUB_OUTPUT")
+            os.environ["GITHUB_OUTPUT"] = str(output_path)
+            try:
+                weekly_quality_report.write_github_outputs(report, json_path, md_path, repo)
+            finally:
+                if previous_output is None:
+                    os.environ.pop("GITHUB_OUTPUT", None)
+                else:
+                    os.environ["GITHUB_OUTPUT"] = previous_output
+
+            text = output_path.read_text(encoding="utf-8")
+            self.assertIn("has_problems=false", text)
+            self.assertIn(f"report_json={weekly_quality_report.slash(json_path)}", text)
+            self.assertIn(f"report_md={weekly_quality_report.slash(md_path)}", text)
 
 
 if __name__ == "__main__":

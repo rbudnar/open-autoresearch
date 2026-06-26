@@ -204,14 +204,23 @@ def write_report(report: dict[str, object], repo: Path, output_dir: str) -> tupl
     return json_path, md_path
 
 
+def github_output_path(path: Path, repo: Path) -> str:
+    resolved_path = path.resolve()
+    resolved_repo = repo.resolve()
+    try:
+        return slash(resolved_path.relative_to(resolved_repo))
+    except ValueError:
+        return slash(resolved_path)
+
+
 def write_github_outputs(report: dict[str, object], json_path: Path, md_path: Path, repo: Path) -> None:
     output = os.environ.get("GITHUB_OUTPUT")
     if not output:
         return
     with open(output, "a", encoding="utf-8") as handle:
         handle.write(f"has_problems={'true' if report['summary']['hasProblems'] else 'false'}\n")
-        handle.write(f"report_json={slash(json_path.relative_to(repo))}\n")
-        handle.write(f"report_md={slash(md_path.relative_to(repo))}\n")
+        handle.write(f"report_json={github_output_path(json_path, repo)}\n")
+        handle.write(f"report_md={github_output_path(md_path, repo)}\n")
 
 
 def github_run_url(env: dict[str, str] | None = None) -> str | None:
