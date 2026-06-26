@@ -9,6 +9,7 @@ repository.
 from __future__ import annotations
 
 import argparse
+import subprocess
 import re
 import sys
 import json
@@ -66,6 +67,21 @@ def require_contains(path: str, snippet: str, reason: str) -> None:
 
 def is_text_artifact(path: Path) -> bool:
     return path.suffix.lower() in TEXT_ARTIFACT_SUFFIXES
+
+
+def tracked_paths_under(path: str) -> list[Path]:
+    result = subprocess.run(
+        ["git", "ls-files", "-z", "--", path],
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        fail(f"git ls-files failed for {path}: {result.stderr.strip()}")
+        return []
+    return [REPO_ROOT / rel for rel in result.stdout.split("\0") if rel]
 
 
 def extract_protocol_version() -> str | None:
@@ -262,7 +278,7 @@ def check_version_consistency() -> None:
         "FAQ current protocol version",
     )
 
-    for path in sorted((REPO_ROOT / "examples").rglob("*")):
+    for path in sorted(tracked_paths_under("examples")):
         if not path.is_file() or not is_text_artifact(path):
             continue
         rel = path.relative_to(REPO_ROOT).as_posix()

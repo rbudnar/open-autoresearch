@@ -136,7 +136,7 @@ def check_script_help() -> None:
 def check_example_versions() -> None:
     protocol_version = (REPO_ROOT / "template/PROTOCOL_VERSION").read_text(encoding="utf-8").strip()
     bad: list[str] = []
-    for path in sorted((REPO_ROOT / "examples").rglob("*")):
+    for path in sorted(tracked_paths_under("examples")):
         if not path.is_file() or not is_text_artifact(path):
             continue
         text = path.read_text(encoding="utf-8")
@@ -163,6 +163,20 @@ def check_example_versions() -> None:
 
 def is_text_artifact(path: Path) -> bool:
     return path.suffix.lower() in TEXT_ARTIFACT_SUFFIXES
+
+
+def tracked_paths_under(path: str) -> list[Path]:
+    result = subprocess.run(
+        ["git", "ls-files", "-z", "--", path],
+        cwd=REPO_ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise SystemExit(f"git ls-files failed for {path}: {result.stderr.strip()}")
+    return [REPO_ROOT / rel for rel in result.stdout.split("\0") if rel]
 
 
 def check_example_ledgers() -> None:
