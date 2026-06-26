@@ -24,6 +24,11 @@ class HarnessMetricsTests(unittest.TestCase):
         self.assertIn("requiredFiles", values)
         self.assertIn("brokenInternalLinks", values)
 
+    def test_markdown_scan_includes_linked_worktree_root(self) -> None:
+        repo = Path(__file__).resolve().parents[2]
+        scanned = {path.relative_to(repo).as_posix() for path in harness_metrics.markdown_files_for_scan(repo)}
+        self.assertIn("AGENTS.md", scanned)
+
     def test_baseline_shape_is_valid(self) -> None:
         failures = harness_metrics.validate_baseline(
             Path(__file__).resolve().parents[2] / "docs" / "harness-metrics-baseline.json"

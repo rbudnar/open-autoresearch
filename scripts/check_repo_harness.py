@@ -213,26 +213,27 @@ def check_metrics_baseline() -> None:
             fail(f"{path} baseline is missing {key!r}")
 
 
-def check_active_plan_header() -> None:
-    path = "docs/plans/active/2026-06-25-open-autoresearch-harness-bootstrap.md"
-    if not exists(path):
-        fail(f"{path} is missing")
+def check_active_plan_headers() -> None:
+    plan_dir = REPO_ROOT / "docs" / "plans" / "active"
+    if not plan_dir.exists():
         return
-    text = read(path)
-    for key in [
-        "status",
-        "owner",
-        "created",
-        "updated",
-        "next_action",
-        "validation_command",
-        "stop_condition",
-        "supersedes",
-        "superseded_by",
-        "retirement_or_revisit",
-    ]:
-        if not re.search(rf"^{re.escape(key)}:\s+\S", text, re.MULTILINE):
-            fail(f"{path} header must include {key}:")
+    for path in sorted(plan_dir.glob("*.md")):
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        text = path.read_text(encoding="utf-8")
+        for key in [
+            "status",
+            "owner",
+            "created",
+            "updated",
+            "next_action",
+            "validation_command",
+            "stop_condition",
+            "supersedes",
+            "superseded_by",
+            "retirement_or_revisit",
+        ]:
+            if not re.search(rf"^{re.escape(key)}:\s+\S", text, re.MULTILINE):
+                fail(f"{rel} header must include {key}:")
 
 
 def check_version_consistency() -> None:
@@ -333,7 +334,7 @@ def main(argv: list[str] | None = None) -> int:
     check_dogfooding_anchors()
     check_router_docs()
     check_harness_metadata()
-    check_active_plan_header()
+    check_active_plan_headers()
     if not args.skip_metrics:
         check_metrics_baseline()
     check_version_consistency()

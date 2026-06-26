@@ -35,11 +35,7 @@ REQUIRED_FILES = [
 
 def collect_metrics(repo: Path = REPO_ROOT, include_validator: bool = True) -> dict[str, object]:
     agents = read_text(repo / "AGENTS.md")
-    markdown_files = sorted(
-        path
-        for path in repo.rglob("*.md")
-        if ".git" not in path.parts and ".worktrees" not in path.parts
-    )
+    markdown_files = markdown_files_for_scan(repo)
     broken_links = find_broken_internal_links(repo, markdown_files)
     required_missing = [path for path in REQUIRED_FILES if not (repo / path).exists()]
 
@@ -108,6 +104,17 @@ def read_text(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except FileNotFoundError:
         return ""
+
+
+def markdown_files_for_scan(repo: Path) -> list[Path]:
+    files: list[Path] = []
+    resolved_repo = repo.resolve()
+    for path in resolved_repo.rglob("*.md"):
+        relative_parts = path.relative_to(resolved_repo).parts
+        if ".git" in relative_parts or ".worktrees" in relative_parts:
+            continue
+        files.append(path)
+    return sorted(files)
 
 
 def find_broken_internal_links(repo: Path, markdown_files: list[Path]) -> list[dict[str, object]]:
