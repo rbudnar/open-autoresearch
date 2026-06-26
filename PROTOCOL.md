@@ -1798,7 +1798,7 @@ Do not jump to Level 5 before Level 1-3 are reliable.
 - promoting single-seed wins (at any cost tier)
 - accepting surprising gains without ablation
 - relying on self-reported results when out-of-band enforcement is absent (§3.1.1)
-- unbounded memory growth (ledger rotates per §17.5.4)
+- unbounded memory growth (sharded immutable records plus bounded derived artifacts; §17.5.4)
 - literature-free architecture changes (in live mode)
 - claiming novelty without evidence (offline mode blocks novelty claims)
 - pretending in-band controls enforce when they're advisory (§17.1)

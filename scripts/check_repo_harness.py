@@ -285,6 +285,7 @@ def check_ledger_rotation_drift() -> None:
         ("PROTOCOL.md", "**rotated per §17.5.4**"),
         ("PROTOCOL.md", "ledger_rotation_iterations"),
         ("PROTOCOL.md", "ledger rotation (§17.5.4)"),
+        ("PROTOCOL.md", "ledger rotates per §17.5.4"),
         ("PROTOCOL.md", "experiment ledger (with rotation"),
         ("PROTOCOL.md", "ledger + playbook with rotation"),
         ("template/config/metrics.yaml.example", "ledger_rotation_iterations"),

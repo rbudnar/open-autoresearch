@@ -1,5 +1,12 @@
 # Testing And Validation
 
+The reference verifier scripts need PyYAML. In a fresh environment, install it
+before running the local gate:
+
+```bash
+python -m pip install pyyaml
+```
+
 The canonical local quality gate is:
 
 ```bash

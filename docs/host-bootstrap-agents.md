@@ -272,7 +272,7 @@ A successful bootstrap leaves the host repo with:
 - A clean commit history on the integration branch with one commit per
   state-changing workflow step (steps 3, 4, 5, 6, 7 — usually 5 commits).
 - An open PR titled `chore(autoresearch): bootstrap integration` with this
-  AGENTS.md linked in the body for the human reviewer.
+  `docs/host-bootstrap-agents.md` guide linked in the body for the human reviewer.
 
 You are done. The loop-driving agent (or its operator) takes over from
 here. Do not start the first proposal yourself unless the human explicitly
