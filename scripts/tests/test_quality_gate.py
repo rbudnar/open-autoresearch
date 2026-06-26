@@ -40,6 +40,53 @@ class QualityGateTests(unittest.TestCase):
                 os.environ["GITHUB_EVENT_PATH"] = previous
             Path(event_path).unlink(missing_ok=True)
 
+    def test_expected_verifier_rejection_requires_reference_rehash_pass(self) -> None:
+        packet = {
+            "status": "rejected",
+            "not_deployable": True,
+            "rejection_reasons": ["val exposure 52 >= budget 50"],
+            "criteria_check": {
+                "2_references_rehash": {"pass": False, "note": "stale hash"},
+                "6_val_exposure_not_exhausted": {"pass": False, "note": "val exposure"},
+            },
+        }
+
+        with self.assertRaises(SystemExit) as cm:
+            quality_gate.assert_expected_verifier_rejection(packet)
+
+        self.assertIn("reference rehash criterion should pass", str(cm.exception))
+
+    def test_expected_verifier_rejection_rejects_extra_failed_criteria(self) -> None:
+        packet = {
+            "status": "rejected",
+            "not_deployable": True,
+            "rejection_reasons": ["val exposure 52 >= budget 50"],
+            "criteria_check": {
+                "2_references_rehash": {"pass": True, "note": None},
+                "6_val_exposure_not_exhausted": {"pass": False, "note": "val exposure"},
+                "8_skeptic_verdict_clean": {"pass": False, "note": "unclean"},
+            },
+        }
+
+        with self.assertRaises(SystemExit) as cm:
+            quality_gate.assert_expected_verifier_rejection(packet)
+
+        self.assertIn("unexpected verifier failed criteria", str(cm.exception))
+
+    def test_expected_verifier_rejection_accepts_only_val_exposure_failure(self) -> None:
+        packet = {
+            "status": "rejected",
+            "not_deployable": True,
+            "rejection_reasons": ["val exposure 52 >= budget 50"],
+            "criteria_check": {
+                "2_references_rehash": {"pass": True, "note": None},
+                "6_val_exposure_not_exhausted": {"pass": False, "note": "val exposure"},
+                "8_skeptic_verdict_clean": {"pass": True, "note": None},
+            },
+        }
+
+        quality_gate.assert_expected_verifier_rejection(packet)
+
 
 if __name__ == "__main__":
     unittest.main()

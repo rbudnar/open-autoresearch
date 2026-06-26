@@ -43,6 +43,8 @@ TEXT_ARTIFACT_SUFFIXES = {
     ".yml",
 }
 
+EXPECTED_VERIFIER_FAILED_CRITERIA = {"6_val_exposure_not_exhausted"}
+
 
 def run(args: list[str], cwd: Path | None = None, expect: int = 0) -> subprocess.CompletedProcess[str]:
     print(f"$ {' '.join(args)}")
@@ -230,14 +232,38 @@ def check_verifier_rejection() -> None:
         )
         packet = Path(out_dir) / "20260518-220000-bbb008-promotion-packet.json"
         data = json.loads(packet.read_text(encoding="utf-8"))
-        reasons = " ".join(data.get("rejection_reasons", []))
-        if data.get("status") != "rejected" or data.get("not_deployable") is not True:
-            raise SystemExit(f"unexpected verifier packet status: {data}")
-        if "val exposure" not in reasons.lower():
-            raise SystemExit(f"expected val-exposure rejection, got: {reasons}")
+        assert_expected_verifier_rejection(data)
         if "status=rejected" not in proc.stdout:
             raise SystemExit("verifier output did not report status=rejected")
     print("OK: Level-3 counter-example verifier rejection preserved")
+
+
+def assert_expected_verifier_rejection(data: dict[str, object]) -> None:
+    reasons = " ".join(data.get("rejection_reasons", []))
+    if data.get("status") != "rejected" or data.get("not_deployable") is not True:
+        raise SystemExit(f"unexpected verifier packet status: {data}")
+    if "val exposure" not in reasons.lower():
+        raise SystemExit(f"expected val-exposure rejection, got: {reasons}")
+
+    criteria = data.get("criteria_check", {})
+    if not isinstance(criteria, dict):
+        raise SystemExit("verifier packet missing criteria_check")
+
+    references = criteria.get("2_references_rehash", {})
+    if not isinstance(references, dict) or references.get("pass") is not True:
+        raise SystemExit(f"reference rehash criterion should pass, got: {references}")
+
+    failed = {
+        name
+        for name, result in criteria.items()
+        if isinstance(result, dict) and result.get("pass") is False
+    }
+    if failed != EXPECTED_VERIFIER_FAILED_CRITERIA:
+        raise SystemExit(
+            "unexpected verifier failed criteria: "
+            f"{', '.join(sorted(failed)) or '<none>'}; "
+            f"expected {', '.join(sorted(EXPECTED_VERIFIER_FAILED_CRITERIA))}"
+        )
 
 
 def main() -> int:
