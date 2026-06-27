@@ -193,7 +193,7 @@ A patch without a written hypothesis is invalid.
 
 ### 3.3 Literature-informed search (with offline fallback — §9.0)
 
-Before proposing nontrivial architecture changes, the research agent should search for recent papers, strong public implementations, and benchmark-tested methods related to the current model family and failure mode. **When live literature search is unavailable, the agent operates in offline mode (§9.0) and labels its proposals with `literature_status: canon_only`; if neither live search nor the curated canon was checked, use `literature_status: not_literature_verified`.**
+Before proposing nontrivial architecture changes, the research agent should search for recent papers, strong public implementations, and benchmark-tested methods related to the current model family and failure mode. **When live literature search is unavailable, the agent operates in offline mode (§9.0). When the optional `literature_status` field is recorded, use `canon_only` for canon-backed offline work; if neither live search nor the curated canon was checked, use `not_literature_verified`.**
 
 ### 3.4 Multi-objective model quality
 
@@ -626,9 +626,10 @@ Every proposal records its scout's mode in the frontmatter.
 
 protocol_version: 0.5
 mode: live | offline
-literature_status: live_search | canon_only | not_literature_verified
 web_search_used: true | false
 scout_agent: claude-sonnet-4.5 | codex | ...
+# Optional literature-grounding field:
+# literature_status: live_search | canon_only | not_literature_verified
 
 ## Search scope
 ...
@@ -637,9 +638,9 @@ scout_agent: claude-sonnet-4.5 | codex | ...
 ### Idea 1: <name>
 - Source: <link or canon.bib key>
 - Source type: peer-reviewed | preprint | blog | repo | speculation
-- Citation risk: peer_reviewed | technical_report | arxiv_preprint | withdrawn | unknown
-- Novelty check: <why this is not a rejected sibling or stale retry>
-- Implementation precedent: <paper/code evidence the idea has been made to run, or none found>
+- Citation risk (optional): peer_reviewed | technical_report | arxiv_preprint | withdrawn | unknown
+- Novelty check (optional): <why this is not a rejected sibling or stale retry>
+- Implementation precedent (optional): <paper/code evidence the idea has been made to run, or none found>
 - ...
 ```
 
@@ -657,12 +658,13 @@ proposal_id: <YYYYMMDD-HHMMSS-6hex-slug>
 branch: architecture | loss_objective | data_sampling | features | optimization | calibration | systems_efficiency
 parent_proposal_id: <id or "baseline">
 literature_brief: <path>
-literature_status: live_search | canon_only | not_literature_verified
 web_search_used: true | false
-source_ideas: [<paper/repo/canon key>]
-novelty_check: <why this is not a rejected sibling or stale retry>
-implementation_precedent: <paper/code evidence the idea is plausible, or none found>
-citation_risk: peer_reviewed | technical_report | arxiv_preprint | withdrawn | unknown
+# Optional literature-grounding fields:
+# literature_status: live_search | canon_only | not_literature_verified
+# source_ideas: [<paper/repo/canon key>]
+# novelty_check: <why this is not a rejected sibling or stale retry>
+# implementation_precedent: <paper/code evidence the idea is plausible, or none found>
+# citation_risk: peer_reviewed | technical_report | arxiv_preprint | withdrawn | unknown
 
 ## Hypothesis
 Because <observed failure>, changing <mechanism> should improve <metric/subgroup> by ≥ <expected_delta> without worsening <guardrails> beyond <regression_tolerance>.
@@ -670,7 +672,7 @@ Because <observed failure>, changing <mechanism> should improve <metric/subgroup
 ## Literature basis
 - <source 1> [<source type>]: <relevant finding>
 
-## Novelty and precedent check
+## Novelty and precedent check (optional)
 - Source ideas: <papers/repos/prior proposals that motivated the change>
 - Novelty check: <why this is not re-running stale or rejected work>
 - Implementation precedent: <code/paper evidence, or "none found">

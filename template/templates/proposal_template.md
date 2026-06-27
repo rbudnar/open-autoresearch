@@ -4,14 +4,15 @@ proposal_id: "<YYYYMMDD-HHMMSS-6hex-slug>"
 branch: "<architecture | loss_objective | data_sampling | features | optimization | calibration | systems_efficiency>"
 parent_proposal_id: "<id or baseline>"
 literature_brief: "<path or null>"
-literature_status: "<live_search | canon_only | not_literature_verified>"
 web_search_used: <true | false>
-source_ideas:
-  - "<paper/repo/canon key that motivated this proposal, or null>"
-novelty_check: "<why this is not just re-running an already rejected sibling idea>"
-implementation_precedent: "<paper/code evidence this change is plausible, or null>"
-citation_risk: "<peer_reviewed | technical_report | arxiv_preprint | withdrawn | unknown>"
 maturity_level: <1 | 2 | 3 | 4 | 5>
+# Optional literature-grounding fields:
+# literature_status: "<live_search | canon_only | not_literature_verified>"
+# source_ideas:
+#   - "<paper/repo/canon key that motivated this proposal, or null>"
+# novelty_check: "<why this is not just re-running an already rejected sibling idea>"
+# implementation_precedent: "<paper/code evidence this change is plausible, or null>"
+# citation_risk: "<peer_reviewed | technical_report | arxiv_preprint | withdrawn | unknown>"
 ---
 
 # Experiment Proposal: <short name>
@@ -26,7 +27,7 @@ Because <observed failure>, changing <mechanism> should improve <metric/subgroup
 
 If `literature_status: canon_only`, this section pulls only from `canon.bib`; tag the brief `mode: offline` and avoid novelty claims. If `literature_status: not_literature_verified`, write that explicitly and treat the proposal as lower-confidence until a Literature Scout or human review fills the gap.
 
-## Novelty and precedent check
+## Novelty and precedent check (optional)
 
 - **Source ideas:** <papers/repos/prior proposals that motivated the change>
 - **Novelty check:** <why this is not just re-running a rejected sibling or known negative result>
