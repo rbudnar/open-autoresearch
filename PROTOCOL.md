@@ -193,7 +193,7 @@ A patch without a written hypothesis is invalid.
 
 ### 3.3 Literature-informed search (with offline fallback — §9.0)
 
-Before proposing nontrivial architecture changes, the research agent should search for recent papers, strong public implementations, and benchmark-tested methods related to the current model family and failure mode. **When live literature search is unavailable, the agent operates in offline mode (§9.0) and labels its proposals `not literature-verified`.**
+Before proposing nontrivial architecture changes, the research agent should search for recent papers, strong public implementations, and benchmark-tested methods related to the current model family and failure mode. **When live literature search is unavailable, the agent operates in offline mode (§9.0) and labels its proposals with `literature_status: canon_only`; if neither live search nor the curated canon was checked, use `literature_status: not_literature_verified`.**
 
 ### 3.4 Multi-objective model quality
 
