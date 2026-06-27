@@ -638,7 +638,7 @@ scout_agent: claude-sonnet-4.5 | codex | ...
 ### Idea 1: <name>
 - Source: <link or canon.bib key>
 - Source type: peer-reviewed | preprint | blog | repo | speculation
-- Citation risk (optional): peer_reviewed | technical_report | arxiv_preprint | withdrawn | unknown
+- Citation risk (optional): peer_reviewed | technical_report | arxiv_preprint | prototype | withdrawn | unknown
 - Novelty check (optional): <why this is not a rejected sibling or stale retry>
 - Implementation precedent (optional): <paper/code evidence the idea has been made to run, or none found>
 - ...
@@ -664,7 +664,7 @@ web_search_used: true | false
 # source_ideas: [<paper/repo/canon key>]
 # novelty_check: <why this is not a rejected sibling or stale retry>
 # implementation_precedent: <paper/code evidence the idea is plausible, or none found>
-# citation_risk: peer_reviewed | technical_report | arxiv_preprint | withdrawn | unknown
+# citation_risk: peer_reviewed | technical_report | arxiv_preprint | prototype | withdrawn | unknown
 
 ## Hypothesis
 Because <observed failure>, changing <mechanism> should improve <metric/subgroup> by ≥ <expected_delta> without worsening <guardrails> beyond <regression_tolerance>.
@@ -678,7 +678,7 @@ If `web_search_used: false`, this section pulls only from `canon.bib` and the ho
 - Source ideas: <papers/repos/prior proposals that motivated the change>
 - Novelty check: <why this is not re-running stale or rejected work>
 - Implementation precedent: <code/paper evidence, or "none found">
-- Citation risk: <peer_reviewed | technical_report | arxiv_preprint | withdrawn | unknown>
+- Citation risk: <peer_reviewed | technical_report | arxiv_preprint | prototype | withdrawn | unknown>
 
 ## Proposed change
 Describe the minimal implementation. Per §11.1.1, ONE non-baseline config switch.

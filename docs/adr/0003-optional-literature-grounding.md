@@ -1,6 +1,6 @@
 # ADR 0003 - Optional literature grounding fields
 
-- Status: Proposed
+- Status: Accepted
 - Date: 2026-06-27
 - Deciders: @rbudnar
 - Related: GitHub issue #17, `docs/references.md`, `docs/related-work.md`, `PROTOCOL.md` Section 2 / Section 3.3 / Section 9.0

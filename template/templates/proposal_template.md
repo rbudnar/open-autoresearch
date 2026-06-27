@@ -12,7 +12,7 @@ maturity_level: <1 | 2 | 3 | 4 | 5>
 #   - "<paper/repo/canon key that motivated this proposal, or null>"
 # novelty_check: "<why this is not just re-running an already rejected sibling idea>"
 # implementation_precedent: "<paper/code evidence this change is plausible, or null>"
-# citation_risk: "<peer_reviewed | technical_report | arxiv_preprint | withdrawn | unknown>"
+# citation_risk: "<peer_reviewed | technical_report | arxiv_preprint | prototype | withdrawn | unknown>"
 ---
 
 # Experiment Proposal: <short name>
@@ -32,7 +32,7 @@ If `web_search_used: false`, this section pulls only from `canon.bib` and the ho
 - **Source ideas:** <papers/repos/prior proposals that motivated the change>
 - **Novelty check:** <why this is not just re-running a rejected sibling or known negative result>
 - **Implementation precedent:** <paper/code evidence that the change is plausible, or "none found">
-- **Citation risk:** <peer_reviewed | technical_report | arxiv_preprint | withdrawn | unknown>
+- **Citation risk:** <peer_reviewed | technical_report | arxiv_preprint | prototype | withdrawn | unknown>
 
 ## Proposed change
 
