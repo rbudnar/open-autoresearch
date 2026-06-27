@@ -672,6 +672,8 @@ Because <observed failure>, changing <mechanism> should improve <metric/subgroup
 ## Literature basis
 - <source 1> [<source type>]: <relevant finding>
 
+If `web_search_used: false`, this section pulls only from `canon.bib` and the host project's own docs; tag the brief `mode: offline` and avoid novelty claims. If the optional `literature_status` field is present, use `canon_only` for canon-backed offline work or `not_literature_verified` when neither live search nor canon was checked.
+
 ## Novelty and precedent check (optional)
 - Source ideas: <papers/repos/prior proposals that motivated the change>
 - Novelty check: <why this is not re-running stale or rejected work>
