@@ -16,7 +16,7 @@ The point of departure. Karpathy's prototype showed that a tight autonomous loop
 
 **What we changed:** added literature search, multi-objective scoring, ablation discipline, tree search over branches, role separation, out-of-band enforcement, validation-exposure accounting, budget accounting. Most of these are downstream of "what happens when this runs for days instead of minutes?"
 
-### 2026 research wave — TREX, MARS, AlphaLab, AI Scientist v2, AutoResearch-RL, Hyperagents, Arbor/HTR
+### 2026 research wave — MARS, AlphaLab, AI Scientist v2, AutoResearch-RL, Hyperagents, Arbor/HTR
 
 `PROTOCOL.md` §2 tags each citation's review status honestly. Most of these are concurrent preprints from 2026 Q1-Q2; one (AutoResearch-RL) was withdrawn by arXiv admin.
 

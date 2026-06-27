@@ -53,7 +53,7 @@ template, example, verifier, or workflow changes.
 
 ## Why this exists
 
-Karpathy's [autoresearch](https://github.com/karpathy/autoresearch) demonstrated the value of a tight autonomous loop. The 2026 literature (TREX, AlphaLab, MARS, AI Scientist v2, Arbor/HTR, etc.) added tree search, durable memory, role specialization, and explicit ablation discipline. The maintained foundation list lives in [`docs/references.md`](./docs/references.md); this protocol synthesizes those ideas with an opinionated stance on what's enforceable vs. honor-system.
+Karpathy's [autoresearch](https://github.com/karpathy/autoresearch) demonstrated the value of a tight autonomous loop. The 2026 literature (AlphaLab, MARS, AI Scientist v2, Arbor/HTR, etc.) added tree search, durable memory, role specialization, and explicit ablation discipline. The maintained foundation list lives in [`docs/references.md`](./docs/references.md); this protocol synthesizes those ideas with an opinionated stance on what's enforceable vs. honor-system.
 
 The single largest distinction from prior art: this protocol **does not promise** to prevent reward-hacking by an agent that controls bootstrap. It is structured to make cheating **detectable** through external verification, namespaced labels, behavioral-equivalence tripwires, and explicit `not_deployable` markers when out-of-band enforcement is absent. The README, threat model, and label vocabulary all say this out loud.
 
