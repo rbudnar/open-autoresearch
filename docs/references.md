@@ -42,11 +42,11 @@ source is added, removed, reclassified, or materially reinterpreted.
 | MARS | https://arxiv.org/abs/2602.02660 | Unreviewed preprint | 2026-05-18 | Budget-aware tree search, reflective memory, sibling comparisons. |
 | AlphaLab | https://arxiv.org/abs/2604.08590 | Unreviewed preprint | 2026-05-18 | Strategist/Worker split, persistent playbook, literature-grounded search. |
 | Deep Researcher Agent | https://arxiv.org/abs/2604.05854 | Unreviewed preprint | 2026-05-18 | Leader/worker split, bounded memory, multi-day operation. |
-| ResearchGym | https://arxiv.org/abs/2602.15112 | Peer-reviewed workshop | 2026-05-18 | Long-horizon agent failure modes and reliability gaps. |
-| MLGym | https://openreview.net/forum?id=ryTr83DxRq | Peer-reviewed conference | 2026-05-18 | Long-horizon ML-agent failure modes, budget/time/confidence management. |
+| ResearchGym | https://arxiv.org/abs/2602.15112 | Peer-reviewed | 2026-05-18 | Workshop-reviewed source for long-horizon agent failure modes and reliability gaps. |
+| MLGym | https://openreview.net/forum?id=ryTr83DxRq | Peer-reviewed | 2026-05-18 | Conference-reviewed source for long-horizon ML-agent failure modes, budget/time/confidence management. |
 | AI Scientist v2 | https://arxiv.org/abs/2504.08066 | Technical report | 2026-05-18 | Tree budget allocation, experiment-manager role, ablation requirement. |
-| AI Scientist (Nature) | https://www.nature.com/articles/s41586-026-10265-5 | Peer-reviewed journal | 2026-05-18 | End-to-end automated research framing. |
-| Arbor / Hypothesis-Tree Refinement | https://arxiv.org/abs/2606.11926 and https://github.com/RUC-NLPIR/Arbor | Unreviewed preprint plus implementation | 2026-06-27 | Hypothesis-tree refinement, coordinator/executor split, isolated worktrees, insight propagation. |
+| AI Scientist (Nature) | https://www.nature.com/articles/s41586-026-10265-5 | Peer-reviewed | 2026-05-18 | Journal-reviewed source for end-to-end automated research framing. |
+| Arbor / Hypothesis-Tree Refinement | https://arxiv.org/abs/2606.11926 and https://github.com/RUC-NLPIR/Arbor | Unreviewed preprint | 2026-06-27 | Hypothesis-tree refinement, coordinator/executor split, isolated worktrees, insight propagation, and implementation precedent. |
 
 ## Maintainer Checklist
 
