@@ -4,7 +4,9 @@ Where AutoResearch++ sits in the 2026 landscape, and what it deliberately is and
 
 ## Lineage
 
-The protocol's `§2` citation status table is the authoritative reference; this doc is the longer narrative.
+`docs/references.md` is the maintained reference register, and `PROTOCOL.md`
+§2 is the adopter-facing citation snapshot. This doc is the longer narrative
+for why those sources matter.
 
 ### Karpathy's `autoresearch` (2026, GitHub prototype)
 
@@ -14,13 +16,23 @@ The point of departure. Karpathy's prototype showed that a tight autonomous loop
 
 **What we changed:** added literature search, multi-objective scoring, ablation discipline, tree search over branches, role separation, out-of-band enforcement, validation-exposure accounting, budget accounting. Most of these are downstream of "what happens when this runs for days instead of minutes?"
 
-### 2026 research wave — TREX, MARS, AlphaLab, AI Scientist v2, AutoResearch-RL, Hyperagents
+### 2026 research wave — TREX, MARS, AlphaLab, AI Scientist v2, AutoResearch-RL, Hyperagents, Arbor/HTR
 
 `PROTOCOL.md` §2 tags each citation's review status honestly. Most of these are concurrent preprints from 2026 Q1-Q2; one (AutoResearch-RL) was withdrawn by arXiv admin.
 
-**What we absorbed from each:** the budget-aware tree search idea (MARS, AI Scientist v2), Strategist/Worker role split (AlphaLab), persistent playbook (AlphaLab), ablation-before-promotion (AI Scientist v2), variant archives + cross-iteration lessons (Hyperagents). The literature-grounded search pattern itself is absorbed from AlphaLab's domain-understanding phase.
+**What we absorbed from each:** the budget-aware tree search idea (MARS, AI Scientist v2), Strategist/Worker role split (AlphaLab), persistent playbook (AlphaLab), ablation-before-promotion (AI Scientist v2), variant archives + cross-iteration lessons (Hyperagents), and hypothesis-tree refinement with isolated short-lived executors (Arbor/HTR). The literature-grounded search pattern itself is absorbed from AlphaLab's domain-understanding phase.
 
 **What we did not adopt:** the RL-based meta-policy framing of AutoResearch-RL — interesting structurally but the paper was withdrawn and the empirical claims unsupported, so it stays as an "idea source only" tag. The Strategist/Worker pair-programming pattern from AlphaLab was generalized into our 7-role split rather than adopted verbatim.
+
+### Arbor / Hierarchical Thought Refinement (2026, arXiv preprint + GitHub implementation)
+
+Arbor is the closest operational cousin in the current literature lane. It is a runnable autonomous-research agent centered on Hypothesis-Tree Refinement: a persistent hypothesis tree, a coordinator that chooses and refines work, executors that run scoped experiments in isolated workspaces, and propagated insights that update future branch constraints.
+
+**What we keep:** the idea that the research tree should be operational, not only a historical ledger; short-lived executor worktrees for one hypothesis at a time; explicit lifecycle/frontier choices; and branch-level lessons that affect future search rather than living only in final reports.
+
+**What we change:** Arbor is a search runtime. Open-AutoResearch is a protocol and trust contract. We do not treat an Arbor run as equivalent to verified promotion: candidate claims still need immutable ledger records, exposure accounting, ablations where required, Skeptic review at Level 3+, and verifier-signed promotion packets. Arbor can inspire or drive exploration, but promotion remains an auditable Open-AutoResearch decision.
+
+**Evidence status:** unreviewed concurrent preprint, checked 2026-06-27. Use it as design pressure and implementation precedent, not as settled empirical validation.
 
 ### Peer-reviewed: ResearchGym (ICLR 2026 workshop), MLGym (COLM 2025)
 
@@ -50,7 +62,7 @@ The broader AI-Scientist line has a 2026 Nature paper. It frames the whole end-t
 
 ## Differences from prior art (the differentiation argument)
 
-The 2026 research wave converged on **tree search + durable memory + role specialization + multi-fidelity** as the four design upgrades. We took those as input — and added:
+The 2026 research wave converged on **tree search + durable memory + role specialization + multi-fidelity** as the four design upgrades. Arbor/HTR makes the tree-search pressure especially concrete by connecting a hypothesis tree to executable isolated workspaces. We took those as input — and added:
 
 1. **Honest in-band-vs-out-of-band labeling.** Most prior systems claim to "lock" the evaluator; very few specify how, or admit when the lock is honor-system. The §3.1.1 honesty disclaimer is the protocol's most-distinguishing feature.
 2. **Verifier-signed promotion packets.** The agent emits a *request*; a non-agent verifier emits the *packet*. Self-attestation is structurally blocked.
@@ -63,7 +75,7 @@ The 2026 research wave converged on **tree search + durable memory + role specia
 
 - A real, peer-reviewed benchmark of "protocol-following agent vs no-protocol agent" on a public task. Out of scope for v1.0; on the v1.1+ roadmap.
 - A ports list (Go, Rust, Bash) for the reference scripts. Welcome via the CONTRIBUTING flow.
-- Quarterly §2 citation review — preprints either get peer review or get demoted to "design influence only" in the table.
+- Quarterly citation review — preprints either get peer review or get demoted to "design influence only" in `docs/references.md` and `PROTOCOL.md` §2.
 
 ## When to look elsewhere
 
