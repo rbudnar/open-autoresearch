@@ -24,7 +24,7 @@ scout_agent: "<claude-sonnet-4.5 | codex | gemini-pro | other>"
 
 - **Source:** <link or canon.bib key>
 - **Source type:** <peer-reviewed | preprint | blog | repo | speculation | withdrawn>
-- **Citation risk:** <peer_reviewed | technical_report | arxiv_preprint | unknown>
+- **Citation risk:** <peer_reviewed | technical_report | arxiv_preprint | withdrawn | unknown>
 - **Mechanism:** <one sentence>
 - **Evidence quality:** <strong | medium | weak — with reasoning>
 - **Implementation complexity:** <low | medium | high>

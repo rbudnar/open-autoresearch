@@ -24,7 +24,7 @@ The point of departure. Karpathy's prototype showed that a tight autonomous loop
 
 **What we did not adopt:** the RL-based meta-policy framing of AutoResearch-RL — interesting structurally but the paper was withdrawn and the empirical claims unsupported, so it stays as an "idea source only" tag. The Strategist/Worker pair-programming pattern from AlphaLab was generalized into our 7-role split rather than adopted verbatim.
 
-### Arbor / Hierarchical Thought Refinement (2026, arXiv preprint + GitHub implementation)
+### Arbor / Hypothesis-Tree Refinement (2026, arXiv preprint + GitHub implementation)
 
 Arbor is the closest operational cousin in the current literature lane. It is a runnable autonomous-research agent centered on Hypothesis-Tree Refinement: a persistent hypothesis tree, a coordinator that chooses and refines work, executors that run scoped experiments in isolated workspaces, and propagated insights that update future branch constraints.
 
