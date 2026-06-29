@@ -23,6 +23,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import heapq
 import json
 import os
 import sys
@@ -281,7 +282,7 @@ def _record_promotion_status(rec: dict[str, Any]) -> str:
     return "none"
 
 
-def _record_node_type(rec: dict[str, Any], parent_ids: list[str]) -> str:
+def _record_node_type(rec: dict[str, Any]) -> str:
     raw = rec.get("node_type")
     if isinstance(raw, str) and raw in _NODE_TYPE_SET:
         return raw
@@ -326,21 +327,24 @@ def _lineage_order(
 ) -> list[str]:
     """Return deterministic parent-before-child order, tolerating bad DAGs."""
     incoming = {rid: len(parents_by_id.get(rid, [])) for rid in nodes}
-    ready = sorted(rid for rid, count in incoming.items() if count == 0)
+    ready = [rid for rid, count in incoming.items() if count == 0]
+    heapq.heapify(ready)
+    queued = set(ready)
     order: list[str] = []
     seen: set[str] = set()
 
     while ready:
-        rid = ready.pop(0)
+        rid = heapq.heappop(ready)
+        queued.discard(rid)
         if rid in seen:
             continue
         seen.add(rid)
         order.append(rid)
-        for child in sorted(children.get(rid, [])):
+        for child in children.get(rid, []):
             incoming[child] = max(0, incoming.get(child, 0) - 1)
-            if incoming[child] == 0 and child not in seen and child not in ready:
-                ready.append(child)
-        ready.sort()
+            if incoming[child] == 0 and child not in seen and child not in queued:
+                heapq.heappush(ready, child)
+                queued.add(child)
 
     # validate_ledger rejects cycles, but regenerate_state should remain a
     # tolerant reader and still emit a deterministic aggregate for inspection.
@@ -380,7 +384,7 @@ def build_research_tree(
         parent_ids = [p for p in parents if isinstance(p, str)]
         lifecycle = _record_lifecycle(rec)
         promotion_status = _record_promotion_status(rec)
-        node_type = _record_node_type(rec, parent_ids)
+        node_type = _record_node_type(rec)
         frontier_eligible = _record_frontier_eligible(rec, lifecycle)
         blocked_by = rec.get("blocked_by")
         blocked_by = (

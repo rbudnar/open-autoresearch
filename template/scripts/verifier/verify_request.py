@@ -731,6 +731,13 @@ def rule_9_statistics_recomputed(ctx: VerifierContext) -> tuple[bool, str | None
         tree_errors = validate_tree_fields(rec["entry"], all_ledger_ids)
         if tree_errors:
             return False, f"{label} ledger shard fails tree validation: {tree_errors[0]}"
+        if label.startswith("candidate_runs[") and rec["entry"].get(
+            "lifecycle_status"
+        ) in {"blocked", "pruned", "merged"}:
+            return False, (
+                f"{label} lifecycle_status {rec['entry'].get('lifecycle_status')!r} "
+                "is closed and cannot be promoted"
+            )
 
     # Primary metric present + finite on candidate + baseline (the §13.2.1
     # comparison evidence). Ablation/rerun shapes vary (factorial_cells etc.), so

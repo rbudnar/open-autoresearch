@@ -287,17 +287,9 @@ def write_record(state_dir: Path, record: dict[str, Any]) -> Path:
 def load_existing_record_ids(state_dir: Path) -> set[str]:
     """Best-effort id set for lifecycle cross-field validation before write."""
     ledger_dir = state_dir / "ledger"
-    ids: set[str] = set()
     if not ledger_dir.is_dir():
-        return ids
-    for path in ledger_dir.glob("*.json"):
-        try:
-            obj = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, UnicodeDecodeError, json.JSONDecodeError):
-            continue
-        if isinstance(obj, dict) and isinstance(obj.get("id"), str):
-            ids.add(obj["id"])
-    return ids
+        return set()
+    return {path.stem for path in ledger_dir.glob("*.json") if path.is_file()}
 
 
 def main(argv: list[str]) -> int:

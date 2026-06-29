@@ -1196,7 +1196,7 @@ The derived tree SHOULD expose a `views` object with deterministic indexes for:
 - `merged` — merged/subsumed node ids with `merged_into`.
 - `promotion_candidates_by_maturity` — candidate node ids bucketed by `level1`, `level2`, `level3_plus`, or `unknown`; closed lifecycle states and already-promoted terminal states stay out of this planning queue.
 
-`validate_ledger.py` validates optional lifecycle fields when present: `blocked` nodes need `blocked_by`, `pruned` nodes need `pruned_reason`, `merged` nodes need a known `merged_into` target, and closed nodes cannot be marked frontier-eligible. The promotion verifier applies the same checks to referenced ledger evidence before signing a packet. These checks are additive and do not invalidate older Protocol 0.5 records that omit the fields.
+`validate_ledger.py` validates optional lifecycle fields when present: `blocked` nodes need `blocked_by`, `pruned` nodes need `pruned_reason`, `merged` nodes need a known `merged_into` target, and closed nodes cannot be marked frontier-eligible. The promotion verifier applies the same checks to referenced ledger evidence before signing a packet, and fails closed when a promotion request uses a `candidate_runs[]` record whose lifecycle is already `blocked`, `pruned`, or `merged`. These checks are additive and do not invalidate older Protocol 0.5 records that omit the fields.
 
 ---
 
