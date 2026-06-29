@@ -41,6 +41,8 @@ on:
       - 'docs/harness-metrics-baseline.json'
       - 'docs/host-bootstrap-agents.md'
       - 'docs/faq.md'
+      - 'docs/references.md'
+      - 'docs/related-work.md'
       - 'docs/runtime-safety.md'
       - 'docs/testing.md'
       - 'docs/plans/**'
@@ -95,6 +97,8 @@ jobs:
             'docs/harness-metrics-baseline.json' \
             'docs/host-bootstrap-agents.md' \
             'docs/faq.md' \
+            'docs/references.md' \
+            'docs/related-work.md' \
             'docs/runtime-safety.md' \
             'docs/testing.md' \
             'docs/plans/' \

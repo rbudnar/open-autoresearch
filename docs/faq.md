@@ -14,7 +14,7 @@ Read `§1.5` first; it tells you which sections you actually need at Level 1.
 
 ## Why are most cited papers preprints?
 
-The 2026 research wave on autonomous ML research happened fast; most of it isn't peer-reviewed yet. We honestly tag each citation's review status in `§2`. The protocol does NOT claim its design is validated by these papers — it's *inspired* by them. The protocol's empirical claims live in `examples/level3-counter-example/` and in future benchmark work.
+The 2026 research wave on autonomous ML research happened fast; most of it isn't peer-reviewed yet. We honestly tag each citation's review status in `docs/references.md` and `PROTOCOL.md` §2. The protocol does NOT claim its design is validated by these papers — it's *inspired* by them. The protocol's empirical claims live in `examples/level3-counter-example/` and in future benchmark work.
 
 ## What happens if my host project doesn't have CI?
 

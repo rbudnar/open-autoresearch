@@ -5,6 +5,8 @@ branch: "<architecture | loss_objective | data_sampling | features | optimizatio
 mode: "<live | offline>"
 web_search_used: <true | false>
 scout_agent: "<claude-sonnet-4.5 | codex | gemini-pro | other>"
+# Optional literature-grounding field:
+# literature_status: "<live_search | canon_only | not_literature_verified>"
 ---
 
 # Literature Brief: <branch> / <hypothesis>
@@ -23,11 +25,14 @@ scout_agent: "<claude-sonnet-4.5 | codex | gemini-pro | other>"
 
 - **Source:** <link or canon.bib key>
 - **Source type:** <peer-reviewed | preprint | blog | repo | speculation | withdrawn>
+- **Citation risk (optional):** <peer_reviewed | technical_report | arxiv_preprint | prototype | withdrawn | unknown>
 - **Mechanism:** <one sentence>
 - **Evidence quality:** <strong | medium | weak — with reasoning>
 - **Implementation complexity:** <low | medium | high>
 - **Expected benefit:** <on which metric/subgroup>
 - **Risks:** <leakage | compute | metric gaming | adapter / dependency complexity>
+- **Novelty check (optional):** <why this is not just a rejected sibling, stale retry, or already-covered baseline>
+- **Implementation precedent (optional):** <paper/code evidence that the idea has been made to run, or "none found">
 - **Minimal test:** <smallest experiment that would distinguish this idea from baseline>
 
 ### Idea 2: ...

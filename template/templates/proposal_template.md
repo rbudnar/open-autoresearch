@@ -6,6 +6,13 @@ parent_proposal_id: "<id or baseline>"
 literature_brief: "<path or null>"
 web_search_used: <true | false>
 maturity_level: <1 | 2 | 3 | 4 | 5>
+# Optional literature-grounding fields:
+# literature_status: "<live_search | canon_only | not_literature_verified>"
+# source_ideas:
+#   - "<paper/repo/canon key that motivated this proposal, or null>"
+# novelty_check: "<why this is not just re-running an already rejected sibling idea>"
+# implementation_precedent: "<paper/code evidence this change is plausible, or null>"
+# citation_risk: "<peer_reviewed | technical_report | arxiv_preprint | prototype | withdrawn | unknown>"
 ---
 
 # Experiment Proposal: <short name>
@@ -18,7 +25,14 @@ Because <observed failure>, changing <mechanism> should improve <metric/subgroup
 
 - <source 1> [<peer-reviewed | preprint | blog | repo | speculation>]: <relevant finding>
 
-(If `web_search_used: false`, this section pulls only from `canon.bib`; tag the brief `mode: offline` and avoid novelty claims.)
+If `web_search_used: false`, this section pulls only from `canon.bib` and the host project's own docs; tag the brief `mode: offline` and avoid novelty claims. If the optional `literature_status` field is present, use `canon_only` for canon-backed offline work or `not_literature_verified` when neither live search nor canon was checked.
+
+## Novelty and precedent check (optional)
+
+- **Source ideas:** <papers/repos/prior proposals that motivated the change>
+- **Novelty check:** <why this is not just re-running a rejected sibling or known negative result>
+- **Implementation precedent:** <paper/code evidence that the change is plausible, or "none found">
+- **Citation risk:** <peer_reviewed | technical_report | arxiv_preprint | prototype | withdrawn | unknown>
 
 ## Proposed change
 

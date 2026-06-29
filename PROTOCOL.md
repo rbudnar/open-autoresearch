@@ -112,7 +112,7 @@ This is the Karpathy-baseline equivalent in this protocol — minus the cheating
 
 ## 2. Research basis and design influences
 
-This protocol synthesizes patterns from publicly-available work. Each citation is tagged with its review status. Patterns are not validated by the protocol; the protocol re-states their structure.
+This protocol synthesizes patterns from publicly-available work. Each citation is tagged with its review status. Patterns are not validated by the protocol; the protocol re-states their structure. The maintained bibliography and re-review policy live in `docs/references.md`; keep that register, this section, and `docs/related-work.md` synchronized.
 
 ### 2.1 Citation status table
 
@@ -128,6 +128,7 @@ This protocol synthesizes patterns from publicly-available work. Each citation i
 | MLGym | openreview.net/forum?id=ryTr83DxRq | COLM 2025 | Peer-reviewed (conference) | 2026-05-18 | Long-horizon failure modes |
 | AI Scientist v2 | arxiv.org/abs/2504.08066 | arXiv technical report | Technical report | 2026-05-18 | Tree search, ablation requirement |
 | AI Scientist (Nature) | nature.com/articles/s41586-026-10265-5 | Nature article | Peer-reviewed (journal) | 2026-05-18 | End-to-end automated research framing |
+| Arbor / HTR | arxiv.org/abs/2606.11926 + github.com/RUC-NLPIR/Arbor | arXiv preprint + GitHub implementation | Unreviewed concurrent preprint | 2026-06-27 | Hypothesis-tree refinement, coordinator/executor split, insight propagation, isolated worktrees |
 
 ### 2.2 How to read this table
 
@@ -152,6 +153,8 @@ This labeling exists because §17.3 requires marking unreviewed papers as such. 
 **AI Scientist v2 (tech report):** experiment-manager agent for tree budget allocation; required ablations and review artifacts.
 
 **Hyperagents / DGM-H (preprint, unreviewed):** archive of variants; meta-level improvement; preserved cross-iteration lessons.
+
+**Arbor / Hypothesis-Tree Refinement (preprint, unreviewed):** persistent hypothesis tree with node lifecycle decisions; long-lived coordinator and short-lived executors; isolated executor worktrees; insight propagation from experiment leaves back into ancestor constraints; frontier refinement over one-shot local attempts. Its implementation is a runnable search system; this protocol treats it as an operational design influence, not validation of Open-AutoResearch's trust or promotion model.
 
 ---
 
@@ -190,7 +193,7 @@ A patch without a written hypothesis is invalid.
 
 ### 3.3 Literature-informed search (with offline fallback — §9.0)
 
-Before proposing nontrivial architecture changes, the research agent should search for recent papers, strong public implementations, and benchmark-tested methods related to the current model family and failure mode. **When live literature search is unavailable, the agent operates in offline mode (§9.0) and labels its proposals `not literature-verified`.**
+Before proposing nontrivial architecture changes, the research agent should search for recent papers, strong public implementations, and benchmark-tested methods related to the current model family and failure mode. **When live literature search is unavailable, the agent operates in offline mode (§9.0). When the optional `literature_status` field is recorded, use `canon_only` for canon-backed offline work; if neither live search nor the curated canon was checked, use `not_literature_verified`.**
 
 ### 3.4 Multi-objective model quality
 
@@ -350,7 +353,7 @@ Inspects dataset docs, baseline model and metrics; identifies failure modes; map
 
 ### 5.3 Literature Scout
 
-Searches available sources (web when available, canon.bib when offline — §9.0); focuses on active branch and failure mode; extracts implementation-relevant ideas; prefers methods with ablations and code; flags speculative ideas; produces a literature brief. Includes `web_search_used: bool` field in every brief.
+Searches available sources (web when available, canon.bib when offline — §9.0); focuses on active branch and failure mode; extracts implementation-relevant ideas; prefers methods with ablations and code; flags speculative ideas; produces a literature brief. Includes `web_search_used: bool` and optional `literature_status`, `citation_risk`, `novelty_check`, and `implementation_precedent` fields so the Research Director can distinguish live literature grounding from canon-only or unverified proposal work.
 
 ### 5.4 Implementation Worker
 
@@ -625,6 +628,8 @@ protocol_version: 0.5
 mode: live | offline
 web_search_used: true | false
 scout_agent: claude-sonnet-4.5 | codex | ...
+# Optional literature-grounding field:
+# literature_status: live_search | canon_only | not_literature_verified
 
 ## Search scope
 ...
@@ -633,6 +638,9 @@ scout_agent: claude-sonnet-4.5 | codex | ...
 ### Idea 1: <name>
 - Source: <link or canon.bib key>
 - Source type: peer-reviewed | preprint | blog | repo | speculation
+- Citation risk (optional): peer_reviewed | technical_report | arxiv_preprint | prototype | withdrawn | unknown
+- Novelty check (optional): <why this is not a rejected sibling or stale retry>
+- Implementation precedent (optional): <paper/code evidence the idea has been made to run, or none found>
 - ...
 ```
 
@@ -651,12 +659,26 @@ branch: architecture | loss_objective | data_sampling | features | optimization 
 parent_proposal_id: <id or "baseline">
 literature_brief: <path>
 web_search_used: true | false
+# Optional literature-grounding fields:
+# literature_status: live_search | canon_only | not_literature_verified
+# source_ideas: [<paper/repo/canon key>]
+# novelty_check: <why this is not a rejected sibling or stale retry>
+# implementation_precedent: <paper/code evidence the idea is plausible, or none found>
+# citation_risk: peer_reviewed | technical_report | arxiv_preprint | prototype | withdrawn | unknown
 
 ## Hypothesis
 Because <observed failure>, changing <mechanism> should improve <metric/subgroup> by ≥ <expected_delta> without worsening <guardrails> beyond <regression_tolerance>.
 
 ## Literature basis
 - <source 1> [<source type>]: <relevant finding>
+
+If `web_search_used: false`, this section pulls only from `canon.bib` and the host project's own docs; tag the brief `mode: offline` and avoid novelty claims. If the optional `literature_status` field is present, use `canon_only` for canon-backed offline work or `not_literature_verified` when neither live search nor canon was checked.
+
+## Novelty and precedent check (optional)
+- Source ideas: <papers/repos/prior proposals that motivated the change>
+- Novelty check: <why this is not re-running stale or rejected work>
+- Implementation precedent: <code/paper evidence, or "none found">
+- Citation risk: <peer_reviewed | technical_report | arxiv_preprint | prototype | withdrawn | unknown>
 
 ## Proposed change
 Describe the minimal implementation. Per §11.1.1, ONE non-baseline config switch.

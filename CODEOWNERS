@@ -40,6 +40,8 @@
 /docs/harness-version.json  @rbudnar
 /docs/host-bootstrap-agents.md @rbudnar
 /docs/faq.md                @rbudnar
+/docs/references.md         @rbudnar
+/docs/related-work.md       @rbudnar
 /docs/runtime-safety.md     @rbudnar
 /docs/testing.md            @rbudnar
 /docs/plans/**              @rbudnar
