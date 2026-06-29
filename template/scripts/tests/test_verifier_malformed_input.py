@@ -1348,6 +1348,23 @@ class TestRule9RequiresPromotionEvidence(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("fails schema", reason)
 
+    def test_tree_invalid_referenced_shard_rejected(self):
+        # Schema-valid but validate_ledger-invalid lifecycle metadata must reject
+        # before the verifier signs a packet.
+        ledger = self._full_ledger()
+        candidate = _valid_record(
+            "20260101-000000-bbb000", metrics={"validation_nll": 0.825}
+        )
+        candidate["lifecycle_status"] = "pruned"
+        ledger["c0"] = {
+            "entry": candidate,
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(self._ctx(_base_request(), ledger))
+        self.assertFalse(ok)
+        self.assertIn("fails tree validation", reason)
+        self.assertIn("pruned_reason", reason)
+
     def test_metric_empty_evidence_rejected(self):
         # Schema-valid candidate but with empty metrics (no primary metric) -> no
         # §13.2.1 evidence -> reject rather than mint a deployable packet.

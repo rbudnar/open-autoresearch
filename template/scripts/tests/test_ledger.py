@@ -8,6 +8,8 @@ Run:
 from __future__ import annotations
 
 import datetime as dt
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -174,6 +176,13 @@ class TestLogExperiment(TempStateMixin):
             val_queries=3,
             node_title="",
             node_lesson=[],
+            lifecycle_status="",
+            promotion_status="",
+            frontier_eligible=None,
+            blocked_by=[],
+            pruned_reason="",
+            merged_into="",
+            node_type="",
             schema=SCHEMA_PATH,
             protocol_version_file=self.tmp / "PV",
             repo_dir=self.tmp,
@@ -225,6 +234,60 @@ class TestLogExperiment(TempStateMixin):
         self.assertNotIn("git_sha_after", rec)
         schema = _ledger_common.load_schema(SCHEMA_PATH)
         self.assertEqual(_ledger_common.validate_against_schema(rec, schema), [])
+
+    def test_tree_fields_are_omitted_by_default(self):
+        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
+        rec = log_experiment.build_record(self._args(), now)
+        self.assertNotIn("lifecycle_status", rec)
+        self.assertNotIn("promotion_status", rec)
+        self.assertNotIn("frontier_eligible", rec)
+        self.assertNotIn("node_type", rec)
+
+    def test_tree_fields_stamp_when_flags_given(self):
+        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
+        rec = log_experiment.build_record(
+            self._args(
+                lifecycle_status="blocked",
+                promotion_status="none",
+                frontier_eligible=False,
+                blocked_by=["human:needs-data-approval"],
+                node_type="candidate",
+            ),
+            now,
+        )
+        self.assertEqual(rec["lifecycle_status"], "blocked")
+        self.assertEqual(rec["promotion_status"], "none")
+        self.assertFalse(rec["frontier_eligible"])
+        self.assertEqual(rec["blocked_by"], ["human:needs-data-approval"])
+        self.assertEqual(rec["node_type"], "candidate")
+        schema = _ledger_common.load_schema(SCHEMA_PATH)
+        self.assertEqual(_ledger_common.validate_against_schema(rec, schema), [])
+
+    def test_writer_rejects_tree_cross_field_errors(self):
+        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        with contextlib.redirect_stderr(io.StringIO()):
+            rc = log_experiment.main(
+                [
+                    "--state-dir",
+                    str(self.state),
+                    "--branch",
+                    "blocked-branch",
+                    "--hypothesis",
+                    "needs approval",
+                    "--status",
+                    "promising",
+                    "--lifecycle-status",
+                    "blocked",
+                    "--protocol-version-file",
+                    str(self.tmp / "PV"),
+                    "--repo-dir",
+                    str(self.tmp),
+                ]
+            )
+        self.assertEqual(rc, 2)
+        self.assertEqual(list(self.ledger.glob("*.json")), [])
 
     def test_data_fingerprint_omitted_by_default(self):
         # With no split-identity flags, build_record emits no data_fingerprint
@@ -353,6 +416,7 @@ class TestRegenerate(TempStateMixin):
         regenerate_state.regenerate(self.state)
         tree = json.loads((self.state / "research_tree.json").read_text())
         self.assertEqual(tree["roots"], ["20260518-090000-aaa000"])
+        self.assertEqual(tree["nodes"]["20260518-090000-aaa000"]["node_type"], "baseline")
         self.assertEqual(
             tree["children"]["20260518-090000-aaa000"],
             ["20260518-100000-aaa001", "20260518-110000-aaa002"],
@@ -366,6 +430,7 @@ class TestRegenerate(TempStateMixin):
         regenerate_state.regenerate(self.state)
         tree = json.loads((self.state / "research_tree.json").read_text())
         self.assertEqual(tree["roots"], ["20260518-090000-aaa000"])
+        self.assertEqual(tree["nodes"]["20260518-090000-aaa000"]["node_type"], "candidate")
 
     def test_val_counter_sum(self):
         write_shard(self.ledger, make_record("20260518-090000-aaa000", val=5))
@@ -469,6 +534,102 @@ class TestRegenerate(TempStateMixin):
         self.assertEqual(node["title"], "Curated Title")
         self.assertEqual(node["lessons"], ["curated lesson"])
 
+    def test_operational_tree_views(self):
+        baseline = make_record(
+            "20260518-090000-aaa000", parents=["baseline"], branch="baseline"
+        )
+        active = make_record(
+            "20260518-100000-aaa001",
+            parents=["20260518-090000-aaa000"],
+            branch="frontier",
+        )
+        active["lifecycle_status"] = "proposed"
+        active["node_type"] = "candidate"
+        pruned = make_record(
+            "20260518-110000-aaa002",
+            parents=["20260518-090000-aaa000"],
+            branch="bad-idea",
+        )
+        pruned["lifecycle_status"] = "pruned"
+        pruned["pruned_reason"] = "guardrail regression"
+        blocked = make_record(
+            "20260518-120000-aaa003",
+            parents=["20260518-090000-aaa000"],
+            branch="needs-human",
+        )
+        blocked["lifecycle_status"] = "blocked"
+        blocked["blocked_by"] = ["human:approve-data-refresh"]
+        winner = make_record(
+            "20260518-130000-aaa004",
+            parents=["20260518-100000-aaa001"],
+            branch="winner",
+            status="branch_winner",
+        )
+        winner["promotion_status"] = "branch_winner"
+        winner["maturity_level"] = 3
+        merged = make_record(
+            "20260518-140000-aaa005",
+            parents=["20260518-100000-aaa001"],
+            branch="subsumed",
+        )
+        merged["lifecycle_status"] = "merged"
+        merged["promotion_status"] = "branch_winner"
+        merged["maturity_level"] = 3
+        merged["merged_into"] = "20260518-130000-aaa004"
+        promoted = make_record(
+            "20260518-150000-aaa006",
+            parents=["20260518-130000-aaa004"],
+            branch="already-promoted",
+            status="promoted",
+        )
+        promoted["promotion_status"] = "promoted"
+        promoted["maturity_level"] = 3
+        for rec in (baseline, active, pruned, blocked, winner, merged, promoted):
+            write_shard(self.ledger, rec)
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertTrue(ok, lines)
+
+        regenerate_state.regenerate(self.state)
+        tree = json.loads((self.state / "research_tree.json").read_text())
+        views = tree["views"]
+        self.assertEqual(
+            views["lineage_order"][0],
+            "20260518-090000-aaa000",
+        )
+        self.assertEqual(views["frontier"], ["20260518-100000-aaa001"])
+        self.assertEqual(
+            views["blocked"],
+            [
+                {
+                    "id": "20260518-120000-aaa003",
+                    "blocked_by": ["human:approve-data-refresh"],
+                }
+            ],
+        )
+        self.assertEqual(
+            views["pruned"],
+            [{"id": "20260518-110000-aaa002", "reason": "guardrail regression"}],
+        )
+        self.assertEqual(
+            views["merged"],
+            [
+                {
+                    "id": "20260518-140000-aaa005",
+                    "merged_into": "20260518-130000-aaa004",
+                }
+            ],
+        )
+        self.assertEqual(
+            views["promotion_candidates_by_maturity"]["level3_plus"],
+            ["20260518-130000-aaa004"],
+        )
+        self.assertEqual(
+            tree["nodes"]["20260518-100000-aaa001"]["lifecycle_status"], "proposed"
+        )
+        self.assertTrue(
+            tree["nodes"]["20260518-100000-aaa001"]["frontier_eligible"]
+        )
+
     def test_jsonl_lines_are_canonical(self):
         rec = make_record("20260518-090000-aaa000")
         write_shard(self.ledger, rec)
@@ -557,6 +718,32 @@ class TestValidateLedger(TempStateMixin):
         ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
         self.assertFalse(ok)
         self.assertTrue(any("cycle" in line for line in lines), lines)
+
+    def test_pruned_lifecycle_requires_reason(self):
+        rec = make_record("20260518-090000-aaa000", parents=["baseline"])
+        rec["lifecycle_status"] = "pruned"
+        write_shard(self.ledger, rec)
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+        self.assertTrue(any("pruned_reason" in line for line in lines), lines)
+
+    def test_merged_lifecycle_requires_known_target(self):
+        rec = make_record("20260518-090000-aaa000", parents=["baseline"])
+        rec["lifecycle_status"] = "merged"
+        rec["merged_into"] = "20260518-100000-aaa001"
+        write_shard(self.ledger, rec)
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+        self.assertTrue(any("merged_into" in line for line in lines), lines)
+
+    def test_blocked_lifecycle_requires_blocker(self):
+        rec = make_record("20260518-090000-aaa000", parents=["baseline"])
+        rec["lifecycle_status"] = "blocked"
+        rec["blocked_by"] = []
+        write_shard(self.ledger, rec)
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+        self.assertTrue(any("blocked_by" in line for line in lines), lines)
 
 
 # --- migration round-trip ----------------------------------------------------
