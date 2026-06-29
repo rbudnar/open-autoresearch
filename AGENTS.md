@@ -69,6 +69,11 @@ python scripts/quality_gate.py
 Use `python scripts/check_repo_harness.py` when you only need the fast
 repo-harness invariant check.
 
+Before calling a PR ready or done, check the sticky `PR Agent Inbox` comment or
+the `agent-inbox-clean` status. `agent-attention` means agent work remains;
+`pending` can mean the PR is only waiting on human review or another external
+state.
+
 For reference-script changes, also run the relevant Python tests under
 `template/scripts/tests/` and the help/parse checks from
 `.github/workflows/validate-examples.yml`.
