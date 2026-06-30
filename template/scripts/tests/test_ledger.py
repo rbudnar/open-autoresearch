@@ -745,6 +745,41 @@ class TestValidateLedger(TempStateMixin):
         self.assertFalse(ok)
         self.assertTrue(any("blocked_by" in line for line in lines), lines)
 
+    def test_closed_lifecycle_cannot_be_frontier_eligible(self):
+        write_shard(
+            self.ledger,
+            make_record("20260518-090000-aaa000", parents=["baseline"]),
+        )
+        cases = [
+            (
+                "20260518-100000-aaa001",
+                "blocked",
+                {"blocked_by": ["human:decision"]},
+            ),
+            (
+                "20260518-110000-aaa002",
+                "pruned",
+                {"pruned_reason": "subsumed by stronger branch"},
+            ),
+            (
+                "20260518-120000-aaa003",
+                "merged",
+                {"merged_into": "20260518-090000-aaa000"},
+            ),
+        ]
+        for record_id, lifecycle, extra_fields in cases:
+            rec = make_record(record_id, parents=["baseline"])
+            rec["lifecycle_status"] = lifecycle
+            rec["frontier_eligible"] = True
+            rec.update(extra_fields)
+            write_shard(self.ledger, rec)
+
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+        joined = "\n".join(lines)
+        for _, lifecycle, _ in cases:
+            self.assertIn(f"lifecycle_status {lifecycle!r}", joined)
+
 
 # --- migration round-trip ----------------------------------------------------
 
