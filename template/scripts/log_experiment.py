@@ -49,18 +49,26 @@ from typing import Any
 
 try:
     from _ledger_common import (
+        LIFECYCLE_STATUSES,
+        NODE_TYPES,
+        PROMOTION_STATUSES,
         _canonical_record_bytes,
         load_schema,
         sanitize_slug,
         validate_against_schema,
+        validate_tree_fields,
     )
 except ImportError:  # pragma: no cover - path shim for direct invocation
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from _ledger_common import (
+        LIFECYCLE_STATUSES,
+        NODE_TYPES,
+        PROMOTION_STATUSES,
         _canonical_record_bytes,
         load_schema,
         sanitize_slug,
         validate_against_schema,
+        validate_tree_fields,
     )
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -212,6 +220,20 @@ def build_record(args: argparse.Namespace, now: dt.datetime) -> dict[str, Any]:
         record["node_title"] = args.node_title
     if args.node_lesson:
         record["node_lessons"] = list(args.node_lesson)
+    if args.lifecycle_status:
+        record["lifecycle_status"] = args.lifecycle_status
+    if args.promotion_status:
+        record["promotion_status"] = args.promotion_status
+    if args.frontier_eligible is not None:
+        record["frontier_eligible"] = args.frontier_eligible
+    if args.blocked_by:
+        record["blocked_by"] = list(args.blocked_by)
+    if args.pruned_reason:
+        record["pruned_reason"] = args.pruned_reason
+    if args.merged_into:
+        record["merged_into"] = args.merged_into
+    if args.node_type:
+        record["node_type"] = args.node_type
     data_fingerprint = _build_data_fingerprint(args)
     if data_fingerprint:
         record["data_fingerprint"] = data_fingerprint
@@ -262,6 +284,14 @@ def write_record(state_dir: Path, record: dict[str, Any]) -> Path:
     return out_path
 
 
+def load_existing_record_ids(state_dir: Path) -> set[str]:
+    """Best-effort id set for lifecycle cross-field validation before write."""
+    ledger_dir = state_dir / "ledger"
+    if not ledger_dir.is_dir():
+        return set()
+    return {path.stem for path in ledger_dir.glob("*.json") if path.is_file()}
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--state-dir", required=True, type=Path)
@@ -274,6 +304,54 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--val-queries", type=int, default=None)
     parser.add_argument("--node-title", default="")
     parser.add_argument("--node-lesson", action="append", default=[])
+    parser.add_argument(
+        "--lifecycle-status",
+        default="",
+        choices=("", *LIFECYCLE_STATUSES),
+        help="Optional tree lifecycle state for derived research_tree views.",
+    )
+    parser.add_argument(
+        "--promotion-status",
+        default="",
+        choices=("", *PROMOTION_STATUSES),
+        help="Optional promotion/evidence status separate from lifecycle state.",
+    )
+    frontier_group = parser.add_mutually_exclusive_group()
+    frontier_group.add_argument(
+        "--frontier-eligible",
+        dest="frontier_eligible",
+        action="store_true",
+        help="Mark this node as eligible for the derived active frontier view.",
+    )
+    frontier_group.add_argument(
+        "--not-frontier-eligible",
+        dest="frontier_eligible",
+        action="store_false",
+        help="Mark this node as ineligible for the derived active frontier view.",
+    )
+    parser.set_defaults(frontier_eligible=None)
+    parser.add_argument(
+        "--blocked-by",
+        action="append",
+        default=[],
+        help="Optional blocker marker for lifecycle_status=blocked.",
+    )
+    parser.add_argument(
+        "--pruned-reason",
+        default="",
+        help="Optional short reason for lifecycle_status=pruned.",
+    )
+    parser.add_argument(
+        "--merged-into",
+        default="",
+        help="Optional target record id for lifecycle_status=merged.",
+    )
+    parser.add_argument(
+        "--node-type",
+        default="",
+        choices=("", *NODE_TYPES),
+        help="Optional tree node kind for derived research_tree views.",
+    )
     parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA)
     parser.add_argument(
         "--protocol-version-file",
@@ -359,6 +437,10 @@ def main(argv: list[str]) -> int:
         sys.stderr.write(f"CONFIG ERROR: {exc}\n")
         return 2
     errors = validate_against_schema(record, schema)
+    tree_errors = validate_tree_fields(
+        record, load_existing_record_ids(args.state_dir) | {record["id"]}
+    )
+    errors.extend(tree_errors)
     if errors:
         sys.stderr.write("SCHEMA VALIDATION FAILED:\n")
         for e in errors:

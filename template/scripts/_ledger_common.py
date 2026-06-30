@@ -157,6 +157,88 @@ _JSON_TYPE_CHECKS = {
 
 _SAFE_FILENAME_STEM_RE = re.compile(r"[A-Za-z0-9._-]+")
 
+LIFECYCLE_STATUSES = (
+    "proposed",
+    "pending",
+    "running",
+    "completed",
+    "merged",
+    "pruned",
+    "blocked",
+)
+
+PROMOTION_STATUSES = (
+    "none",
+    "promising",
+    "level1_branch_winner",
+    "level2_branch_winner",
+    "branch_winner",
+    "promotion_candidate",
+    "promoted",
+    "low_evidence_promoted",
+    "rejected",
+)
+
+NODE_TYPES = (
+    "baseline",
+    "candidate",
+    "ablation",
+    "verifier",
+    "admin",
+    "counter_example",
+)
+
+_CLOSED_LIFECYCLE_STATUSES = {"blocked", "pruned", "merged"}
+
+
+def _nonempty_string(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip())
+
+
+def validate_tree_fields(
+    entry: dict[str, Any], all_ids: set[str] | None = None
+) -> list[str]:
+    """Validate optional lifecycle/frontier fields when a record opts into them.
+
+    ``all_ids`` is optional so writers can use the same checks before the full
+    ledger exists. When supplied, ``merged_into`` must resolve to a known record
+    id; validate_ledger.py passes the complete ledger id set.
+    """
+    errors: list[str] = []
+    rid = entry.get("id")
+    lifecycle = entry.get("lifecycle_status")
+
+    if lifecycle == "blocked":
+        blockers = entry.get("blocked_by")
+        if not (
+            isinstance(blockers, list)
+            and any(_nonempty_string(blocker) for blocker in blockers)
+        ):
+            errors.append("lifecycle_status 'blocked' requires non-empty blocked_by")
+
+    if lifecycle == "pruned" and not _nonempty_string(entry.get("pruned_reason")):
+        errors.append("lifecycle_status 'pruned' requires pruned_reason")
+
+    merged_into = entry.get("merged_into")
+    if lifecycle == "merged" and not _nonempty_string(merged_into):
+        errors.append("lifecycle_status 'merged' requires merged_into")
+    if _nonempty_string(merged_into):
+        if all_ids is not None and merged_into not in all_ids:
+            errors.append(f"merged_into {merged_into!r} is not a known id")
+        if isinstance(rid, str) and merged_into == rid:
+            errors.append("merged_into cannot point to the same record id")
+
+    if (
+        entry.get("frontier_eligible") is True
+        and isinstance(lifecycle, str)
+        and lifecycle in _CLOSED_LIFECYCLE_STATUSES
+    ):
+        errors.append(
+            f"frontier_eligible true conflicts with lifecycle_status {lifecycle!r}"
+        )
+
+    return errors
+
 
 def is_safe_filename_stem(value: Any, max_length: int = 200) -> bool:
     """True iff ``value`` is safe to use as a SINGLE path component (a packet or
