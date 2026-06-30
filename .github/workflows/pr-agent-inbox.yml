@@ -108,11 +108,12 @@ jobs:
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
+          TARGET_PR: ${{ steps.decide.outputs.pr }}
         run: |
           set -euo pipefail
           node .agent-inbox-tool/scripts/pr-agent-inbox.mjs \
             --repo "$GITHUB_REPOSITORY" \
-            --pr "${{ steps.decide.outputs.pr }}" \
+            --pr "$TARGET_PR" \
             --assert-clean \
             --update-comment \
             --ensure-label \
