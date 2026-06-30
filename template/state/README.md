@@ -23,7 +23,14 @@ Campaign-level metadata, the only source for the derived tree's root/branch-poli
 Rebuilt by `regenerate_state.py`: records sorted by `id`, one canonical line each (the `PROTOCOL.md` §14.1 / §10.5 hash basis — compact, insertion order, `ensure_ascii=False`, no trailing newline). Not committed.
 
 ### `research_tree.json` (DERIVED, git-ignored)
-The active research tree (`PROTOCOL.md` §15), regenerated from topology (`parent_ids`) + record node fields (`node_title`/`node_lessons`) + campaign metadata (`campaign.json`). Not hand-edited.
+The active research tree (`PROTOCOL.md` §15), regenerated from topology
+(`parent_ids`) + optional record node fields (`node_title`, `node_lessons`,
+`lifecycle_status`, `promotion_status`, `frontier_eligible`, `blocked_by`,
+`pruned_reason`, `merged_into`, `node_type`) + campaign metadata
+(`campaign.json`). It may include derived `views` for lineage order, active
+frontier, blocked nodes, pruned branches, merged/subsumed nodes, and promotion
+candidates by maturity level. Closed branches and already-promoted terminal
+states stay out of the promotion-candidate planning view. Not hand-edited.
 
 ### `playbook.md`
 Compact, curated lessons. Bounded by `metrics.yaml.memory.max_playbook_tokens`. This is what gets loaded into every future agent context.

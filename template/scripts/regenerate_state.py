@@ -8,8 +8,8 @@ never relying on mtime for staleness.
 
 Outputs (all under state/):
   - experiment_ledger.jsonl  records sorted by id, one canonical line each
-  - research_tree.json       topology (parent_ids) + node content (records'
-                             node_title/node_lessons) + campaign metadata
+  - research_tree.json       topology (parent_ids) + node content/state +
+                             operational views + campaign metadata
   - val_exposure.json        derived: queries (+ exposure_budget and
                              holdout_refresh_due when metrics.yaml is present);
                              no hand prose
@@ -23,6 +23,7 @@ Usage
 from __future__ import annotations
 
 import argparse
+import heapq
 import json
 import os
 import sys
@@ -31,12 +32,35 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from _ledger_common import _canonical_record_bytes, resolve_val_queries
+    from _ledger_common import (
+        LIFECYCLE_STATUSES,
+        NODE_TYPES,
+        PROMOTION_STATUSES,
+        _canonical_record_bytes,
+        resolve_val_queries,
+    )
 except ImportError:  # pragma: no cover - path shim for direct invocation
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from _ledger_common import _canonical_record_bytes, resolve_val_queries
+    from _ledger_common import (
+        LIFECYCLE_STATUSES,
+        NODE_TYPES,
+        PROMOTION_STATUSES,
+        _canonical_record_bytes,
+        resolve_val_queries,
+    )
 
 BASELINE_SENTINEL = "baseline"
+_LIFECYCLE_SET = set(LIFECYCLE_STATUSES)
+_PROMOTION_SET = set(PROMOTION_STATUSES)
+_NODE_TYPE_SET = set(NODE_TYPES)
+_FRONTIER_LIFECYCLE = {"proposed", "pending"}
+_CLOSED_LIFECYCLE = {"blocked", "pruned", "merged"}
+_PROMOTION_CANDIDATE_STATUSES = {
+    "level1_branch_winner",
+    "level2_branch_winner",
+    "branch_winner",
+    "promotion_candidate",
+}
 
 
 def atomic_write_bytes(path: Path, data: bytes) -> None:
@@ -238,16 +262,109 @@ def _detect_pv(records: list[dict[str, Any]]) -> str:
     return "0.5"
 
 
+def _record_lifecycle(rec: dict[str, Any]) -> str:
+    raw = rec.get("lifecycle_status")
+    if isinstance(raw, str) and raw in _LIFECYCLE_SET:
+        return raw
+    # A ledger record without an explicit lifecycle state is a completed
+    # historical observation. Keep legacy status labels as evidence/promotion
+    # labels, not lifecycle.
+    return "completed"
+
+
+def _record_promotion_status(rec: dict[str, Any]) -> str:
+    raw = rec.get("promotion_status")
+    if isinstance(raw, str) and raw in _PROMOTION_SET:
+        return raw
+    legacy_status = rec.get("status")
+    if isinstance(legacy_status, str) and legacy_status in _PROMOTION_SET:
+        return legacy_status
+    return "none"
+
+
+def _record_node_type(rec: dict[str, Any]) -> str:
+    raw = rec.get("node_type")
+    if isinstance(raw, str) and raw in _NODE_TYPE_SET:
+        return raw
+    if rec.get("status") == "baseline" or rec.get("branch") == "baseline":
+        return "baseline"
+    return "candidate"
+
+
+def _record_frontier_eligible(rec: dict[str, Any], lifecycle: str) -> bool:
+    raw = rec.get("frontier_eligible")
+    if isinstance(raw, bool):
+        return raw and lifecycle not in _CLOSED_LIFECYCLE
+    return lifecycle in _FRONTIER_LIFECYCLE
+
+
+def _maturity_bucket(rec: dict[str, Any], promotion_status: str) -> str:
+    maturity = rec.get("maturity_level")
+    if isinstance(maturity, int) and not isinstance(maturity, bool):
+        if maturity <= 1:
+            return "level1"
+        if maturity == 2:
+            return "level2"
+        return "level3_plus"
+    if promotion_status == "level1_branch_winner":
+        return "level1"
+    if promotion_status == "level2_branch_winner":
+        return "level2"
+    if promotion_status in {
+        "branch_winner",
+        "promotion_candidate",
+        "promoted",
+        "low_evidence_promoted",
+    }:
+        return "level3_plus"
+    return "unknown"
+
+
+def _lineage_order(
+    nodes: dict[str, Any],
+    children: dict[str, list[str]],
+    parents_by_id: dict[str, list[str]],
+) -> list[str]:
+    """Return deterministic parent-before-child order, tolerating bad DAGs."""
+    incoming = {rid: len(parents_by_id.get(rid, [])) for rid in nodes}
+    ready = [rid for rid, count in incoming.items() if count == 0]
+    heapq.heapify(ready)
+    queued = set(ready)
+    order: list[str] = []
+    seen: set[str] = set()
+
+    while ready:
+        rid = heapq.heappop(ready)
+        queued.discard(rid)
+        if rid in seen:
+            continue
+        seen.add(rid)
+        order.append(rid)
+        for child in children.get(rid, []):
+            incoming[child] = max(0, incoming.get(child, 0) - 1)
+            if incoming[child] == 0 and child not in seen and child not in queued:
+                heapq.heappush(ready, child)
+                queued.add(child)
+
+    # validate_ledger rejects cycles, but regenerate_state should remain a
+    # tolerant reader and still emit a deterministic aggregate for inspection.
+    for rid in sorted(nodes):
+        if rid not in seen:
+            order.append(rid)
+    return order
+
+
 def build_research_tree(
     records: list[dict[str, Any]], campaign: dict[str, Any]
 ) -> dict[str, Any]:
-    """Tree = topology (parent_ids) + node content (record fields) + campaign meta.
+    """Tree = topology + record node fields + operational derived views.
 
     Node content prefers curated node_title/node_lessons, falling back to the
     record's branch/hypothesis and lessons so the tree is always populated.
     """
     nodes: dict[str, Any] = {}
     children: dict[str, list[str]] = {}
+    parents_by_id: dict[str, list[str]] = {}
     roots: list[str] = []
 
     for rec in records:
@@ -264,15 +381,36 @@ def build_research_tree(
             )
         parents = rec.get("parent_ids")
         parents = parents if isinstance(parents, list) else []
+        parent_ids = [p for p in parents if isinstance(p, str)]
+        lifecycle = _record_lifecycle(rec)
+        promotion_status = _record_promotion_status(rec)
+        node_type = _record_node_type(rec)
+        frontier_eligible = _record_frontier_eligible(rec, lifecycle)
+        blocked_by = rec.get("blocked_by")
+        blocked_by = (
+            [b for b in blocked_by if isinstance(b, str)]
+            if isinstance(blocked_by, list)
+            else []
+        )
         nodes[rid] = {
             "id": rid,
             "title": title,
             "branch": rec.get("branch", ""),
             "status": rec.get("status", ""),
+            "lifecycle_status": lifecycle,
+            "promotion_status": promotion_status,
+            "frontier_eligible": frontier_eligible,
+            "node_type": node_type,
             "hypothesis": rec.get("hypothesis", ""),
-            "parent_ids": [p for p in parents if isinstance(p, str)],
+            "parent_ids": parent_ids,
             "lessons": list(lessons),
         }
+        if blocked_by:
+            nodes[rid]["blocked_by"] = blocked_by
+        if isinstance(rec.get("pruned_reason"), str):
+            nodes[rid]["pruned_reason"] = rec["pruned_reason"]
+        if isinstance(rec.get("merged_into"), str):
+            nodes[rid]["merged_into"] = rec["merged_into"]
         children.setdefault(rid, [])
 
     for rec in records:
@@ -286,6 +424,7 @@ def build_research_tree(
             for p in parents
             if isinstance(p, str) and p != BASELINE_SENTINEL and p in nodes
         ]
+        parents_by_id[rid] = sorted(set(real_parents))
         if not real_parents:
             roots.append(rid)
         for p in real_parents:
@@ -293,6 +432,53 @@ def build_research_tree(
 
     for rid in children:
         children[rid] = sorted(set(children[rid]))
+
+    lineage_order = _lineage_order(nodes, children, parents_by_id)
+    records_by_id = {
+        rec["id"]: rec
+        for rec in records
+        if isinstance(rec.get("id"), str)
+    }
+    promotion_candidates_by_maturity = {
+        "level1": [],
+        "level2": [],
+        "level3_plus": [],
+        "unknown": [],
+    }
+    for rid in lineage_order:
+        node = nodes[rid]
+        lifecycle = str(node.get("lifecycle_status", "completed"))
+        promotion_status = str(node.get("promotion_status", "none"))
+        if (
+            lifecycle not in _CLOSED_LIFECYCLE
+            and promotion_status in _PROMOTION_CANDIDATE_STATUSES
+        ):
+            promotion_candidates_by_maturity[
+                _maturity_bucket(records_by_id.get(rid, {}), promotion_status)
+            ].append(rid)
+
+    views: dict[str, Any] = {
+        "lineage_order": lineage_order,
+        "frontier": [
+            rid for rid in lineage_order if nodes[rid].get("frontier_eligible") is True
+        ],
+        "blocked": [
+            {"id": rid, "blocked_by": nodes[rid].get("blocked_by", [])}
+            for rid in lineage_order
+            if nodes[rid].get("lifecycle_status") == "blocked"
+        ],
+        "pruned": [
+            {"id": rid, "reason": nodes[rid].get("pruned_reason", "")}
+            for rid in lineage_order
+            if nodes[rid].get("lifecycle_status") == "pruned"
+        ],
+        "promotion_candidates_by_maturity": promotion_candidates_by_maturity,
+        "merged": [
+            {"id": rid, "merged_into": nodes[rid].get("merged_into", "")}
+            for rid in lineage_order
+            if nodes[rid].get("lifecycle_status") == "merged"
+        ],
+    }
 
     tree: dict[str, Any] = {
         "protocol_version": campaign.get("protocol_version", _detect_pv(records)),
@@ -305,6 +491,7 @@ def build_research_tree(
         "roots": sorted(roots),
         "nodes": {rid: nodes[rid] for rid in sorted(nodes)},
         "children": {rid: children[rid] for rid in sorted(children)},
+        "views": views,
     }
     return tree
 

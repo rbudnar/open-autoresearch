@@ -24,10 +24,18 @@ from typing import Any
 
 # Allow running both as a module and as a bare script.
 try:
-    from _ledger_common import load_schema, validate_against_schema
+    from _ledger_common import (
+        load_schema,
+        validate_against_schema,
+        validate_tree_fields,
+    )
 except ImportError:  # pragma: no cover - path shim for direct invocation
     sys.path.insert(0, str(Path(__file__).resolve().parent))
-    from _ledger_common import load_schema, validate_against_schema
+    from _ledger_common import (
+        load_schema,
+        validate_against_schema,
+        validate_tree_fields,
+    )
 
 BASELINE_SENTINEL = "baseline"
 
@@ -123,6 +131,9 @@ def validate(ledger_dir: Path, schema_path: Path) -> tuple[bool, list[str]]:
                         f"orphan parent_id {pid!r} (not a known id or "
                         f"sentinel {BASELINE_SENTINEL!r})"
                     )
+
+        if isinstance(obj, dict):
+            record_errors.extend(validate_tree_fields(obj, all_ids))
 
         if record_errors:
             ok_overall = False

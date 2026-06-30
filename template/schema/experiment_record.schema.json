@@ -59,6 +59,43 @@
       "type": "string",
       "description": "Free-form status label (e.g. baseline, promising, branch_winner, failed, invalidated, informative_failure, rejected)."
     },
+    "lifecycle_status": {
+      "type": "string",
+      "enum": ["proposed", "pending", "running", "completed", "merged", "pruned", "blocked"],
+      "description": "OPTIONAL tree lifecycle state for derived research_tree views. Distinct from evidence/promotion labels in status/promotion_status."
+    },
+    "promotion_status": {
+      "type": "string",
+      "enum": ["none", "promising", "level1_branch_winner", "level2_branch_winner", "branch_winner", "promotion_candidate", "promoted", "low_evidence_promoted", "rejected"],
+      "description": "OPTIONAL promotion/evidence label used by derived tree views. Existing status labels keep their protocol meaning; this field separates promotion posture from lifecycle state."
+    },
+    "frontier_eligible": {
+      "type": "boolean",
+      "description": "OPTIONAL override for whether this node belongs in the derived active frontier view. When omitted, regenerate_state.py derives frontier eligibility from lifecycle_status."
+    },
+    "blocked_by": {
+      "type": "array",
+      "description": "OPTIONAL blockers for lifecycle_status=blocked. Values may be record ids, issue ids, or human-decision markers.",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "pruned_reason": {
+      "type": "string",
+      "minLength": 1,
+      "description": "OPTIONAL short reason when lifecycle_status=pruned."
+    },
+    "merged_into": {
+      "type": "string",
+      "minLength": 1,
+      "description": "OPTIONAL target record id when lifecycle_status=merged."
+    },
+    "node_type": {
+      "type": "string",
+      "enum": ["baseline", "candidate", "ablation", "verifier", "admin", "counter_example"],
+      "description": "OPTIONAL tree node kind for derived research_tree views."
+    },
     "source_commit": {
       "type": "string",
       "description": "Content-addressed-provenance Level-1 breadcrumb: the commit HEAD pointed at when this experiment ran. NON-AUTHORITATIVE — a hint, not a reproducibility guarantee. Off-main experiment branches and squash-merges mean it may never resolve from main; see resolvable_from_main. Auditability is carried by the structured record (hypothesis/params/metrics/lineage), not by this pointer. See docs/proposals/2026-06-13-provenance-redesign.md."
