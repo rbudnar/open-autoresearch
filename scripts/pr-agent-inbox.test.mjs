@@ -473,6 +473,25 @@ test('pending checks block locally unless allow-pending-checks is set', () => {
   assert.equal(allowed.clean, true);
 });
 
+test('explicit required checks are honored when branch protection omits them', () => {
+  const result = analyzeInbox(data({
+    prView: {
+      statusCheckRollup: [
+        { context: 'continuous-integration/jenkins/pr-merge', state: 'PENDING' },
+        { name: 'Optional docs', conclusion: 'FAILURE' },
+      ],
+    },
+    branchProtection: {
+      required_status_checks: { contexts: [] },
+    },
+  }), { requiredChecks: ['continuous-integration/jenkins/pr-merge'] });
+
+  assert.equal(result.clean, false);
+  assert.equal(result.statusState, 'pending');
+  assert.deepEqual(result.checks.pending, ['continuous-integration/jenkins/pr-merge']);
+  assert.deepEqual(result.checks.failed, []);
+});
+
 test('branch protection metadata records native review gates', () => {
   const result = analyzeInbox(data({
     branchProtection: {
@@ -496,10 +515,11 @@ test('markdown includes sticky marker and stable sections', () => {
 });
 
 test('assert-clean is parsed as normalized clean assertion', () => {
-  const options = parseArgs(['--pr', '60', '--assert-clean', '--allow-pending-checks']);
+  const options = parseArgs(['--pr', '60', '--assert-clean', '--allow-pending-checks', '--required-check', 'continuous-integration/jenkins/pr-merge']);
   assert.equal(options.pr, 60);
   assert.equal(options.assertClean, true);
   assert.equal(options.allowPendingChecks, true);
+  assert.deepEqual(options.requiredChecks, ['continuous-integration/jenkins/pr-merge']);
 });
 
 test('assert-no-agent-attention is parsed as actionable-only assertion', () => {

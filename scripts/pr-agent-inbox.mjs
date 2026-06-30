@@ -42,6 +42,7 @@ export function parseArgs(argv = process.argv.slice(2)) {
     ensureLabel: false,
     publishStatus: false,
     ignoreChecks: [defaultStatusContext],
+    requiredChecks: [],
     allowPendingChecks: false,
     statusContext: defaultStatusContext,
     attentionLabel: defaultAttentionLabel,
@@ -81,6 +82,10 @@ export function parseArgs(argv = process.argv.slice(2)) {
       index += 1;
       if (!argv[index]) throw new Error('--ignore-check requires a check name');
       options.ignoreChecks.push(argv[index]);
+    } else if (arg === '--required-check') {
+      index += 1;
+      if (!argv[index]) throw new Error('--required-check requires a check name');
+      options.requiredChecks.push(argv[index]);
     } else if (arg === '--allow-pending-checks') {
       options.allowPendingChecks = true;
     } else if (arg === '--status-context') {
@@ -125,6 +130,7 @@ export function helpText() {
     '  --ensure-label          Create agent-attention if missing before syncing.',
     '  --publish-status        Publish agent-inbox-clean on the PR head SHA.',
     '  --ignore-check <name>   Ignore a check/status context during required-check classification.',
+    '  --required-check <name> Treat a check/status context as required even when branch protection omits it.',
     '  --allow-pending-checks  Let pending required checks stay non-blocking for this run.',
   ].join('\n');
 }
@@ -406,7 +412,11 @@ export function analyzeInbox(data, options = {}) {
   }
 
   addMergeStateItem(items, prView);
-  addCheckItems(items, prView, data.branchProtection, { ignoreChecks, allowPendingChecks: options.allowPendingChecks });
+  addCheckItems(items, prView, data.branchProtection, {
+    ignoreChecks,
+    requiredChecks: options.requiredChecks,
+    allowPendingChecks: options.allowPendingChecks,
+  });
 
   const agentAttention = items.some((entry) => entry.agentActionable && entry.severity === 'blocking');
   const clean = items.length === 0;
@@ -474,12 +484,17 @@ function addMergeStateItem(items, prView) {
 function addCheckItems(items, prView, branchProtection, options) {
   const checks = Array.isArray(prView.statusCheckRollup) ? prView.statusCheckRollup : [];
   const requiredNames = requiredCheckNames(branchProtection);
-  const requiredKnown = requiredNames !== null;
+  const explicitRequiredNames = new Set((options.requiredChecks ?? []).map(normalizeCheckName));
+  const effectiveRequiredNames = new Set([
+    ...((requiredNames === null) ? [] : requiredNames),
+    ...explicitRequiredNames,
+  ]);
+  const requiredKnown = requiredNames !== null || explicitRequiredNames.size > 0;
 
   for (const check of checks) {
     const name = checkName(check);
     if (!name || shouldIgnoreCheck(check, options.ignoreChecks)) continue;
-    if (requiredKnown && !checkMatchesRequired(check, requiredNames)) continue;
+    if (requiredKnown && !checkMatchesRequired(check, effectiveRequiredNames)) continue;
 
     const state = checkState(check);
     if (state === 'success' || state === 'skipped' || state === 'neutral') continue;
