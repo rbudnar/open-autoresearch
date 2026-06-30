@@ -18,7 +18,6 @@ on:
     - cron: '*/15 * * * *'
 
 permissions:
-  actions: read
   contents: read
   issues: write
   pull-requests: read
@@ -31,7 +30,7 @@ concurrency:
 
 jobs:
   agent-inbox:
-    if: github.event_name != 'issue_comment' || (github.event.issue.pull_request && startsWith(github.event.comment.body, '/agent-inbox refresh'))
+    if: github.event_name != 'issue_comment' || github.event.issue.pull_request
     runs-on: ubuntu-latest
     steps:
       - name: Decide inbox refresh scope
@@ -45,11 +44,13 @@ jobs:
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
           INPUT_PR: ${{ github.event.inputs.pr || '' }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr || '' }}
+          CHECKOUT_REF: ${{ github.event.pull_request.base.sha || github.sha }}
         run: |
           set -euo pipefail
 
           mode="skip"
           pr="${PR_NUMBER}"
+          checkout_ref="${CHECKOUT_REF:-$GITHUB_SHA}"
 
           case "$EVENT_NAME" in
             pull_request_target)
@@ -87,16 +88,13 @@ jobs:
           {
             echo "mode=$mode"
             echo "pr=$pr"
+            echo "checkout_ref=$checkout_ref"
           } >> "$GITHUB_OUTPUT"
 
-      - name: Checkout shared PR Agent Inbox
+      - uses: actions/checkout@v4
         if: steps.decide.outputs.mode != 'skip'
-        uses: actions/checkout@v4
         with:
-          repository: rbudnar/harness-engineering-bootstrap
-          ref: ce3c9484309451af52d0b1a432d6da398daf270d
-          path: .agent-inbox-tool
-          persist-credentials: false
+          ref: ${{ steps.decide.outputs.checkout_ref }}
 
       - uses: actions/setup-node@v4
         if: steps.decide.outputs.mode != 'skip'
@@ -105,30 +103,45 @@ jobs:
 
       - name: Refresh one PR inbox
         if: steps.decide.outputs.mode == 'assert'
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
           TARGET_PR: ${{ steps.decide.outputs.pr }}
         run: |
           set -euo pipefail
-          node .agent-inbox-tool/scripts/pr-agent-inbox.mjs \
+          if [[ ! -f scripts/pr-agent-inbox.mjs ]]; then
+            echo "::notice::PR Agent Inbox script is not installed on the checked-out base ref yet; skipping bootstrap refresh."
+            exit 0
+          fi
+          if ! node scripts/pr-agent-inbox.mjs --help 2>&1 | grep -q -- '--assert-no-agent-attention'; then
+            echo "::notice::PR Agent Inbox script on the checked-out ref does not support actionable-only assertion yet; skipping bootstrap refresh."
+            exit 0
+          fi
+          node scripts/pr-agent-inbox.mjs \
             --repo "$GITHUB_REPOSITORY" \
             --pr "$TARGET_PR" \
-            --assert-clean \
+            --assert-no-agent-attention \
             --update-comment \
             --ensure-label \
             --sync-label \
             --publish-status \
+            --allow-pending-checks \
             --ignore-check "PR Agent Inbox" \
             --ignore-check "PR Agent Inbox / agent-inbox"
 
       - name: Refresh open PR inboxes
         if: steps.decide.outputs.mode == 'sweep'
-        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          if [[ ! -f scripts/pr-agent-inbox.mjs ]]; then
+            echo "::notice::PR Agent Inbox script is not installed on the checked-out base ref yet; skipping bootstrap sweep."
+            exit 0
+          fi
+          if ! node scripts/pr-agent-inbox.mjs --help 2>&1 | grep -q -- '--assert-no-agent-attention'; then
+            echo "::notice::PR Agent Inbox script on the checked-out ref does not support actionable-only assertion yet; skipping bootstrap sweep."
+            exit 0
+          fi
           pr_list="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json number --jq '.[].number')"
           if [[ -z "$pr_list" ]]; then
             echo "No open pull requests to refresh."
@@ -138,14 +151,16 @@ jobs:
 
           status=0
           for pr in "${prs[@]}"; do
-            node .agent-inbox-tool/scripts/pr-agent-inbox.mjs \
+            node scripts/pr-agent-inbox.mjs \
               --repo "$GITHUB_REPOSITORY" \
               --pr "$pr" \
               --refresh \
+              --assert-no-agent-attention \
               --update-comment \
               --ensure-label \
               --sync-label \
               --publish-status \
+              --allow-pending-checks \
               --ignore-check "PR Agent Inbox" \
               --ignore-check "PR Agent Inbox / agent-inbox" || status=1
           done
