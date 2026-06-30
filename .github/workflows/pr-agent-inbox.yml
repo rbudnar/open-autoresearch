@@ -9,6 +9,9 @@ on:
     types: [created, edited, deleted]
   issue_comment:
     types: [created]
+  status:
+  check_run:
+    types: [created, rerequested, completed]
   workflow_dispatch:
     inputs:
       pr:
@@ -30,7 +33,9 @@ concurrency:
 
 jobs:
   agent-inbox:
-    if: github.event_name != 'issue_comment' || github.event.issue.pull_request
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/agent-inbox refresh'))
     runs-on: ubuntu-latest
     steps:
       - name: Decide inbox refresh scope
@@ -44,13 +49,41 @@ jobs:
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
           INPUT_PR: ${{ github.event.inputs.pr || '' }}
           PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr || '' }}
-          CHECKOUT_REF: ${{ github.event.pull_request.base.sha || github.sha }}
+          CHECKOUT_REF: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch || github.sha }}
+          STATUS_CONTEXT: ${{ github.event.context || '' }}
+          STATUS_SHA: ${{ github.event.sha || '' }}
+          CHECK_RUN_NAME: ${{ github.event.check_run.name || '' }}
+          CHECK_RUN_SHA: ${{ github.event.check_run.head_sha || '' }}
         run: |
           set -euo pipefail
 
           mode="skip"
           pr="${PR_NUMBER}"
           checkout_ref="${CHECKOUT_REF:-$GITHUB_SHA}"
+
+          resolve_open_prs_for_sha() {
+            local sha="$1"
+            if [[ -z "$sha" ]]; then
+              return 0
+            fi
+            gh api -H "Accept: application/vnd.github+json" \
+              "repos/${REPO}/commits/${sha}/pulls" \
+              --jq 'map(select(.state == "open")) | .[].number' 2>/dev/null || true
+          }
+
+          set_pr_scope_for_sha() {
+            local sha="$1"
+            mapfile -t resolved_prs < <(resolve_open_prs_for_sha "$sha")
+            if (( ${#resolved_prs[@]} == 1 )); then
+              mode="assert"
+              pr="${resolved_prs[0]}"
+            elif (( ${#resolved_prs[@]} > 1 )); then
+              echo "::notice::Multiple open PRs found for ${sha}; sweeping open PR inboxes."
+              mode="sweep"
+            else
+              echo "::notice::No open pull request found for ${sha}; skipping inbox refresh."
+            fi
+          }
 
           case "$EVENT_NAME" in
             pull_request_target)
@@ -70,6 +103,20 @@ jobs:
                   admin|maintain|write) mode="assert" ;;
                   *) echo "::notice::Ignoring /agent-inbox refresh from ${COMMENT_AUTHOR}; permission is ${permission}." ;;
                 esac
+              fi
+              ;;
+            status)
+              if [[ "$STATUS_CONTEXT" == "agent-inbox-clean" ]]; then
+                echo "::notice::Skipping self-published agent-inbox-clean status event."
+              else
+                set_pr_scope_for_sha "$STATUS_SHA"
+              fi
+              ;;
+            check_run)
+              if [[ "$CHECK_RUN_NAME" == "agent-inbox" ]]; then
+                echo "::notice::Skipping self check_run event for PR Agent Inbox."
+              else
+                set_pr_scope_for_sha "$CHECK_RUN_SHA"
               fi
               ;;
             workflow_dispatch)
