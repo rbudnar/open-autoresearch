@@ -492,6 +492,22 @@ test('explicit required checks are honored when branch protection omits them', (
   assert.deepEqual(result.checks.failed, []);
 });
 
+test('explicit required checks preserve fail-closed behavior when protection is unavailable', () => {
+  const result = analyzeInbox(data({
+    prView: {
+      statusCheckRollup: [
+        { context: 'continuous-integration/jenkins/pr-merge', state: 'PENDING' },
+        { name: 'Unknown required', conclusion: 'FAILURE' },
+      ],
+    },
+    branchProtection: null,
+  }), { requiredChecks: ['continuous-integration/jenkins/pr-merge'] });
+
+  assert.equal(result.clean, false);
+  assert.deepEqual(result.checks.pending, ['continuous-integration/jenkins/pr-merge']);
+  assert.deepEqual(result.checks.failed, ['Unknown required']);
+});
+
 test('branch protection metadata records native review gates', () => {
   const result = analyzeInbox(data({
     branchProtection: {
@@ -570,6 +586,12 @@ test('exit policy distinguishes waiting state from agent attention', () => {
   }, {
     assertNoAgentAttention: true,
   }, [{ name: 'update sticky inbox comment' }]), false);
+});
+
+test('refresh exits zero for ordinary agent attention but not status publish failures', () => {
+  const result = { clean: false, agentAttention: true };
+  assert.equal(shouldExitNonzero(result, { refresh: true, assertNoAgentAttention: true }), false);
+  assert.equal(shouldExitNonzero(result, { refresh: true }, [{ name: 'publish inbox status' }]), true);
 });
 
 test('label sync adds and removes based on agentAttention', () => {

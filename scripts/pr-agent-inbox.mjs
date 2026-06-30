@@ -489,7 +489,7 @@ function addCheckItems(items, prView, branchProtection, options) {
     ...((requiredNames === null) ? [] : requiredNames),
     ...explicitRequiredNames,
   ]);
-  const requiredKnown = requiredNames !== null || explicitRequiredNames.size > 0;
+  const requiredKnown = requiredNames !== null;
 
   for (const check of checks) {
     const name = checkName(check);
@@ -695,6 +695,7 @@ export function writeGitHubOutputs(result) {
 
 export function shouldExitNonzero(result, options = {}, publishFailures = []) {
   if (publishFailures.some((failure) => failure.name === 'publish inbox status')) return true;
+  if (options.refresh) return false;
   if (options.assertClean && !result.clean) return true;
   if (options.assertNoAgentAttention && result.agentAttention) return true;
   return false;
