@@ -1184,6 +1184,11 @@ When the cost tier (§6.1) reduces seed counts below 3, bootstrap intervals wide
 The label vocabulary is **namespaced by maturity level** so that an external reader can tell at a glance how much evidence backs a "win." Every label-carrying artifact (ledger entries, reports, dashboards) MUST include `maturity_level: <N>` and `not_deployable: true|false` frontmatter — the namespaced labels are not optional sugar.
 
 - **invalid** — tampering / leakage / broken eval / unreproducible.
+- **invalidated** — a previously recorded result was retroactively invalidated
+  by review, re-grade, evaluator drift, leakage discovery, or another trust
+  boundary failure. Use `invalid` when the run is known bad at write time; use
+  `invalidated` when later evidence revokes a prior result. It is failed/invalid
+  evidence for promotion.
 - **infra_failed** — infrastructure prevented a meaningful evaluation; requires `failure_reason` and does not count against the branch failure budget.
 - **budget_truncated** — a per-iteration budget cap stopped the run before planned evidence was available; requires `failure_reason` and does not count as a worse model.
 - **failed** — worse or too costly.

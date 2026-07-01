@@ -4,7 +4,7 @@ report_id: "<YYYYMMDD-HHMMSS-6hex-slug>"
 candidate_proposal_id: "<id>"
 ledger_entry_id: "<id>"
 maturity_level: <1 | 2 | 3 | 4 | 5>
-status: "<invalid | infra_failed | budget_truncated | failed | informative_failure | promising | level1_branch_winner | level2_branch_winner | branch_winner | promotion_candidate | promoted | low_evidence_promoted>"
+status: "<invalid | invalidated | infra_failed | budget_truncated | failed | informative_failure | promising | level1_branch_winner | level2_branch_winner | branch_winner | promotion_candidate | promoted | low_evidence_promoted>"
 not_deployable: <true | false>
 evidence_level: "<standard | low>"
 enforcement_mode: "<ci_enforced | pre_receive | oop_verifier | container_ro | none>"
@@ -85,7 +85,7 @@ executor_return:
   boundary_deviations:
     - "<none, or exact deviation requiring Research Director/Skeptic review>"
   ledger_ready_fields:
-    status: "<invalid | infra_failed | budget_truncated | failed | informative_failure | promising | ...>"
+    status: "<invalid | invalidated | infra_failed | budget_truncated | failed | informative_failure | promising | ...>"
     failure_reason: "<required for infra_failed/budget_truncated; recommended for invalid>"
     val_queries_incurred_by_this_run: <int>
     coordinator_executor_separation: "<level_0 | level_1 | level_2 | level_3>"

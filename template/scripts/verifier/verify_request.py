@@ -104,6 +104,10 @@ FAILED_OR_INVALID_EVIDENCE_STATUSES = {
     "informative_failure",
 }
 
+TERMINAL_STATUSES_BLOCKING_PROMOTION_STATUS = {
+    "rejected",
+}
+
 # §10.5 verifier validation rules, in order. Each function takes the verifier
 # context and returns (ok: bool, rejection_reason: str | None).
 RULE_NAMES = [
@@ -766,9 +770,18 @@ def rule_9_statistics_recomputed(ctx: VerifierContext) -> tuple[bool, str | None
                 f"{status_errors[0]}"
             )
         raw_status = rec["entry"].get("status")
+        posture_field, posture = _promotion_posture(rec["entry"])
         if raw_status in FAILED_OR_INVALID_EVIDENCE_STATUSES:
             return False, (
                 f"{label} status {raw_status!r} is failed or invalid evidence"
+            )
+        if (
+            raw_status in TERMINAL_STATUSES_BLOCKING_PROMOTION_STATUS
+            and posture_field == "promotion_status"
+        ):
+            return False, (
+                f"{label} status {raw_status!r} cannot be overridden by "
+                f"promotion_status {posture!r}"
             )
         tree_errors = validate_tree_fields(rec["entry"], all_ledger_ids)
         if tree_errors:
@@ -787,11 +800,9 @@ def rule_9_statistics_recomputed(ctx: VerifierContext) -> tuple[bool, str | None
                 "is closed and cannot be promoted"
             )
         if label.startswith("candidate_runs["):
-            posture_field, posture = _promotion_posture(rec["entry"])
             if posture not in PROMOTABLE_CANDIDATE_POSTURES:
                 return False, f"{label} {posture_field} {posture!r} is not promotable"
         else:
-            posture_field, posture = _promotion_posture(rec["entry"])
             if posture in FAILED_OR_INVALID_EVIDENCE_STATUSES:
                 return False, (
                     f"{label} {posture_field} {posture!r} is failed or invalid "

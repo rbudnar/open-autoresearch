@@ -1425,6 +1425,7 @@ class TestRule9RequiresPromotionEvidence(unittest.TestCase):
             "level2_branch_winner",
             "promoted",
             "low_evidence_promoted",
+            "rejected",
             "unknown_label",
         ):
             with self.subTest(status=status):
@@ -1455,6 +1456,24 @@ class TestRule9RequiresPromotionEvidence(unittest.TestCase):
                     self.assertIn("failed or invalid evidence", reason)
                 else:
                     self.assertIn("not promotable", reason)
+
+    def test_candidate_rejected_status_not_masked_by_promotion_status(self):
+        ledger = self._full_ledger()
+        candidate = _valid_record(
+            "20260101-000000-bbb000",
+            metrics={"validation_nll": 0.825},
+        )
+        candidate["status"] = "rejected"
+        candidate["promotion_status"] = "promotion_candidate"
+        ledger["c0"] = {
+            "entry": candidate,
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(
+            self._ctx(_base_request(), ledger)
+        )
+        self.assertFalse(ok)
+        self.assertIn("cannot be overridden", reason)
 
     def test_candidate_promotion_status_can_carry_positive_posture(self):
         ledger = self._full_ledger()
@@ -1577,6 +1596,22 @@ class TestRule9RequiresPromotionEvidence(unittest.TestCase):
         self.assertIn("baseline_rerun", reason)
         self.assertIn("failed or invalid evidence", reason)
 
+    def test_baseline_rerun_rejected_status_not_masked_by_promotion_status(self):
+        ledger = self._full_ledger()
+        rerun = _valid_record("20260101-000000-ccc000")
+        rerun["status"] = "rejected"
+        rerun["promotion_status"] = "promotion_candidate"
+        ledger["br0"] = {
+            "entry": rerun,
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(
+            self._ctx(_base_request(), ledger)
+        )
+        self.assertFalse(ok)
+        self.assertIn("baseline_rerun", reason)
+        self.assertIn("cannot be overridden", reason)
+
     def test_invalidated_baseline_rerun_status_rejected(self):
         ledger = self._full_ledger()
         rerun = _valid_record("20260101-000000-ccc000")
@@ -1623,6 +1658,22 @@ class TestRule9RequiresPromotionEvidence(unittest.TestCase):
         self.assertFalse(ok)
         self.assertIn("ablation_runs[0]", reason)
         self.assertIn("failed or invalid evidence", reason)
+
+    def test_ablation_rejected_status_not_masked_by_promotion_status(self):
+        ledger = self._full_ledger()
+        ablation = _valid_record("20260101-000000-ddd000", metrics={})
+        ablation["status"] = "rejected"
+        ablation["promotion_status"] = "promotion_candidate"
+        ledger["ab0"] = {
+            "entry": ablation,
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(
+            self._ctx(_base_request(), ledger)
+        )
+        self.assertFalse(ok)
+        self.assertIn("ablation_runs[0]", reason)
+        self.assertIn("cannot be overridden", reason)
 
     def test_invalidated_ablation_status_rejected(self):
         ledger = self._full_ledger()

@@ -57,7 +57,7 @@
     },
     "status": {
       "type": "string",
-      "description": "Free-form status label (e.g. baseline, promising, branch_winner, failed, infra_failed, budget_truncated, invalid, informative_failure, rejected)."
+      "description": "Free-form status label (e.g. baseline, promising, branch_winner, failed, infra_failed, budget_truncated, invalid, invalidated, informative_failure, rejected)."
     },
     "failure_reason": {
       "type": "string",
