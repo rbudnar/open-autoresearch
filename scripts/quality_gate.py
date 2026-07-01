@@ -205,6 +205,13 @@ def check_repo_script_tests() -> None:
     run([sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_*.py"])
 
 
+def check_agent_inbox_tests() -> None:
+    test_file = REPO_ROOT / "scripts" / "pr-agent-inbox.test.mjs"
+    if not test_file.exists():
+        return
+    run(["node", "--test", "scripts/pr-agent-inbox.test.mjs"])
+
+
 def check_verifier_rejection() -> None:
     example = REPO_ROOT / "examples" / "level3-counter-example"
     with tempfile.TemporaryDirectory(prefix="oar-quality-gate-") as out_dir:
@@ -282,6 +289,7 @@ def main() -> int:
     check_script_parse()
     check_script_help()
     check_repo_script_tests()
+    check_agent_inbox_tests()
     check_example_versions()
     check_example_ledgers()
     if not args.skip_verifier:

@@ -27,6 +27,8 @@
 /scripts/harness_metrics.py @rbudnar
 /scripts/quality_gate.py    @rbudnar
 /scripts/weekly_quality_report.py @rbudnar
+/scripts/pr-agent-inbox.mjs @rbudnar
+/scripts/pr-agent-inbox.test.mjs @rbudnar
 /scripts/tests/**           @rbudnar
 
 # Example campaigns — must validate against the protocol via CI.

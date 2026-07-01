@@ -1,0 +1,213 @@
+name: PR Agent Inbox
+
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft, edited]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  pull_request_review_comment:
+    types: [created, edited, deleted]
+  issue_comment:
+    types: [created]
+  status:
+  check_run:
+    types: [created, rerequested, completed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Pull request number to refresh; omit to sweep open PRs.
+        required: false
+  schedule:
+    - cron: '*/15 * * * *'
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  checks: read
+  statuses: write
+
+concurrency:
+  group: pr-agent-inbox-${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr || 'sweep' }}
+  cancel-in-progress: false
+
+jobs:
+  agent-inbox:
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/agent-inbox refresh'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide inbox refresh scope
+        id: decide
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          COMMENT_AUTHOR: ${{ github.event.comment.user.login || '' }}
+          COMMENT_BODY: ${{ github.event.comment.body || '' }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
+          INPUT_PR: ${{ github.event.inputs.pr || '' }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr || '' }}
+          CHECKOUT_REF: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch || github.sha }}
+          STATUS_CONTEXT: ${{ github.event.context || '' }}
+          STATUS_SHA: ${{ github.event.sha || '' }}
+          CHECK_RUN_NAME: ${{ github.event.check_run.name || '' }}
+          CHECK_RUN_SHA: ${{ github.event.check_run.head_sha || '' }}
+        run: |
+          set -euo pipefail
+
+          mode="skip"
+          pr="${PR_NUMBER}"
+          checkout_ref="${CHECKOUT_REF:-$GITHUB_SHA}"
+
+          resolve_open_prs_for_sha() {
+            local sha="$1"
+            if [[ -z "$sha" ]]; then
+              return 0
+            fi
+            gh api -H "Accept: application/vnd.github+json" \
+              "repos/${REPO}/commits/${sha}/pulls" \
+              --jq 'map(select(.state == "open")) | .[].number' 2>/dev/null || true
+          }
+
+          set_pr_scope_for_sha() {
+            local sha="$1"
+            mapfile -t resolved_prs < <(resolve_open_prs_for_sha "$sha")
+            if (( ${#resolved_prs[@]} == 1 )); then
+              mode="assert"
+              pr="${resolved_prs[0]}"
+            elif (( ${#resolved_prs[@]} > 1 )); then
+              echo "::notice::Multiple open PRs found for ${sha}; sweeping open PR inboxes."
+              mode="sweep"
+            else
+              echo "::notice::No open pull request found for ${sha}; skipping inbox refresh."
+            fi
+          }
+
+          case "$EVENT_NAME" in
+            pull_request_target)
+              mode="assert"
+              ;;
+            pull_request_review|pull_request_review_comment)
+              if [[ -n "$HEAD_REPO" && "$HEAD_REPO" != "$REPO" ]]; then
+                echo "::notice::Skipping write-backed review refresh for fork PR ${pr}; scheduled or manual refresh will reconcile the PR-head status."
+              else
+                mode="assert"
+              fi
+              ;;
+            issue_comment)
+              if [[ "$COMMENT_BODY" == "/agent-inbox refresh"* ]]; then
+                permission="$(gh api "repos/${REPO}/collaborators/${COMMENT_AUTHOR}/permission" --jq '.permission' 2>/dev/null || echo none)"
+                case "$permission" in
+                  admin|maintain|write) mode="assert" ;;
+                  *) echo "::notice::Ignoring /agent-inbox refresh from ${COMMENT_AUTHOR}; permission is ${permission}." ;;
+                esac
+              fi
+              ;;
+            status)
+              if [[ "$STATUS_CONTEXT" == "agent-inbox-clean" ]]; then
+                echo "::notice::Skipping self-published agent-inbox-clean status event."
+              else
+                set_pr_scope_for_sha "$STATUS_SHA"
+              fi
+              ;;
+            check_run)
+              if [[ "$CHECK_RUN_NAME" == "agent-inbox" || "$CHECK_RUN_NAME" == "PR Agent Inbox / agent-inbox" ]]; then
+                echo "::notice::Skipping self check_run event for PR Agent Inbox."
+              else
+                set_pr_scope_for_sha "$CHECK_RUN_SHA"
+              fi
+              ;;
+            workflow_dispatch)
+              if [[ -n "$INPUT_PR" ]]; then
+                mode="assert"
+                pr="$INPUT_PR"
+              else
+                mode="sweep"
+              fi
+              ;;
+            schedule)
+              mode="sweep"
+              ;;
+          esac
+
+          {
+            echo "mode=$mode"
+            echo "pr=$pr"
+            echo "checkout_ref=$checkout_ref"
+          } >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        if: steps.decide.outputs.mode != 'skip'
+        with:
+          ref: ${{ steps.decide.outputs.checkout_ref }}
+
+      - uses: actions/setup-node@v4
+        if: steps.decide.outputs.mode != 'skip'
+        with:
+          node-version: '20'
+
+      - name: Refresh one PR inbox
+        if: steps.decide.outputs.mode == 'assert'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TARGET_PR: ${{ steps.decide.outputs.pr }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f scripts/pr-agent-inbox.mjs ]]; then
+            echo "::notice::PR Agent Inbox script is not installed on the checked-out base ref yet; skipping bootstrap refresh."
+            exit 0
+          fi
+          if ! node scripts/pr-agent-inbox.mjs --help 2>&1 | grep -q -- '--assert-no-agent-attention'; then
+            echo "::notice::PR Agent Inbox script on the checked-out ref does not support actionable-only assertion yet; skipping bootstrap refresh."
+            exit 0
+          fi
+          node scripts/pr-agent-inbox.mjs \
+            --repo "$GITHUB_REPOSITORY" \
+            --pr "$TARGET_PR" \
+            --assert-no-agent-attention \
+            --update-comment \
+            --ensure-label \
+            --sync-label \
+            --publish-status \
+            --ignore-check "PR Agent Inbox" \
+            --ignore-check "PR Agent Inbox / agent-inbox"
+
+      - name: Refresh open PR inboxes
+        if: steps.decide.outputs.mode == 'sweep'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [[ ! -f scripts/pr-agent-inbox.mjs ]]; then
+            echo "::notice::PR Agent Inbox script is not installed on the checked-out base ref yet; skipping bootstrap sweep."
+            exit 0
+          fi
+          if ! node scripts/pr-agent-inbox.mjs --help 2>&1 | grep -q -- '--assert-no-agent-attention'; then
+            echo "::notice::PR Agent Inbox script on the checked-out ref does not support actionable-only assertion yet; skipping bootstrap sweep."
+            exit 0
+          fi
+          pr_list="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json number --jq '.[].number')"
+          if [[ -z "$pr_list" ]]; then
+            echo "No open pull requests to refresh."
+            exit 0
+          fi
+          mapfile -t prs <<< "$pr_list"
+
+          status=0
+          for pr in "${prs[@]}"; do
+            node scripts/pr-agent-inbox.mjs \
+              --repo "$GITHUB_REPOSITORY" \
+              --pr "$pr" \
+              --refresh \
+              --assert-no-agent-attention \
+              --update-comment \
+              --ensure-label \
+              --sync-label \
+              --publish-status \
+              --ignore-check "PR Agent Inbox" \
+              --ignore-check "PR Agent Inbox / agent-inbox" || status=1
+          done
+
+          exit "$status"
