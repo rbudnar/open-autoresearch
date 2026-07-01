@@ -304,6 +304,13 @@ def validate_branch_insights(
                     f"{prefix}.updates_parent_ids contains unknown id "
                     f"{unknown_updates[0]!r}"
                 )
+        entry_id = entry.get("id")
+        if _nonempty_string(entry_id) and isinstance(update_ids, list):
+            if entry_id in update_ids:
+                errors.append(
+                    f"{prefix}.updates_parent_ids must not contain the current "
+                    "record id"
+                )
 
         constraint = insight.get("validated_constraint")
         if constraint is not None and not _nonempty_string(constraint):
@@ -335,7 +342,9 @@ def validate_branch_insights(
         review_ids = insight.get("review_record_ids")
         if review_ids is not None:
             if not _nonempty_string_list(review_ids):
-                errors.append(f"{prefix}.review_record_ids must be a string list")
+                errors.append(
+                    f"{prefix}.review_record_ids must be a non-empty string list"
+                )
             elif all_ids is not None:
                 unknown_review_ids = [rid for rid in review_ids if rid not in all_ids]
                 if unknown_review_ids:

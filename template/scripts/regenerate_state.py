@@ -33,6 +33,8 @@ from typing import Any
 
 try:
     from _ledger_common import (
+        INSIGHT_CONFIDENCE_LEVELS,
+        INSIGHT_REVIEW_STATUSES,
         LIFECYCLE_STATUSES,
         NODE_TYPES,
         PROMOTION_STATUSES,
@@ -42,6 +44,8 @@ try:
 except ImportError:  # pragma: no cover - path shim for direct invocation
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from _ledger_common import (
+        INSIGHT_CONFIDENCE_LEVELS,
+        INSIGHT_REVIEW_STATUSES,
         LIFECYCLE_STATUSES,
         NODE_TYPES,
         PROMOTION_STATUSES,
@@ -53,6 +57,8 @@ BASELINE_SENTINEL = "baseline"
 _LIFECYCLE_SET = set(LIFECYCLE_STATUSES)
 _PROMOTION_SET = set(PROMOTION_STATUSES)
 _NODE_TYPE_SET = set(NODE_TYPES)
+_INSIGHT_CONFIDENCE_SET = set(INSIGHT_CONFIDENCE_LEVELS)
+_INSIGHT_REVIEW_STATUS_SET = set(INSIGHT_REVIEW_STATUSES)
 _FRONTIER_LIFECYCLE = {"proposed", "pending"}
 _CLOSED_LIFECYCLE = {"blocked", "pruned", "merged"}
 _PROMOTION_CANDIDATE_STATUSES = {
@@ -331,8 +337,12 @@ def _record_branch_insights(rec: dict[str, Any]) -> list[dict[str, Any]]:
             "distilled_insight": distilled,
             "source_record_ids": source_ids,
             "updates_parent_ids": update_ids,
-            "confidence": item.get("confidence", "low"),
-            "review_status": item.get("review_status", "draft"),
+            "confidence": item.get("confidence")
+            if item.get("confidence") in _INSIGHT_CONFIDENCE_SET
+            else "low",
+            "review_status": item.get("review_status")
+            if item.get("review_status") in _INSIGHT_REVIEW_STATUS_SET
+            else "draft",
         }
         if isinstance(item.get("validated_constraint"), str):
             insight["validated_constraint"] = item["validated_constraint"]

@@ -294,6 +294,27 @@ class TestLogExperiment(TempStateMixin):
             [],
         )
 
+    def test_branch_insight_does_not_resolve_self_updated_parent(self):
+        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        now = dt.datetime(2026, 5, 18, 10, 0, 0, 0, tzinfo=dt.timezone.utc)
+        insight = {
+            "raw_observation": "A leaf tried to update itself.",
+            "distilled_insight": "The update target must remain an ancestor.",
+            "source_record_ids": ["self"],
+            "updates_parent_ids": ["self"],
+            "validated_constraint": "Self-targeted updates are not parent constraints.",
+            "confidence": "medium",
+        }
+        rec = log_experiment.build_record(
+            self._args(branch_insight_json=[json.dumps(insight)]),
+            now,
+        )
+        stamped = rec["branch_insights"][0]
+        self.assertEqual(stamped["source_record_ids"], [rec["id"]])
+        self.assertEqual(stamped["updates_parent_ids"], ["self"])
+        errors = _ledger_common.validate_branch_insights(rec, {rec["id"]})
+        self.assertTrue(any("updates_parent_ids" in error for error in errors), errors)
+
     def test_writer_rejects_tree_cross_field_errors(self):
         (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
         with contextlib.redirect_stderr(io.StringIO()):
@@ -685,12 +706,19 @@ class TestRegenerate(TempStateMixin):
                 "review_status": "reviewed",
                 "review_record_ids": ["20260518-100000-aaa001"],
                 "retirement_signal": "Revisit after a factorial with new data split.",
-            }
+            },
+            {
+                "raw_observation": "Malformed hand-written insight is tolerated by the derived reader.",
+                "distilled_insight": "Derived views should not leak unknown enum values.",
+                "source_record_ids": ["20260518-100000-aaa001"],
+                "updates_parent_ids": ["baseline"],
+                "validated_constraint": "Malformed enum values degrade to defaults.",
+                "confidence": "surprisingly_sure",
+                "review_status": "maybe",
+            },
         ]
         write_shard(self.ledger, baseline)
         write_shard(self.ledger, candidate)
-        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
-        self.assertTrue(ok, lines)
 
         regenerate_state.regenerate(self.state)
         tree = json.loads((self.state / "research_tree.json").read_text())
@@ -710,6 +738,14 @@ class TestRegenerate(TempStateMixin):
         self.assertEqual(
             insights["invalidated_ideas"][0]["idea"],
             "promote attention_pool+ordinal_hybrid without attribution",
+        )
+        self.assertEqual(
+            insights["by_record"]["20260518-100000-aaa001"][1]["confidence"],
+            "low",
+        )
+        self.assertEqual(
+            insights["by_record"]["20260518-100000-aaa001"][1]["review_status"],
+            "draft",
         )
 
     def test_jsonl_lines_are_canonical(self):
@@ -917,6 +953,23 @@ class TestValidateLedger(TempStateMixin):
         ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
         self.assertFalse(ok)
         self.assertTrue(any("updates_parent_ids" in line for line in lines), lines)
+
+    def test_branch_insight_rejects_current_record_as_updated_parent(self):
+        rec = make_record("20260518-090000-aaa000", parents=["baseline"])
+        rec["branch_insights"] = [
+            {
+                "raw_observation": "Observation points at itself.",
+                "distilled_insight": "A propagated insight should update an ancestor.",
+                "source_record_ids": ["20260518-090000-aaa000"],
+                "updates_parent_ids": ["20260518-090000-aaa000"],
+                "validated_constraint": "Self-targeted updates are not allowed.",
+                "confidence": "medium",
+            }
+        ]
+        write_shard(self.ledger, rec)
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+        self.assertTrue(any("current record id" in line for line in lines), lines)
 
 
 # --- migration round-trip ----------------------------------------------------

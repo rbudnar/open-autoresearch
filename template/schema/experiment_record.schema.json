@@ -145,6 +145,7 @@
           },
           "invalidated_ideas": {
             "type": "array",
+            "minItems": 1,
             "description": "Sibling ideas, mechanisms, or proposal shapes no longer worth pursuing without new evidence.",
             "items": {
               "type": "string",
@@ -168,6 +169,7 @@
           },
           "review_record_ids": {
             "type": "array",
+            "minItems": 1,
             "description": "Optional ledger ids or review-bearing records that reviewed or challenged the insight.",
             "items": {
               "type": "string",

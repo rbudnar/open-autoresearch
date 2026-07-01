@@ -249,12 +249,13 @@ def _build_branch_insights(raw_values: list[str], record_id: str) -> list[dict[s
     """Parse optional propagated branch insights.
 
     CLI callers do not know the generated record id ahead of time, so `"self"`
-    is accepted in id-list fields and rewritten to the final record id.
+    is accepted in source/review id fields and rewritten to the final record id.
+    ``updates_parent_ids`` must name an ancestor/root target, never the new leaf.
     """
     insights: list[dict[str, Any]] = []
     for raw in raw_values:
         insight = _parse_json_object_arg(raw, "--branch-insight-json")
-        for field in ("source_record_ids", "updates_parent_ids", "review_record_ids"):
+        for field in ("source_record_ids", "review_record_ids"):
             values = insight.get(field)
             if isinstance(values, list):
                 insight[field] = [
@@ -384,7 +385,9 @@ def main(argv: list[str]) -> int:
             "JSON object for one propagated branch insight. Use source_record_ids, "
             "updates_parent_ids, raw_observation, distilled_insight, confidence, "
             "and either validated_constraint or invalidated_ideas. The string "
-            "'self' in id-list fields resolves to the generated record id."
+            "'self' in source_record_ids/review_record_ids resolves to the "
+            "generated record id; updates_parent_ids must name an ancestor or "
+            "baseline."
         ),
     )
     parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA)
