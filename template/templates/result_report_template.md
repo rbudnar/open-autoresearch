@@ -71,6 +71,28 @@ lockfile_hash: "..."
 
 (Reflection Analyst's call. What in the candidate change drove the observed effect? Be specific.)
 
+## Insight propagation (optional, §14.4)
+
+Use this section only when the result should constrain future ancestor or sibling work. Keep local narrative in `lessons`; put durable tree-facing constraints in ledger `branch_insights[]`.
+
+```yaml
+branch_insights:
+  - raw_observation: "<measured result, failure, or review event>"
+    distilled_insight: "<why it matters for future branches>"
+    source_record_ids:
+      - "<this ledger entry id or supporting ledger id>"
+    updates_parent_ids:
+      - "<ancestor ledger id or baseline>"
+    validated_constraint: "<proposal constraint now supported, or omit>"
+    invalidated_ideas:
+      - "<sibling idea/proposal shape now ruled out, or omit>"
+    confidence: "<low | medium | high>"
+    retirement_signal: "<condition that should make the campaign revisit this insight>"
+    review_status: "<draft | reviewed | contested | rejected>"
+    review_record_ids:
+      - "<skeptic/human review ledger id, if available>"
+```
+
 ## Failure modes inspected
 
 (Any per-example failures the analyst surfaced. Subgroup regressions, distributional shifts, edge cases.)

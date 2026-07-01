@@ -96,6 +96,89 @@
       "enum": ["baseline", "candidate", "ablation", "verifier", "admin", "counter_example"],
       "description": "OPTIONAL tree node kind for derived research_tree views."
     },
+    "branch_insights": {
+      "type": "array",
+      "description": "OPTIONAL propagated branch insights. Unlike local lessons[], these are compact, ledger-traceable observations meant to update ancestor constraints or future branch choices.",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "raw_observation",
+          "distilled_insight",
+          "source_record_ids",
+          "updates_parent_ids",
+          "confidence"
+        ],
+        "properties": {
+          "raw_observation": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Measured result, failure, or event observed in the run."
+          },
+          "distilled_insight": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Short interpretation of why the observation matters for the branch."
+          },
+          "source_record_ids": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Immutable ledger ids that support this insight.",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "updates_parent_ids": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Ancestor/root node ids whose future constraints or choices this insight updates. The baseline sentinel may be used for root-level constraints.",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "validated_constraint": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Future proposal constraint inferred from the evidence."
+          },
+          "invalidated_ideas": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Sibling ideas, mechanisms, or proposal shapes no longer worth pursuing without new evidence.",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "confidence": {
+            "type": "string",
+            "enum": ["low", "medium", "high"],
+            "description": "Confidence in this propagated insight based on evidence quality and maturity level."
+          },
+          "retirement_signal": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Condition that should trigger reconsidering this insight."
+          },
+          "review_status": {
+            "type": "string",
+            "enum": ["draft", "reviewed", "contested", "rejected"],
+            "description": "Whether Skeptic, human, or another review path has challenged or accepted the insight."
+          },
+          "review_record_ids": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Optional ledger ids or review-bearing records that reviewed or challenged the insight.",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      }
+    },
     "source_commit": {
       "type": "string",
       "description": "Content-addressed-provenance Level-1 breadcrumb: the commit HEAD pointed at when this experiment ran. NON-AUTHORITATIVE — a hint, not a reproducibility guarantee. Off-main experiment branches and squash-merges mean it may never resolve from main; see resolvable_from_main. Auditability is carried by the structured record (hypothesis/params/metrics/lineage), not by this pointer. See docs/proposals/2026-06-13-provenance-redesign.md."

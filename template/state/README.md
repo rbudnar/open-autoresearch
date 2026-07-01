@@ -26,11 +26,13 @@ Rebuilt by `regenerate_state.py`: records sorted by `id`, one canonical line eac
 The active research tree (`PROTOCOL.md` §15), regenerated from topology
 (`parent_ids`) + optional record node fields (`node_title`, `node_lessons`,
 `lifecycle_status`, `promotion_status`, `frontier_eligible`, `blocked_by`,
-`pruned_reason`, `merged_into`, `node_type`) + campaign metadata
+`pruned_reason`, `merged_into`, `node_type`, `branch_insights[]`) + campaign metadata
 (`campaign.json`). It may include derived `views` for lineage order, active
 frontier, blocked nodes, pruned branches, merged/subsumed nodes, and promotion
-candidates by maturity level. Closed branches and already-promoted terminal
-states stay out of the promotion-candidate planning view. Not hand-edited.
+candidates by maturity level, plus propagated branch insights indexed by source
+record, affected parent/root record, validated constraint, and invalidated idea.
+Closed branches and already-promoted terminal states stay out of the
+promotion-candidate planning view. Not hand-edited.
 
 ### `playbook.md`
 Compact, curated lessons. Bounded by `metrics.yaml.memory.max_playbook_tokens`. This is what gets loaded into every future agent context.

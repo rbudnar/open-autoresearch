@@ -188,11 +188,24 @@ NODE_TYPES = (
     "counter_example",
 )
 
+INSIGHT_CONFIDENCE_LEVELS = ("low", "medium", "high")
+
+INSIGHT_REVIEW_STATUSES = ("draft", "reviewed", "contested", "rejected")
+
 _CLOSED_LIFECYCLE_STATUSES = {"blocked", "pruned", "merged"}
+_BASELINE_SENTINEL = "baseline"
 
 
 def _nonempty_string(value: Any) -> bool:
     return isinstance(value, str) and bool(value.strip())
+
+
+def _nonempty_string_list(value: Any) -> bool:
+    return (
+        isinstance(value, list)
+        and len(value) > 0
+        and all(_nonempty_string(item) for item in value)
+    )
 
 
 def validate_tree_fields(
@@ -236,6 +249,113 @@ def validate_tree_fields(
         errors.append(
             f"frontier_eligible true conflicts with lifecycle_status {lifecycle!r}"
         )
+
+    return errors
+
+
+def validate_branch_insights(
+    entry: dict[str, Any], all_ids: set[str] | None = None
+) -> list[str]:
+    """Validate optional propagated branch insights.
+
+    ``branch_insights`` is for lessons that change future branch behavior, not
+    local narrative notes. When ``all_ids`` is supplied, every source/review id
+    must resolve to a ledger record; ``updates_parent_ids`` may also name the
+    baseline sentinel because root constraints can affect the whole campaign.
+    """
+    errors: list[str] = []
+    insights = entry.get("branch_insights")
+    if insights is None:
+        return errors
+    if not isinstance(insights, list):
+        return ["branch_insights must be a list"]
+
+    for i, insight in enumerate(insights):
+        prefix = f"branch_insights[{i}]"
+        if not isinstance(insight, dict):
+            errors.append(f"{prefix} must be an object")
+            continue
+
+        for field in ("raw_observation", "distilled_insight"):
+            if not _nonempty_string(insight.get(field)):
+                errors.append(f"{prefix}.{field} must be a non-empty string")
+
+        source_ids = insight.get("source_record_ids")
+        if not _nonempty_string_list(source_ids):
+            errors.append(f"{prefix}.source_record_ids must be a non-empty string list")
+        elif all_ids is not None:
+            unknown = [sid for sid in source_ids if sid not in all_ids]
+            if unknown:
+                errors.append(
+                    f"{prefix}.source_record_ids contains unknown id {unknown[0]!r}"
+                )
+
+        update_ids = insight.get("updates_parent_ids")
+        if not _nonempty_string_list(update_ids):
+            errors.append(f"{prefix}.updates_parent_ids must be a non-empty string list")
+        elif all_ids is not None:
+            unknown_updates = [
+                uid
+                for uid in update_ids
+                if uid != _BASELINE_SENTINEL and uid not in all_ids
+            ]
+            if unknown_updates:
+                errors.append(
+                    f"{prefix}.updates_parent_ids contains unknown id "
+                    f"{unknown_updates[0]!r}"
+                )
+        entry_id = entry.get("id")
+        if _nonempty_string(entry_id) and isinstance(update_ids, list):
+            if entry_id in update_ids:
+                errors.append(
+                    f"{prefix}.updates_parent_ids must not contain the current "
+                    "record id"
+                )
+
+        constraint = insight.get("validated_constraint")
+        if constraint is not None and not _nonempty_string(constraint):
+            errors.append(f"{prefix}.validated_constraint must be a non-empty string")
+
+        invalidated = insight.get("invalidated_ideas")
+        if invalidated is not None and not _nonempty_string_list(invalidated):
+            errors.append(f"{prefix}.invalidated_ideas must be a non-empty string list")
+
+        if not _nonempty_string(constraint) and not _nonempty_string_list(invalidated):
+            errors.append(
+                f"{prefix} requires validated_constraint or invalidated_ideas"
+            )
+
+        confidence = insight.get("confidence")
+        if confidence not in INSIGHT_CONFIDENCE_LEVELS:
+            errors.append(
+                f"{prefix}.confidence must be one of "
+                f"{INSIGHT_CONFIDENCE_LEVELS!r}"
+            )
+
+        review_status = insight.get("review_status")
+        if review_status is not None and review_status not in INSIGHT_REVIEW_STATUSES:
+            errors.append(
+                f"{prefix}.review_status must be one of "
+                f"{INSIGHT_REVIEW_STATUSES!r}"
+            )
+
+        review_ids = insight.get("review_record_ids")
+        if review_ids is not None:
+            if not _nonempty_string_list(review_ids):
+                errors.append(
+                    f"{prefix}.review_record_ids must be a non-empty string list"
+                )
+            elif all_ids is not None:
+                unknown_review_ids = [rid for rid in review_ids if rid not in all_ids]
+                if unknown_review_ids:
+                    errors.append(
+                        f"{prefix}.review_record_ids contains unknown id "
+                        f"{unknown_review_ids[0]!r}"
+                    )
+
+        retirement_signal = insight.get("retirement_signal")
+        if retirement_signal is not None and not _nonempty_string(retirement_signal):
+            errors.append(f"{prefix}.retirement_signal must be a non-empty string")
 
     return errors
 

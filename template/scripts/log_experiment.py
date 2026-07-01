@@ -56,6 +56,7 @@ try:
         load_schema,
         sanitize_slug,
         validate_against_schema,
+        validate_branch_insights,
         validate_tree_fields,
     )
 except ImportError:  # pragma: no cover - path shim for direct invocation
@@ -68,6 +69,7 @@ except ImportError:  # pragma: no cover - path shim for direct invocation
         load_schema,
         sanitize_slug,
         validate_against_schema,
+        validate_branch_insights,
         validate_tree_fields,
     )
 
@@ -237,7 +239,30 @@ def build_record(args: argparse.Namespace, now: dt.datetime) -> dict[str, Any]:
     data_fingerprint = _build_data_fingerprint(args)
     if data_fingerprint:
         record["data_fingerprint"] = data_fingerprint
+    branch_insights = _build_branch_insights(args.branch_insight_json, record_id)
+    if branch_insights:
+        record["branch_insights"] = branch_insights
     return record
+
+
+def _build_branch_insights(raw_values: list[str], record_id: str) -> list[dict[str, Any]]:
+    """Parse optional propagated branch insights.
+
+    CLI callers do not know the generated record id ahead of time, so `"self"`
+    is accepted in source/review id fields and rewritten to the final record id.
+    ``updates_parent_ids`` must name an ancestor/root target, never the new leaf.
+    """
+    insights: list[dict[str, Any]] = []
+    for raw in raw_values:
+        insight = _parse_json_object_arg(raw, "--branch-insight-json")
+        for field in ("source_record_ids", "review_record_ids"):
+            values = insight.get(field)
+            if isinstance(values, list):
+                insight[field] = [
+                    record_id if value == "self" else value for value in values
+                ]
+        insights.append(insight)
+    return insights
 
 
 def _build_data_fingerprint(args: argparse.Namespace) -> "dict[str, Any] | None":
@@ -352,6 +377,19 @@ def main(argv: list[str]) -> int:
         choices=("", *NODE_TYPES),
         help="Optional tree node kind for derived research_tree views.",
     )
+    parser.add_argument(
+        "--branch-insight-json",
+        action="append",
+        default=[],
+        help=(
+            "JSON object for one propagated branch insight. Use source_record_ids, "
+            "updates_parent_ids, raw_observation, distilled_insight, confidence, "
+            "and either validated_constraint or invalidated_ideas. The string "
+            "'self' in source_record_ids/review_record_ids resolves to the "
+            "generated record id; updates_parent_ids must name an ancestor or "
+            "baseline."
+        ),
+    )
     parser.add_argument("--schema", type=Path, default=DEFAULT_SCHEMA)
     parser.add_argument(
         "--protocol-version-file",
@@ -437,10 +475,11 @@ def main(argv: list[str]) -> int:
         sys.stderr.write(f"CONFIG ERROR: {exc}\n")
         return 2
     errors = validate_against_schema(record, schema)
-    tree_errors = validate_tree_fields(
-        record, load_existing_record_ids(args.state_dir) | {record["id"]}
-    )
+    all_ids = load_existing_record_ids(args.state_dir) | {record["id"]}
+    tree_errors = validate_tree_fields(record, all_ids)
     errors.extend(tree_errors)
+    insight_errors = validate_branch_insights(record, all_ids)
+    errors.extend(insight_errors)
     if errors:
         sys.stderr.write("SCHEMA VALIDATION FAILED:\n")
         for e in errors:

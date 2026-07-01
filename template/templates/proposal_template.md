@@ -34,6 +34,15 @@ If `web_search_used: false`, this section pulls only from `canon.bib` and the ho
 - **Implementation precedent:** <paper/code evidence that the change is plausible, or "none found">
 - **Citation risk:** <peer_reviewed | technical_report | arxiv_preprint | prototype | withdrawn | unknown>
 
+## Prior propagated constraints (optional)
+
+- **Reviewed insight source ids:** <ledger ids whose `branch_insights[]` affect this proposal, or "none">
+- **Affected parent/root ids:** <parent ids or "baseline">
+- **Validated constraints applied:** <what this proposal must respect>
+- **Invalidated sibling ideas avoided:** <ideas this proposal deliberately does not retry>
+- **Draft or contested insights:** <context only; do not use as pruning or promotion authority>
+- **Retirement signals checked:** <conditions that would make an old insight no longer apply>
+
 ## Proposed change
 
 Describe the minimal implementation. Per `PROTOCOL.md` §11.1.1, exactly ONE non-baseline config switch.

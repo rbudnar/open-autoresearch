@@ -183,6 +183,7 @@ class TestLogExperiment(TempStateMixin):
             pruned_reason="",
             merged_into="",
             node_type="",
+            branch_insight_json=[],
             schema=SCHEMA_PATH,
             protocol_version_file=self.tmp / "PV",
             repo_dir=self.tmp,
@@ -243,6 +244,7 @@ class TestLogExperiment(TempStateMixin):
         self.assertNotIn("promotion_status", rec)
         self.assertNotIn("frontier_eligible", rec)
         self.assertNotIn("node_type", rec)
+        self.assertNotIn("branch_insights", rec)
 
     def test_tree_fields_stamp_when_flags_given(self):
         (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
@@ -264,6 +266,54 @@ class TestLogExperiment(TempStateMixin):
         self.assertEqual(rec["node_type"], "candidate")
         schema = _ledger_common.load_schema(SCHEMA_PATH)
         self.assertEqual(_ledger_common.validate_against_schema(rec, schema), [])
+
+    def test_branch_insight_stamps_and_resolves_self_reference(self):
+        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
+        insight = {
+            "raw_observation": "Stage C improved NLL but latency increased.",
+            "distilled_insight": "The branch is useful only under the latency cap.",
+            "source_record_ids": ["self"],
+            "updates_parent_ids": ["baseline"],
+            "validated_constraint": "Future variants must keep latency under 20ms.",
+            "confidence": "medium",
+            "review_status": "draft",
+        }
+        rec = log_experiment.build_record(
+            self._args(branch_insight_json=[json.dumps(insight)]),
+            now,
+        )
+        self.assertEqual(len(rec["branch_insights"]), 1)
+        stamped = rec["branch_insights"][0]
+        self.assertEqual(stamped["source_record_ids"], [rec["id"]])
+        self.assertEqual(stamped["updates_parent_ids"], ["baseline"])
+        schema = _ledger_common.load_schema(SCHEMA_PATH)
+        self.assertEqual(_ledger_common.validate_against_schema(rec, schema), [])
+        self.assertEqual(
+            _ledger_common.validate_branch_insights(rec, {rec["id"]}),
+            [],
+        )
+
+    def test_branch_insight_does_not_resolve_self_updated_parent(self):
+        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        now = dt.datetime(2026, 5, 18, 10, 0, 0, 0, tzinfo=dt.timezone.utc)
+        insight = {
+            "raw_observation": "A leaf tried to update itself.",
+            "distilled_insight": "The update target must remain an ancestor.",
+            "source_record_ids": ["self"],
+            "updates_parent_ids": ["self"],
+            "validated_constraint": "Self-targeted updates are not parent constraints.",
+            "confidence": "medium",
+        }
+        rec = log_experiment.build_record(
+            self._args(branch_insight_json=[json.dumps(insight)]),
+            now,
+        )
+        stamped = rec["branch_insights"][0]
+        self.assertEqual(stamped["source_record_ids"], [rec["id"]])
+        self.assertEqual(stamped["updates_parent_ids"], ["self"])
+        errors = _ledger_common.validate_branch_insights(rec, {rec["id"]})
+        self.assertTrue(any("updates_parent_ids" in error for error in errors), errors)
 
     def test_writer_rejects_tree_cross_field_errors(self):
         (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
@@ -630,6 +680,74 @@ class TestRegenerate(TempStateMixin):
             tree["nodes"]["20260518-100000-aaa001"]["frontier_eligible"]
         )
 
+    def test_branch_insight_views(self):
+        baseline = make_record(
+            "20260518-090000-aaa000", parents=["baseline"], branch="baseline"
+        )
+        candidate = make_record(
+            "20260518-100000-aaa001",
+            parents=["20260518-090000-aaa000"],
+            branch="architecture",
+        )
+        candidate["branch_insights"] = [
+            {
+                "raw_observation": "Factorial grid isolates attention_pool as the main effect.",
+                "distilled_insight": "Prioritize attention_pool lesion and defer ordinal_hybrid.",
+                "source_record_ids": [
+                    "20260518-090000-aaa000",
+                    "20260518-100000-aaa001",
+                ],
+                "updates_parent_ids": ["20260518-090000-aaa000"],
+                "validated_constraint": "Future follow-ups should test attention_pool alone first.",
+                "invalidated_ideas": [
+                    "promote attention_pool+ordinal_hybrid without attribution"
+                ],
+                "confidence": "high",
+                "review_status": "reviewed",
+                "review_record_ids": ["20260518-100000-aaa001"],
+                "retirement_signal": "Revisit after a factorial with new data split.",
+            },
+            {
+                "raw_observation": "Malformed hand-written insight is tolerated by the derived reader.",
+                "distilled_insight": "Derived views should not leak unknown enum values.",
+                "source_record_ids": ["20260518-100000-aaa001"],
+                "updates_parent_ids": ["baseline"],
+                "validated_constraint": "Malformed enum values degrade to defaults.",
+                "confidence": "surprisingly_sure",
+                "review_status": "maybe",
+            },
+        ]
+        write_shard(self.ledger, baseline)
+        write_shard(self.ledger, candidate)
+
+        regenerate_state.regenerate(self.state)
+        tree = json.loads((self.state / "research_tree.json").read_text())
+        insights = tree["views"]["branch_insights"]
+        self.assertEqual(
+            insights["by_source_record"]["20260518-090000-aaa000"][0]["record_id"],
+            "20260518-100000-aaa001",
+        )
+        self.assertEqual(
+            insights["by_updated_parent"]["20260518-090000-aaa000"][0]["record_id"],
+            "20260518-100000-aaa001",
+        )
+        self.assertEqual(
+            insights["constraints"][0]["validated_constraint"],
+            "Future follow-ups should test attention_pool alone first.",
+        )
+        self.assertEqual(
+            insights["invalidated_ideas"][0]["idea"],
+            "promote attention_pool+ordinal_hybrid without attribution",
+        )
+        self.assertEqual(
+            insights["by_record"]["20260518-100000-aaa001"][1]["confidence"],
+            "low",
+        )
+        self.assertEqual(
+            insights["by_record"]["20260518-100000-aaa001"][1]["review_status"],
+            "draft",
+        )
+
     def test_jsonl_lines_are_canonical(self):
         rec = make_record("20260518-090000-aaa000")
         write_shard(self.ledger, rec)
@@ -779,6 +897,79 @@ class TestValidateLedger(TempStateMixin):
         joined = "\n".join(lines)
         for _, lifecycle, _ in cases:
             self.assertIn(f"lifecycle_status {lifecycle!r}", joined)
+
+    def test_branch_insight_requires_known_source_ids(self):
+        rec = make_record("20260518-090000-aaa000", parents=["baseline"])
+        rec["branch_insights"] = [
+            {
+                "raw_observation": "Observation without real source.",
+                "distilled_insight": "This should not affect future branches.",
+                "source_record_ids": ["20260518-100000-missing"],
+                "updates_parent_ids": ["baseline"],
+                "validated_constraint": "Do not trust untraced lessons.",
+                "confidence": "low",
+            }
+        ]
+        write_shard(self.ledger, rec)
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+        self.assertTrue(any("source_record_ids" in line for line in lines), lines)
+
+    def test_branch_insight_requires_branch_action(self):
+        rec = make_record("20260518-090000-aaa000", parents=["baseline"])
+        rec["branch_insights"] = [
+            {
+                "raw_observation": "Observation without a branch action.",
+                "distilled_insight": "This should stay local narrative.",
+                "source_record_ids": ["20260518-090000-aaa000"],
+                "updates_parent_ids": ["baseline"],
+                "confidence": "low",
+            }
+        ]
+        write_shard(self.ledger, rec)
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+        self.assertTrue(
+            any(
+                "requires validated_constraint or invalidated_ideas" in line
+                for line in lines
+            ),
+            lines,
+        )
+
+    def test_branch_insight_requires_known_updated_parent(self):
+        rec = make_record("20260518-090000-aaa000", parents=["baseline"])
+        rec["branch_insights"] = [
+            {
+                "raw_observation": "Observation points at a missing parent.",
+                "distilled_insight": "This should not create a phantom branch view.",
+                "source_record_ids": ["20260518-090000-aaa000"],
+                "updates_parent_ids": ["20260518-100000-missing"],
+                "validated_constraint": "Future work needs a real affected parent.",
+                "confidence": "medium",
+            }
+        ]
+        write_shard(self.ledger, rec)
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+        self.assertTrue(any("updates_parent_ids" in line for line in lines), lines)
+
+    def test_branch_insight_rejects_current_record_as_updated_parent(self):
+        rec = make_record("20260518-090000-aaa000", parents=["baseline"])
+        rec["branch_insights"] = [
+            {
+                "raw_observation": "Observation points at itself.",
+                "distilled_insight": "A propagated insight should update an ancestor.",
+                "source_record_ids": ["20260518-090000-aaa000"],
+                "updates_parent_ids": ["20260518-090000-aaa000"],
+                "validated_constraint": "Self-targeted updates are not allowed.",
+                "confidence": "medium",
+            }
+        ]
+        write_shard(self.ledger, rec)
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+        self.assertTrue(any("current record id" in line for line in lines), lines)
 
 
 # --- migration round-trip ----------------------------------------------------

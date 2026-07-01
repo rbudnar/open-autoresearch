@@ -2,6 +2,15 @@
 
 Each major / minor protocol bump may require host-project changes. This file walks through each transition.
 
+## Within v0.5 — propagated branch insights (no migration)
+
+Optional `branch_insights[]` records are a **backward-compatible** addition and
+the protocol stays 0.5. Existing experiment records stay valid with no edits.
+Adopt this field only when a result should update ancestor/root constraints,
+de-prioritize a sibling idea, or steer future proposals. Regenerate derived
+state after adding insights so `research_tree.json.views.branch_insights`
+reflects the new indexes.
+
 ## Within v0.5 — declarative data splits + comparison-set identity (no data migration; one-line manifest `mode` add)
 
 The two-mode §6.3.1 split model and the comparison-set identity record field are a
