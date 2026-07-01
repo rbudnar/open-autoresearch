@@ -440,12 +440,12 @@ test('unavailable branch protection metadata keeps fail-closed check fallback', 
   assert.deepEqual(result.checks.failed, ['Optional maybe required']);
 });
 
-test('unavailable ruleset metadata keeps fail-closed check fallback', () => {
+test('classic branch protection is honored when ruleset metadata is unavailable', () => {
   const branchProtection = fetchBranchProtection({
     json(args) {
       const path = args.at(-1);
       if (path.includes('/protection')) {
-        return { required_status_checks: { contexts: [] } };
+        return { required_status_checks: { contexts: ['Template Fitness'] } };
       }
       throw new Error('gh api repos/o/r/rules/branches/main failed: gh: Resource not accessible by integration (HTTP 403)');
     },
@@ -454,15 +454,16 @@ test('unavailable ruleset metadata keeps fail-closed check fallback', () => {
   const result = analyzeInbox(data({
     prView: {
       statusCheckRollup: [
-        { name: 'Optional maybe required', conclusion: 'FAILURE' },
+        { name: 'Template Fitness', conclusion: 'FAILURE' },
+        { name: 'Optional experiment', conclusion: 'FAILURE' },
       ],
     },
     branchProtection,
   }));
 
-  assert.equal(branchProtection, null);
+  assert.notEqual(branchProtection, null);
   assert.equal(result.clean, false);
-  assert.deepEqual(result.checks.failed, ['Optional maybe required']);
+  assert.deepEqual(result.checks.failed, ['Template Fitness']);
 });
 
 test('pending checks block locally unless allow-pending-checks is set', () => {

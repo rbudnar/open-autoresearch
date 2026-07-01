@@ -113,7 +113,7 @@ jobs:
               fi
               ;;
             check_run)
-              if [[ "$CHECK_RUN_NAME" == "agent-inbox" ]]; then
+              if [[ "$CHECK_RUN_NAME" == "agent-inbox" || "$CHECK_RUN_NAME" == "PR Agent Inbox / agent-inbox" ]]; then
                 echo "::notice::Skipping self check_run event for PR Agent Inbox."
               else
                 set_pr_scope_for_sha "$CHECK_RUN_SHA"

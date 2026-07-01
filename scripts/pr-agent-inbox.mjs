@@ -293,7 +293,8 @@ export function fetchBranchProtection(client, { owner, name, branch }) {
   }
 
   const rules = fetchBranchRules(client, { owner, name, branch });
-  if (classicUnavailable || rules === null) return null;
+  if (classicUnavailable) return null;
+  if (rules === null) return classicProtection ? mergeBranchProtection(classicProtection, []) : null;
   return mergeBranchProtection(classicProtection, rules ?? []);
 }
 
