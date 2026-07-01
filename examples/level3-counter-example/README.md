@@ -17,6 +17,8 @@ This campaign exercises every failure mode the v0.5 protocol is designed to surf
 | Iter 7 | **Factorial ablation** — 2×2 grid attributes gain to attention pool; ordinal loss contributes within noise. | §16.1.2 |
 | Iter 8 | **Promotion request REJECTED by verifier** — val-exposure budget exhausted by the iter-5 re-grade + iter-7 factorial. Verifier-signed packet carries `status: rejected`. | §10.5, §17.6 |
 
+Iters 6 and 7 also demonstrate propagated branch insights (§14.4): iter 6 records a reviewed negative constraint that the attention-pool + ordinal-hybrid combination cannot be promoted as a single candidate, and iter 7 records a reviewed positive constraint that the next follow-up should prioritize attention_pool alone before spending more budget on ordinal_hybrid combinations.
+
 Campaign outcome: `no_trustworthy_improvement_found`. The attention-pool candidate is real (Level-3 `branch_winner`) but **cannot promote** until a holdout refresh restores val-exposure budget. The campaign's deliverable is the **negative lessons report** in `reports/counter_example_report.md`.
 
 ## The toy task

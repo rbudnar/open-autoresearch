@@ -298,6 +298,120 @@ def _record_frontier_eligible(rec: dict[str, Any], lifecycle: str) -> bool:
     return lifecycle in _FRONTIER_LIFECYCLE
 
 
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item.strip()]
+
+
+def _record_branch_insights(rec: dict[str, Any]) -> list[dict[str, Any]]:
+    raw = rec.get("branch_insights")
+    if not isinstance(raw, list):
+        return []
+    insights: list[dict[str, Any]] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            continue
+        observation = item.get("raw_observation")
+        distilled = item.get("distilled_insight")
+        source_ids = _string_list(item.get("source_record_ids"))
+        update_ids = _string_list(item.get("updates_parent_ids"))
+        if not (
+            isinstance(observation, str)
+            and observation.strip()
+            and isinstance(distilled, str)
+            and distilled.strip()
+            and source_ids
+            and update_ids
+        ):
+            continue
+        insight: dict[str, Any] = {
+            "insight_index": i,
+            "raw_observation": observation,
+            "distilled_insight": distilled,
+            "source_record_ids": source_ids,
+            "updates_parent_ids": update_ids,
+            "confidence": item.get("confidence", "low"),
+            "review_status": item.get("review_status", "draft"),
+        }
+        if isinstance(item.get("validated_constraint"), str):
+            insight["validated_constraint"] = item["validated_constraint"]
+        invalidated = _string_list(item.get("invalidated_ideas"))
+        if invalidated:
+            insight["invalidated_ideas"] = invalidated
+        if isinstance(item.get("retirement_signal"), str):
+            insight["retirement_signal"] = item["retirement_signal"]
+        review_ids = _string_list(item.get("review_record_ids"))
+        if review_ids:
+            insight["review_record_ids"] = review_ids
+        insights.append(insight)
+    return insights
+
+
+def _insight_ref(item: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "record_id": item["record_id"],
+        "insight_index": item["insight_index"],
+        "distilled_insight": item["distilled_insight"],
+        "confidence": item["confidence"],
+        "review_status": item["review_status"],
+    }
+
+
+def _branch_insights_view(items: list[dict[str, Any]]) -> dict[str, Any]:
+    by_record: dict[str, list[dict[str, Any]]] = {}
+    by_source_record: dict[str, list[dict[str, Any]]] = {}
+    by_updated_parent: dict[str, list[dict[str, Any]]] = {}
+    constraints: list[dict[str, Any]] = []
+    invalidated_ideas: list[dict[str, Any]] = []
+
+    for item in items:
+        record_id = item["record_id"]
+        by_record.setdefault(record_id, []).append(
+            {k: v for k, v in item.items() if k != "record_id"}
+        )
+        ref = _insight_ref(item)
+        for source_id in item["source_record_ids"]:
+            by_source_record.setdefault(source_id, []).append(ref)
+        for parent_id in item["updates_parent_ids"]:
+            by_updated_parent.setdefault(parent_id, []).append(ref)
+        if isinstance(item.get("validated_constraint"), str):
+            constraints.append(
+                {
+                    "record_id": record_id,
+                    "insight_index": item["insight_index"],
+                    "updates_parent_ids": item["updates_parent_ids"],
+                    "validated_constraint": item["validated_constraint"],
+                    "confidence": item["confidence"],
+                    "review_status": item["review_status"],
+                }
+            )
+        for idea in item.get("invalidated_ideas", []):
+            invalidated_ideas.append(
+                {
+                    "record_id": record_id,
+                    "insight_index": item["insight_index"],
+                    "idea": idea,
+                    "confidence": item["confidence"],
+                    "review_status": item["review_status"],
+                }
+            )
+
+    return {
+        "by_record": {rid: by_record[rid] for rid in sorted(by_record)},
+        "by_source_record": {
+            source_id: by_source_record[source_id]
+            for source_id in sorted(by_source_record)
+        },
+        "by_updated_parent": {
+            parent_id: by_updated_parent[parent_id]
+            for parent_id in sorted(by_updated_parent)
+        },
+        "constraints": constraints,
+        "invalidated_ideas": invalidated_ideas,
+    }
+
+
 def _maturity_bucket(rec: dict[str, Any], promotion_status: str) -> str:
     maturity = rec.get("maturity_level")
     if isinstance(maturity, int) and not isinstance(maturity, bool):
@@ -439,6 +553,13 @@ def build_research_tree(
         for rec in records
         if isinstance(rec.get("id"), str)
     }
+    branch_insight_items: list[dict[str, Any]] = []
+    for rid in lineage_order:
+        for insight in _record_branch_insights(records_by_id.get(rid, {})):
+            item = dict(insight)
+            item["record_id"] = rid
+            branch_insight_items.append(item)
+
     promotion_candidates_by_maturity = {
         "level1": [],
         "level2": [],
@@ -478,6 +599,7 @@ def build_research_tree(
             for rid in lineage_order
             if nodes[rid].get("lifecycle_status") == "merged"
         ],
+        "branch_insights": _branch_insights_view(branch_insight_items),
     }
 
     tree: dict[str, Any] = {

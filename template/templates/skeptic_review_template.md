@@ -44,6 +44,15 @@ For each item: **PASS / OBJECT / N/A**, plus a short note. Any OBJECT prevents t
 - [ ] **Dependency drift:** No unannounced lockfile bump between baseline and candidate? Container digest matches?
 - [ ] **Infrastructure failures:** No `infra_failed` runs silently treated as `failed`?
 
+### Propagated insight checks (§14.4)
+
+- [ ] **Raw vs interpretation separated:** Any proposed `branch_insights[]` distinguish observed result/review event from the distilled claim?
+- [ ] **Traceable source ids:** `source_record_ids` and `review_record_ids` resolve to immutable ledger records?
+- [ ] **Affected parents explicit:** `updates_parent_ids` identify the ancestor/root branch being constrained?
+- [ ] **Constraint strength justified:** `confidence` matches maturity level, seed count, ablation quality, and guardrail coverage?
+- [ ] **No premature pruning:** Draft, contested, or rejected insights are not used as promotion, permanent pruning, or branch-retirement authority?
+- [ ] **Retirement signal present when needed:** The insight says when new evidence should reopen the branch?
+
 ## Specific concerns surfaced
 
 (Free-form prose. Anything the skeptic noticed that the checklist didn't cover. Examples of the kind of thing that belongs here:)

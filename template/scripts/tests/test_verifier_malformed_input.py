@@ -1365,6 +1365,30 @@ class TestRule9RequiresPromotionEvidence(unittest.TestCase):
         self.assertIn("fails tree validation", reason)
         self.assertIn("pruned_reason", reason)
 
+    def test_branch_insight_invalid_referenced_shard_rejected(self):
+        ledger = self._full_ledger()
+        candidate = _valid_record(
+            "20260101-000000-bbb000", metrics={"validation_nll": 0.825}
+        )
+        candidate["branch_insights"] = [
+            {
+                "raw_observation": "Candidate appears better.",
+                "distilled_insight": "But the claimed source id is not real.",
+                "source_record_ids": ["20260101-000000-missing"],
+                "updates_parent_ids": ["20260101-000000-aaa000"],
+                "validated_constraint": "Do not promote untraced branch lessons.",
+                "confidence": "high",
+            }
+        ]
+        ledger["c0"] = {
+            "entry": candidate,
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(self._ctx(_base_request(), ledger))
+        self.assertFalse(ok)
+        self.assertIn("fails branch insight validation", reason)
+        self.assertIn("source_record_ids", reason)
+
     def test_closed_candidate_lifecycle_rejected_even_when_tree_valid(self):
         for lifecycle, extra in (
             ("blocked", {"blocked_by": ["human:decision"]}),

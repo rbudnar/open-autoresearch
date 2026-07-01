@@ -82,6 +82,25 @@
     "Decision: promote attention pool alone. Carry ordinal_hybrid as a 'promising' branch for future campaigns.",
     "Cost was 36.4 GPU-hours — twice a typical candidate. Factorials are expensive; consider whether the marginal information was worth it."
   ],
+  "branch_insights": [
+    {
+      "raw_observation": "The factorial grid attributed most of the gain to attention_pool, while ordinal_hybrid contributed a small just-significant effect with no interaction.",
+      "distilled_insight": "The next promotion path should prioritize attention_pool alone and carry ordinal_hybrid as a lower-priority future branch.",
+      "source_record_ids": [
+        "20260518-190000-bbb007-factorial"
+      ],
+      "updates_parent_ids": [
+        "20260518-160000-bbb005-regrade"
+      ],
+      "validated_constraint": "Plan the attention_pool lesion and promotion request before spending more budget on ordinal_hybrid combinations.",
+      "confidence": "high",
+      "retirement_signal": "Revisit ordinal_hybrid priority after a fresh split or a cheaper targeted calibration experiment.",
+      "review_status": "reviewed",
+      "review_record_ids": [
+        "20260518-190000-bbb007-factorial"
+      ]
+    }
+  ],
   "next_actions": [
     "Plan §16.1.1 lesion test on attention_pool (attention weights → uniform)",
     "Emit promotion request for attention_pool alone"

@@ -18,7 +18,7 @@
       "content_sha256": "3e40d519441dccb687582fb336eb1ea7c8324ba8d7b62fe85bcded4130ede922"
     },
     "ablation_runs": [
-      {"ledger_id": "20260518-190000-bbb007-factorial", "content_sha256": "94d386c28b79e3359f71776146a97d39d24dea9fddf311721ae3b62721bf0723"},
+      {"ledger_id": "20260518-190000-bbb007-factorial", "content_sha256": "4550dd285fc380c0dcbdaab61ad37688e8d6b567d0b71a319467cf11720f2a31"},
       {"ledger_id": "20260518-220000-bbb008-promotion-request", "content_sha256": "997ad275e94254f877d21833ae4a9cdcf02f6be89da7861df59caec802a876af"}
     ],
     "skeptic_review": {

@@ -26,6 +26,7 @@ from typing import Any
 try:
     from _ledger_common import (
         load_schema,
+        validate_branch_insights,
         validate_against_schema,
         validate_tree_fields,
     )
@@ -33,6 +34,7 @@ except ImportError:  # pragma: no cover - path shim for direct invocation
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     from _ledger_common import (
         load_schema,
+        validate_branch_insights,
         validate_against_schema,
         validate_tree_fields,
     )
@@ -134,6 +136,7 @@ def validate(ledger_dir: Path, schema_path: Path) -> tuple[bool, list[str]]:
 
         if isinstance(obj, dict):
             record_errors.extend(validate_tree_fields(obj, all_ids))
+            record_errors.extend(validate_branch_insights(obj, all_ids))
 
         if record_errors:
             ok_overall = False

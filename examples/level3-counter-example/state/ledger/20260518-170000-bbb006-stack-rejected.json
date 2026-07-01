@@ -35,6 +35,28 @@
     "§11.1.1 enforcement: agent must propose single-switch candidates OR explicitly request factorial planning.",
     "Effective Skeptic review depends on Level-2 separation; same-session Level-0 would have likely missed this."
   ],
+  "branch_insights": [
+    {
+      "raw_observation": "Skeptic caught a proposal that combined attention_pool and ordinal_ce_hybrid as two non-baseline switches, so no experiment was run.",
+      "distilled_insight": "The combined attention_pool + ordinal_hybrid idea cannot be treated as a single candidate.",
+      "source_record_ids": [
+        "20260518-170000-bbb006-stack-rejected"
+      ],
+      "updates_parent_ids": [
+        "20260518-160000-bbb005-regrade"
+      ],
+      "validated_constraint": "Future proposals that combine attention_pool and ordinal_ce_hybrid must be registered as a stack or decomposed into factorial cells.",
+      "invalidated_ideas": [
+        "promote attention_pool+ordinal_hybrid as one candidate without factorial attribution"
+      ],
+      "confidence": "high",
+      "retirement_signal": "Revisit only if the combined idea is decomposed into one-switch cells or a factorial grid.",
+      "review_status": "reviewed",
+      "review_record_ids": [
+        "20260518-170000-bbb006-stack-rejected"
+      ]
+    }
+  ],
   "next_actions": [
     "Plan factorial 2×2 grid (iter-7)"
   ]

@@ -63,6 +63,7 @@ try:
         load_schema,
         resolve_val_queries,
         validate_against_schema,
+        validate_branch_insights,
         validate_tree_fields,
     )
 except ImportError:  # pragma: no cover - path shim for direct invocation
@@ -73,6 +74,7 @@ except ImportError:  # pragma: no cover - path shim for direct invocation
         load_schema,
         resolve_val_queries,
         validate_against_schema,
+        validate_branch_insights,
         validate_tree_fields,
     )
 
@@ -731,6 +733,12 @@ def rule_9_statistics_recomputed(ctx: VerifierContext) -> tuple[bool, str | None
         tree_errors = validate_tree_fields(rec["entry"], all_ledger_ids)
         if tree_errors:
             return False, f"{label} ledger shard fails tree validation: {tree_errors[0]}"
+        insight_errors = validate_branch_insights(rec["entry"], all_ledger_ids)
+        if insight_errors:
+            return False, (
+                f"{label} ledger shard fails branch insight validation: "
+                f"{insight_errors[0]}"
+            )
         if label.startswith("candidate_runs[") and rec["entry"].get(
             "lifecycle_status"
         ) in {"blocked", "pruned", "merged"}:
