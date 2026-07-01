@@ -33,6 +33,8 @@ on:
       - 'scripts/harness_metrics.py'
       - 'scripts/quality_gate.py'
       - 'scripts/weekly_quality_report.py'
+      - 'scripts/pr-agent-inbox.mjs'
+      - 'scripts/pr-agent-inbox.test.mjs'
       - 'scripts/tests/**'
       - 'docs/README.md'
       - 'docs/architecture.md'
@@ -48,6 +50,7 @@ on:
       - 'docs/plans/**'
       - 'docs/threat-model.md'
       - 'docs/adoption-levels.md'
+      - '.github/workflows/pr-agent-inbox.yml'
       - '.github/workflows/weekly-quality-report.yml'
       - 'CODEOWNERS'
       - '.github/workflows/**'
@@ -89,6 +92,8 @@ jobs:
             'scripts/harness_metrics.py' \
             'scripts/quality_gate.py' \
             'scripts/weekly_quality_report.py' \
+            'scripts/pr-agent-inbox.mjs' \
+            'scripts/pr-agent-inbox.test.mjs' \
             'scripts/tests/' \
             'docs/README.md' \
             'docs/architecture.md' \
@@ -104,6 +109,7 @@ jobs:
             'docs/plans/' \
             'docs/threat-model.md' \
             'docs/adoption-levels.md' \
+            '.github/workflows/pr-agent-inbox.yml' \
             '.github/workflows/weekly-quality-report.yml' \
             'CODEOWNERS' \
             '.github/workflows/' \

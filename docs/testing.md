@@ -17,13 +17,15 @@ Run it after repo-harness, protocol-version, template, example, verifier, or CI
 routing changes. It runs the repo harness check, committed PR/base whitespace
 checks when a diff range is available, staged and working-tree `git diff
 --check`, reference script parse/help checks, example protocol-version checks,
-and the Level-3 counter-example verifier rejection path.
+the PR Agent Inbox node tests, and the Level-3 counter-example verifier
+rejection path.
 
 ## Focused Checks
 
 - Repo harness only: `python scripts/check_repo_harness.py`
 - Minimal harness metrics: `python scripts/harness_metrics.py --baseline docs/harness-metrics-baseline.json`
 - Reference script parse check: `python scripts/quality_gate.py --skip-verifier`
+- PR Agent Inbox tests: `node --test scripts/pr-agent-inbox.test.mjs`
 - Level-3 verifier regression: `python scripts/quality_gate.py --only-verifier`
 - Full scaffold unit discovery: `python -m unittest discover -s template/scripts/tests -p "test_*.py"`
 - Generate a local weekly report: `python scripts/weekly_quality_report.py --skip-full-scaffold-tests`

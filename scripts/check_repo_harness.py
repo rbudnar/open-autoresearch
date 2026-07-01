@@ -47,10 +47,13 @@ REQUIRED_SURFACES = [
     "scripts/harness_metrics.py",
     "scripts/quality_gate.py",
     "scripts/weekly_quality_report.py",
+    "scripts/pr-agent-inbox.mjs",
+    "scripts/pr-agent-inbox.test.mjs",
     "scripts/tests/test_harness_metrics.py",
     "scripts/tests/test_quality_gate.py",
     "scripts/tests/test_weekly_quality_report.py",
     ".github/workflows/protect-protocol.yml",
+    ".github/workflows/pr-agent-inbox.yml",
     ".github/workflows/weekly-quality-report.yml",
 ]
 
@@ -359,8 +362,11 @@ def check_ci_wiring() -> None:
         "scripts/harness_metrics.py",
         "scripts/quality_gate.py",
         "scripts/weekly_quality_report.py",
+        "scripts/pr-agent-inbox.mjs",
+        "scripts/pr-agent-inbox.test.mjs",
         "docs/harness-metrics-baseline.json",
         "weekly-quality-report.yml",
+        "pr-agent-inbox.yml",
         "docs/README.md",
         "docs/architecture.md",
         "docs/dogfooding.md",
@@ -373,6 +379,32 @@ def check_ci_wiring() -> None:
     ]:
         if snippet not in text:
             fail(f"{workflow} must reference {snippet!r}")
+
+
+def check_pr_agent_inbox_wiring() -> None:
+    for path, snippets in {
+        ".github/workflows/pr-agent-inbox.yml": [
+            "pull-requests: write",
+            "status:",
+            "check_run:",
+            "--assert-no-agent-attention",
+        ],
+        "scripts/pr-agent-inbox.mjs": [
+            "const inboxState = clean ? 'clean'",
+            "const statusState = agentAttention ? 'failure' : 'success'",
+            "Agent check state: ${result.statusState}",
+            "inbox_state=${displayInboxState(result)}",
+        ],
+        "scripts/pr-agent-inbox.test.mjs": [
+            "waiting markdown distinguishes inbox state from agent check state",
+            "assert.equal(result.inboxState, 'waiting')",
+            "assert.equal(result.statusState, 'success')",
+        ],
+    }.items():
+        text = read(path)
+        for snippet in snippets:
+            if snippet not in text:
+                fail(f"{path} must reference {snippet!r}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -392,6 +424,7 @@ def main(argv: list[str] | None = None) -> int:
     check_ledger_rotation_drift()
     check_migration_guidance_drift()
     check_ci_wiring()
+    check_pr_agent_inbox_wiring()
 
     for warning in warnings:
         print(f"WARN: {warning}")
