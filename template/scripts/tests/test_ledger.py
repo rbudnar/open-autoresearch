@@ -174,6 +174,8 @@ class TestLogExperiment(TempStateMixin):
             slug="My Slug!",
             metrics_json="",
             val_queries=3,
+            failure_reason="",
+            coordinator_executor_separation="",
             node_title="",
             node_lesson=[],
             lifecycle_status="",
@@ -436,6 +438,62 @@ class TestLogExperiment(TempStateMixin):
         bad["parent_ids"] = "not-a-list"
         errors = _ledger_common.validate_against_schema(bad, schema)
         self.assertTrue(any("parent_ids" in e for e in errors))
+
+    def test_schema_accepts_executor_boundary_fields(self):
+        schema = _ledger_common.load_schema(SCHEMA_PATH)
+        rec = make_record("20260518-100000-abc123", status="infra_failed")
+        rec["failure_reason"] = "OOM during evaluator run"
+        rec["coordinator_executor_separation"] = "level_0"
+        errors = _ledger_common.validate_against_schema(rec, schema)
+        self.assertEqual(errors, [])
+
+    def test_schema_rejects_invalid_executor_separation_level(self):
+        schema = _ledger_common.load_schema(SCHEMA_PATH)
+        rec = make_record("20260518-100000-abc123")
+        rec["coordinator_executor_separation"] = "same-session"
+        errors = _ledger_common.validate_against_schema(rec, schema)
+        self.assertTrue(any("coordinator_executor_separation" in e for e in errors))
+
+    def test_writer_rejects_failure_status_without_failure_reason(self):
+        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        with contextlib.redirect_stderr(io.StringIO()):
+            rc = log_experiment.main(
+                [
+                    "--state-dir",
+                    str(self.state),
+                    "--branch",
+                    "infra",
+                    "--hypothesis",
+                    "host infrastructure failed",
+                    "--status",
+                    "infra_failed",
+                    "--protocol-version-file",
+                    str(self.tmp / "PV"),
+                    "--repo-dir",
+                    str(self.tmp),
+                ]
+            )
+        self.assertEqual(rc, 2)
+        self.assertEqual(list(self.ledger.glob("*.json")), [])
+
+    def test_writer_stamps_failure_reason_and_executor_separation(self):
+        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
+        rec = log_experiment.build_record(
+            self._args(
+                status="budget_truncated",
+                failure_reason="max_tool_calls_per_iteration reached",
+                coordinator_executor_separation="level_0",
+            ),
+            now,
+        )
+        self.assertEqual(
+            rec["failure_reason"], "max_tool_calls_per_iteration reached"
+        )
+        self.assertEqual(rec["coordinator_executor_separation"], "level_0")
+        schema = _ledger_common.load_schema(SCHEMA_PATH)
+        self.assertEqual(_ledger_common.validate_against_schema(rec, schema), [])
+        self.assertEqual(_ledger_common.validate_status_fields(rec), [])
 
     def test_same_second_different_hex_no_collision(self):
         now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
@@ -862,6 +920,40 @@ class TestValidateLedger(TempStateMixin):
         ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
         self.assertFalse(ok)
         self.assertTrue(any("blocked_by" in line for line in lines), lines)
+
+    def test_failure_status_requires_failure_reason(self):
+        for i, status in enumerate(("infra_failed", "budget_truncated")):
+            rec = make_record(f"20260518-09{i:02d}00-aaa00{i}", parents=["baseline"])
+            rec["status"] = status
+            write_shard(self.ledger, rec)
+
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertFalse(ok)
+        joined = "\n".join(lines)
+        for status in ("infra_failed", "budget_truncated"):
+            self.assertIn(status, joined)
+            self.assertIn("failure_reason", joined)
+
+    def test_legacy_invalid_status_without_failure_reason_still_valid(self):
+        rec = make_record(
+            "20260518-090000-aaa000",
+            parents=["baseline"],
+            status="invalid",
+        )
+        write_shard(self.ledger, rec)
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertTrue(ok, lines)
+
+    def test_failure_status_accepts_failure_reason(self):
+        rec = make_record(
+            "20260518-090000-aaa000",
+            parents=["baseline"],
+            status="budget_truncated",
+        )
+        rec["failure_reason"] = "max_tool_calls_per_iteration reached"
+        write_shard(self.ledger, rec)
+        ok, lines = validate_ledger.validate(self.ledger, SCHEMA_PATH)
+        self.assertTrue(ok, lines)
 
     def test_closed_lifecycle_cannot_be_frontier_eligible(self):
         write_shard(

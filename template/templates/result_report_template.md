@@ -4,7 +4,7 @@ report_id: "<YYYYMMDD-HHMMSS-6hex-slug>"
 candidate_proposal_id: "<id>"
 ledger_entry_id: "<id>"
 maturity_level: <1 | 2 | 3 | 4 | 5>
-status: "<invalid | failed | informative_failure | promising | level1_branch_winner | level2_branch_winner | branch_winner | promotion_candidate | promoted | low_evidence_promoted>"
+status: "<invalid | invalidated | infra_failed | budget_truncated | failed | informative_failure | promising | level1_branch_winner | level2_branch_winner | branch_winner | promotion_candidate | promoted | low_evidence_promoted>"
 not_deployable: <true | false>
 evidence_level: "<standard | low>"
 enforcement_mode: "<ci_enforced | pre_receive | oop_verifier | container_ro | none>"
@@ -66,6 +66,34 @@ lockfile_hash: "..."
 - GPU hours: <float>
 - Wall clock: <float>
 - Provider cost estimate: <$float>
+
+## Executor return (§5.8, if applicable)
+
+```yaml
+executor_return:
+  proposal_id: "<approved proposal id>"
+  workspace: "<worktree/scratch/container/session id>"
+  changed_files:
+    - "<path>"
+  commands_run:
+    - command: "<command>"
+      outcome: "<pass | fail | not_run>"
+  metrics:
+    <metric_name>: <value>
+  artifacts:
+    <name>: "<path>"
+  boundary_deviations:
+    - "<none, or exact deviation requiring Research Director/Skeptic review>"
+  ledger_ready_fields:
+    status: "<invalid | invalidated | infra_failed | budget_truncated | failed | informative_failure | promising | ...>"
+    failure_reason: "<required for infra_failed/budget_truncated; recommended for invalid>"
+    val_queries_incurred_by_this_run: <int>
+    coordinator_executor_separation: "<level_0 | level_1 | level_2 | level_3>"
+    lessons:
+      - "<local lesson>"
+    branch_insights:
+      - "<optional §14.4 branch insight, or omit>"
+```
 
 ## Likely causal mechanism
 

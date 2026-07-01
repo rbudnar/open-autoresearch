@@ -2,6 +2,24 @@
 
 Each major / minor protocol bump may require host-project changes. This file walks through each transition.
 
+## Within v0.5 — coordinator/executor boundary (no migration)
+
+The coordinator/executor handoff is a **backward-compatible guidance** addition.
+Existing experiment records, proposals, reports, and host scaffolds stay valid.
+Adopters may start using the optional `executor_handoff` and `executor_return`
+shapes when a separate Implementation Worker, worktree, scratch branch,
+container, or equivalent host mechanism executes one approved hypothesis.
+
+No scheduler, orchestrator, Python runner, or agent runtime is required. A
+single-session Level-1 campaign can use the same payloads and record
+`coordinator_executor_separation: level_0` to make the degraded separation
+visible.
+
+Existing bare `invalid` records remain valid. New `infra_failed` and
+`budget_truncated` records need `failure_reason` under the reference validator;
+`invalid` records should include one when available, but it is not a migration
+requirement.
+
 ## Within v0.5 — propagated branch insights (no migration)
 
 Optional `branch_insights[]` records are a **backward-compatible** addition and

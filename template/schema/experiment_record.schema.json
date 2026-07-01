@@ -57,7 +57,17 @@
     },
     "status": {
       "type": "string",
-      "description": "Free-form status label (e.g. baseline, promising, branch_winner, failed, invalidated, informative_failure, rejected)."
+      "description": "Free-form status label (e.g. baseline, promising, branch_winner, failed, infra_failed, budget_truncated, invalid, invalidated, informative_failure, rejected)."
+    },
+    "failure_reason": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Required by the reference validator when status is infra_failed or budget_truncated; recommended for invalid."
+    },
+    "coordinator_executor_separation": {
+      "type": "string",
+      "enum": ["level_0", "level_1", "level_2", "level_3"],
+      "description": "Optional §5.8 achieved separation level for Research Director / Implementation Worker handoff evidence."
     },
     "lifecycle_status": {
       "type": "string",
