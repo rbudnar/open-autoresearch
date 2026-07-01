@@ -57,6 +57,7 @@ try:
         sanitize_slug,
         validate_against_schema,
         validate_branch_insights,
+        validate_status_fields,
         validate_tree_fields,
     )
 except ImportError:  # pragma: no cover - path shim for direct invocation
@@ -70,6 +71,7 @@ except ImportError:  # pragma: no cover - path shim for direct invocation
         sanitize_slug,
         validate_against_schema,
         validate_branch_insights,
+        validate_status_fields,
         validate_tree_fields,
     )
 
@@ -218,6 +220,10 @@ def build_record(args: argparse.Namespace, now: dt.datetime) -> dict[str, Any]:
                 f"{args.val_queries})"
             )
         record["val_queries_incurred_by_this_run"] = args.val_queries
+    if args.failure_reason:
+        record["failure_reason"] = args.failure_reason
+    if args.coordinator_executor_separation:
+        record["coordinator_executor_separation"] = args.coordinator_executor_separation
     if args.node_title:
         record["node_title"] = args.node_title
     if args.node_lesson:
@@ -327,6 +333,20 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--slug", default="")
     parser.add_argument("--metrics-json", default="")
     parser.add_argument("--val-queries", type=int, default=None)
+    parser.add_argument(
+        "--failure-reason",
+        default="",
+        help=(
+            "Required for status infra_failed or budget_truncated; recommended "
+            "for invalid."
+        ),
+    )
+    parser.add_argument(
+        "--coordinator-executor-separation",
+        default="",
+        choices=("", "level_0", "level_1", "level_2", "level_3"),
+        help="Optional §5.8 Research Director / Implementation Worker separation level.",
+    )
     parser.add_argument("--node-title", default="")
     parser.add_argument("--node-lesson", action="append", default=[])
     parser.add_argument(
@@ -475,6 +495,7 @@ def main(argv: list[str]) -> int:
         sys.stderr.write(f"CONFIG ERROR: {exc}\n")
         return 2
     errors = validate_against_schema(record, schema)
+    errors.extend(validate_status_fields(record))
     all_ids = load_existing_record_ids(args.state_dir) | {record["id"]}
     tree_errors = validate_tree_fields(record, all_ids)
     errors.extend(tree_errors)

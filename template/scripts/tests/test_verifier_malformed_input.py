@@ -1412,6 +1412,233 @@ class TestRule9RequiresPromotionEvidence(unittest.TestCase):
                 self.assertFalse(ok)
                 self.assertIn("closed and cannot be promoted", reason)
 
+    def test_non_promotable_candidate_status_rejected(self):
+        for status in (
+            "invalid",
+            "invalidated",
+            "infra_failed",
+            "budget_truncated",
+            "failed",
+            "informative_failure",
+            "baseline",
+            "level1_branch_winner",
+            "level2_branch_winner",
+            "promoted",
+            "low_evidence_promoted",
+            "unknown_label",
+        ):
+            with self.subTest(status=status):
+                ledger = self._full_ledger()
+                candidate = _valid_record(
+                    "20260101-000000-bbb000",
+                    metrics={"validation_nll": 0.825},
+                )
+                candidate["status"] = status
+                if status in {"infra_failed", "budget_truncated"}:
+                    candidate["failure_reason"] = "test failure reason"
+                ledger["c0"] = {
+                    "entry": candidate,
+                    "canonical_bytes": b"{}",
+                }
+                ok, reason = vr.rule_9_statistics_recomputed(
+                    self._ctx(_base_request(), ledger)
+                )
+                self.assertFalse(ok)
+                if status in {
+                    "invalid",
+                    "invalidated",
+                    "infra_failed",
+                    "budget_truncated",
+                    "failed",
+                    "informative_failure",
+                }:
+                    self.assertIn("failed or invalid evidence", reason)
+                else:
+                    self.assertIn("not promotable", reason)
+
+    def test_candidate_promotion_status_can_carry_positive_posture(self):
+        ledger = self._full_ledger()
+        candidate = _valid_record(
+            "20260101-000000-bbb000",
+            metrics={"validation_nll": 0.825},
+        )
+        candidate["status"] = "promising"
+        candidate["promotion_status"] = "promotion_candidate"
+        ledger["c0"] = {
+            "entry": candidate,
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(
+            self._ctx(_base_request(), ledger)
+        )
+        self.assertTrue(ok, reason)
+
+    def test_candidate_raw_failure_status_not_masked_by_promotion_status(self):
+        ledger = self._full_ledger()
+        candidate = _valid_record(
+            "20260101-000000-bbb000",
+            metrics={"validation_nll": 0.825},
+        )
+        candidate["status"] = "infra_failed"
+        candidate["failure_reason"] = "worker timed out"
+        candidate["promotion_status"] = "promotion_candidate"
+        ledger["c0"] = {
+            "entry": candidate,
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(
+            self._ctx(_base_request(), ledger)
+        )
+        self.assertFalse(ok)
+        self.assertIn("failed or invalid evidence", reason)
+
+    def test_candidate_promotion_status_none_rejects_legacy_branch_winner(self):
+        ledger = self._full_ledger()
+        candidate = _valid_record(
+            "20260101-000000-bbb000",
+            metrics={"validation_nll": 0.825},
+        )
+        candidate["status"] = "branch_winner"
+        candidate["promotion_status"] = "none"
+        ledger["c0"] = {
+            "entry": candidate,
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(
+            self._ctx(_base_request(), ledger)
+        )
+        self.assertFalse(ok)
+        self.assertIn("not promotable", reason)
+
+    def test_missing_failure_reason_rejected_before_promotion(self):
+        ledger = self._full_ledger()
+        candidate = _valid_record(
+            "20260101-000000-bbb000",
+            metrics={"validation_nll": 0.825},
+        )
+        candidate["status"] = "infra_failed"
+        ledger["c0"] = {
+            "entry": candidate,
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(
+            self._ctx(_base_request(), ledger)
+        )
+        self.assertFalse(ok)
+        self.assertIn("failure_reason", reason)
+
+    def test_legacy_invalid_without_failure_reason_rejected_as_not_promotable(self):
+        ledger = self._full_ledger()
+        candidate = _valid_record(
+            "20260101-000000-bbb000",
+            metrics={"validation_nll": 0.825},
+        )
+        candidate["status"] = "invalid"
+        ledger["c0"] = {
+            "entry": candidate,
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(
+            self._ctx(_base_request(), ledger)
+        )
+        self.assertFalse(ok)
+        self.assertIn("failed or invalid evidence", reason)
+
+    def test_failed_baseline_rerun_status_rejected(self):
+        ledger = self._full_ledger()
+        rerun = _valid_record("20260101-000000-ccc000")
+        rerun["status"] = "infra_failed"
+        rerun["failure_reason"] = "baseline rerun worker timed out"
+        ledger["br0"] = {
+            "entry": rerun,
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(
+            self._ctx(_base_request(), ledger)
+        )
+        self.assertFalse(ok)
+        self.assertIn("baseline_rerun", reason)
+        self.assertIn("failed or invalid evidence", reason)
+
+    def test_baseline_rerun_raw_failure_status_not_masked_by_promotion_status(self):
+        ledger = self._full_ledger()
+        rerun = _valid_record("20260101-000000-ccc000")
+        rerun["status"] = "infra_failed"
+        rerun["failure_reason"] = "baseline rerun worker timed out"
+        rerun["promotion_status"] = "none"
+        ledger["br0"] = {
+            "entry": rerun,
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(
+            self._ctx(_base_request(), ledger)
+        )
+        self.assertFalse(ok)
+        self.assertIn("baseline_rerun", reason)
+        self.assertIn("failed or invalid evidence", reason)
+
+    def test_invalidated_baseline_rerun_status_rejected(self):
+        ledger = self._full_ledger()
+        rerun = _valid_record("20260101-000000-ccc000")
+        rerun["status"] = "invalidated"
+        ledger["br0"] = {
+            "entry": rerun,
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(
+            self._ctx(_base_request(), ledger)
+        )
+        self.assertFalse(ok)
+        self.assertIn("baseline_rerun", reason)
+        self.assertIn("failed or invalid evidence", reason)
+
+    def test_failed_ablation_status_rejected(self):
+        ledger = self._full_ledger()
+        ablation = _valid_record("20260101-000000-ddd000", metrics={})
+        ablation["status"] = "failed"
+        ledger["ab0"] = {
+            "entry": ablation,
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(
+            self._ctx(_base_request(), ledger)
+        )
+        self.assertFalse(ok)
+        self.assertIn("ablation_runs[0]", reason)
+        self.assertIn("failed or invalid evidence", reason)
+
+    def test_ablation_raw_failure_status_not_masked_by_promotion_status(self):
+        ledger = self._full_ledger()
+        ablation = _valid_record("20260101-000000-ddd000", metrics={})
+        ablation["status"] = "budget_truncated"
+        ablation["failure_reason"] = "per-iteration cap reached"
+        ablation["promotion_status"] = "none"
+        ledger["ab0"] = {
+            "entry": ablation,
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(
+            self._ctx(_base_request(), ledger)
+        )
+        self.assertFalse(ok)
+        self.assertIn("ablation_runs[0]", reason)
+        self.assertIn("failed or invalid evidence", reason)
+
+    def test_invalidated_ablation_status_rejected(self):
+        ledger = self._full_ledger()
+        ablation = _valid_record("20260101-000000-ddd000", metrics={})
+        ablation["status"] = "invalidated"
+        ledger["ab0"] = {
+            "entry": ablation,
+            "canonical_bytes": b"{}",
+        }
+        ok, reason = vr.rule_9_statistics_recomputed(
+            self._ctx(_base_request(), ledger)
+        )
+        self.assertFalse(ok)
+        self.assertIn("ablation_runs[0]", reason)
+        self.assertIn("failed or invalid evidence", reason)
+
     def test_metric_empty_evidence_rejected(self):
         # Schema-valid candidate but with empty metrics (no primary metric) -> no
         # §13.2.1 evidence -> reject rather than mint a deployable packet.

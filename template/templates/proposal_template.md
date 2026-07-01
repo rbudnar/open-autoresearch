@@ -63,6 +63,34 @@ config:
 
 - <protected file or category>
 
+## Executor handoff (optional, §5.8)
+
+Use this when a separate Implementation Worker, scratch branch, or worktree will
+execute the proposal. For a single-session Level-1 campaign, keep the same
+payload and record `coordinator_executor_separation: level_0`.
+
+```yaml
+executor_handoff:
+  proposal_id: "<this proposal id>"
+  hypothesis: "<frozen hypothesis from above>"
+  single_non_baseline_switch: "<one switch, or explicit stack label>"
+  editable_paths:
+    - "<path executor may change>"
+  protected_paths:
+    - "<path executor must not change>"
+  isolation: "<worktree | scratch_branch | container | same_session>"
+  budget_cap:
+    llm_tokens: <int | null>
+    tool_calls: <int | null>
+    gpu_hours: <float | null>
+    wall_clock_hours: <float | null>
+  allowed_evaluator_commands:
+    - "<smoke/proxy/full command>"
+  expected_artifacts:
+    - "<metrics/report/model/checkpoint path>"
+  coordinator_executor_separation: "<level_0 | level_1 | level_2 | level_3>"
+```
+
 ## Expected result
 
 | Metric | Baseline | Target | Threshold |

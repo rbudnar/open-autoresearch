@@ -59,6 +59,12 @@ strongest tier you can afford (a per-split membership hash gives byte-level proo
 
 **Adoption time:** ~30 minutes on a clean host project, per §1.5 acceptance criterion.
 
+**Coordinator/executor boundary:** Level 1 may use one agent/session as both
+Research Director and Implementation Worker. Still write the §5.8 handoff in
+the proposal/report when useful, and label the run
+`coordinator_executor_separation: level_0` instead of pretending the executor
+was independent.
+
 **You'll iterate on:** proposals, reports, ledger entries, the playbook. Everything else is set at bootstrap and stays put.
 
 ## Level 2 — Literature-informed

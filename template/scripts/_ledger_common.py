@@ -192,6 +192,8 @@ INSIGHT_CONFIDENCE_LEVELS = ("low", "medium", "high")
 
 INSIGHT_REVIEW_STATUSES = ("draft", "reviewed", "contested", "rejected")
 
+STATUSES_REQUIRING_FAILURE_REASON = ("infra_failed", "budget_truncated")
+
 _CLOSED_LIFECYCLE_STATUSES = {"blocked", "pruned", "merged"}
 _BASELINE_SENTINEL = "baseline"
 
@@ -251,6 +253,17 @@ def validate_tree_fields(
         )
 
     return errors
+
+
+def validate_status_fields(entry: dict[str, Any]) -> list[str]:
+    """Validate semantic status side-fields that JSON Schema cannot express."""
+    status = entry.get("status")
+    if (
+        status in STATUSES_REQUIRING_FAILURE_REASON
+        and not _nonempty_string(entry.get("failure_reason"))
+    ):
+        return [f"status {status!r} requires failure_reason"]
+    return []
 
 
 def validate_branch_insights(
