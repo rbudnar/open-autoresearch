@@ -381,6 +381,32 @@ def check_ci_wiring() -> None:
             fail(f"{workflow} must reference {snippet!r}")
 
 
+def check_pr_agent_inbox_wiring() -> None:
+    for path, snippets in {
+        ".github/workflows/pr-agent-inbox.yml": [
+            "pull-requests: write",
+            "status:",
+            "check_run:",
+            "--assert-no-agent-attention",
+        ],
+        "scripts/pr-agent-inbox.mjs": [
+            "const inboxState = clean ? 'clean'",
+            "const statusState = agentAttention ? 'failure' : 'success'",
+            "Agent check state: ${result.statusState}",
+            "inbox_state=${displayInboxState(result)}",
+        ],
+        "scripts/pr-agent-inbox.test.mjs": [
+            "waiting markdown distinguishes inbox state from agent check state",
+            "assert.equal(result.inboxState, 'waiting')",
+            "assert.equal(result.statusState, 'success')",
+        ],
+    }.items():
+        text = read(path)
+        for snippet in snippets:
+            if snippet not in text:
+                fail(f"{path} must reference {snippet!r}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Check Open-AutoResearch repo harness invariants.")
     parser.add_argument("--skip-metrics", action="store_true", help="Skip metrics baseline shape checks.")
@@ -398,6 +424,7 @@ def main(argv: list[str] | None = None) -> int:
     check_ledger_rotation_drift()
     check_migration_guidance_drift()
     check_ci_wiring()
+    check_pr_agent_inbox_wiring()
 
     for warning in warnings:
         print(f"WARN: {warning}")

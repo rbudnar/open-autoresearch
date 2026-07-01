@@ -109,7 +109,9 @@ test('review required is waiting, not agent attention, and not clean', () => {
 
   assert.equal(result.clean, false);
   assert.equal(result.agentAttention, false);
-  assert.equal(result.statusState, 'pending');
+  assert.equal(result.inboxState, 'waiting');
+  assert.equal(result.statusState, 'success');
+  assert.equal(result.statusDescription, 'No agent-actionable inbox items');
   assert.equal(result.items[0].kind, 'review_required');
 });
 
@@ -148,7 +150,21 @@ test('unknown merge state is waiting and not clean', () => {
 
   assert.equal(result.clean, false);
   assert.equal(result.agentAttention, false);
-  assert.equal(result.statusState, 'pending');
+  assert.equal(result.inboxState, 'waiting');
+  assert.equal(result.statusState, 'success');
+});
+
+test('waiting markdown distinguishes inbox state from agent check state', () => {
+  const markdown = renderMarkdown(analyzeInbox(data({
+    prView: {
+      reviewDecision: 'REVIEW_REQUIRED',
+    },
+  })));
+
+  assert.match(markdown, /Status: Waiting/);
+  assert.match(markdown, /Inbox state: waiting/);
+  assert.match(markdown, /Agent check state: success/);
+  assert.match(markdown, /Agent attention: no/);
 });
 
 test('unstable merge state does not block when only optional checks are failing', () => {
@@ -469,7 +485,8 @@ test('pending checks block locally unless allow-pending-checks is set', () => {
   }), { allowPendingChecks: true });
 
   assert.equal(blocked.clean, false);
-  assert.equal(blocked.statusState, 'pending');
+  assert.equal(blocked.inboxState, 'waiting');
+  assert.equal(blocked.statusState, 'success');
   assert.equal(allowed.clean, true);
 });
 
@@ -487,7 +504,8 @@ test('explicit required checks are honored when branch protection omits them', (
   }), { requiredChecks: ['continuous-integration/jenkins/pr-merge'] });
 
   assert.equal(result.clean, false);
-  assert.equal(result.statusState, 'pending');
+  assert.equal(result.inboxState, 'waiting');
+  assert.equal(result.statusState, 'success');
   assert.deepEqual(result.checks.pending, ['continuous-integration/jenkins/pr-merge']);
   assert.deepEqual(result.checks.failed, []);
 });
@@ -774,8 +792,9 @@ test('publishing side effects continue when write permissions are unavailable', 
     headRefOid: 'abc123',
     clean: false,
     agentAttention: false,
-    statusState: 'pending',
-    statusDescription: 'PR is waiting on non-agent state',
+    inboxState: 'waiting',
+    statusState: 'success',
+    statusDescription: 'No agent-actionable inbox items',
     items: [],
     nativeProtection: {},
   }, {
