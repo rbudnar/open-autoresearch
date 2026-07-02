@@ -5,6 +5,8 @@ Related: #16, #24, #25, #4. Sources checked:
 `karpathy/autoresearch@228791fb499afffb54b46200aca536f79142f117` and
 `RUC-NLPIR/Arbor@4f8c5c2e8d4b8d238ae911da486240e1ba95f4ca`.
 
+---
+
 This note closes the native Arbor/HTR roadmap loop without making Arbor a
 runtime dependency. Open-AutoResearch has already absorbed the durable protocol
 pieces it needs: operational tree state, branch insights, coordinator/executor
@@ -53,6 +55,9 @@ running and choose a cheaper CPU benchmark instead.
 - Human/agent instruction path: `program.md`
 - Protected evaluator/data/runtime paths: `prepare.py`, `pyproject.toml`,
   `uv.lock`, `.python-version`, and downloaded data/tokenizer cache.
+- Required data evidence: a project-local cache manifest or data snapshot entry
+  that records paths, sizes, and hashes for the downloaded data/tokenizer cache
+  used by `prepare.py`; bulky cache files do not need to be committed.
 - Primary metric: `val_bpb` from `prepare.py` evaluation; lower is better.
 - Secondary telemetry: `training_seconds`, `total_seconds`, `peak_vram_mb`,
   `mfu_percent`, `total_tokens_M`, `num_steps`, `num_params_M`, crash rate, and
@@ -68,13 +73,17 @@ Level 1 pilot:
 
 1. Clone the target repo at the pinned commit into a clean host worktree.
 2. Run `uv sync` and `uv run prepare.py` once.
-3. Record baseline `uv run train.py` output as the root ledger record.
-4. Run 3-5 candidate iterations that only modify `train.py`.
-5. Record every kept, discarded, and crashed attempt as immutable ledger records
+3. Write a cache/data snapshot manifest for the downloaded data and tokenizer:
+   record cache paths, byte sizes, hashes, `val_set_version`, and the
+   `data_snapshot` id that every run will cite.
+4. Record baseline `uv run train.py` output as the root ledger record.
+5. Run 3-5 candidate iterations that only modify `train.py`.
+6. Record every kept, discarded, and crashed attempt as immutable ledger records
    with source branch, source commit, lifecycle state, and local lessons.
-6. Commit only Open-AutoResearch artifacts under a new example directory such as
-   `examples/real-benchmark-karpathy-autoresearch/`; do not commit datasets,
-   checkpoints, local caches, or transient `results.tsv`.
+7. Commit only Open-AutoResearch artifacts under a new example directory such as
+   `examples/real-benchmark-karpathy-autoresearch/`; commit the cache/data
+   snapshot manifest, but do not commit bulky datasets, checkpoints, local
+   caches, or transient `results.tsv`.
 
 Level 3 graduation:
 
@@ -96,6 +105,9 @@ Level 3 graduation:
   logic must use the minimize path.
 - Budget check: a five-minute training loop can still be expensive over many
   iterations. Record compute budget and stop conditions before the run.
+- Data-drift check: downloaded data/tokenizer cache contents need a manifest or
+  `data_snapshot` hash record before any `val_bpb` result is treated as
+  auditable.
 - Simplicity check: keep upstream's complexity posture. A tiny `val_bpb` gain
   from a large brittle diff is not automatically worth keeping.
 - Artifact-size check: the example should preserve reports and ledger records,
