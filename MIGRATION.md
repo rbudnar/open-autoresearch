@@ -2,6 +2,19 @@
 
 Each major / minor protocol bump may require host-project changes. This file walks through each transition.
 
+## Within v0.5 — cost-aware frontier allocation (no migration)
+
+The §8 frontier allocation policy is a **backward-compatible guidance**
+addition. Existing proposals, reports, ledger records, and campaign state remain
+valid. Level 3+ adopters should start recording `frontier_decision` fields in
+new proposals/reports when the Director chooses, defers, prunes, or stops a
+frontier node, especially when validation exposure or campaign budget is tight.
+
+No scheduler, search service, learned policy, or new reference runtime is
+required. Hosts may implement the policy as prose, a table, a script, or a
+dashboard as long as a later reviewer can reconstruct why the next branch was
+chosen and whether budget was reserved for promotion evidence.
+
 ## Within v0.5 — coordinator/executor boundary (no migration)
 
 The coordinator/executor handoff is a **backward-compatible guidance** addition.

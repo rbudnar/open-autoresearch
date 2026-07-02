@@ -13,6 +13,12 @@ maturity_level: <1 | 2 | 3 | 4 | 5>
 # novelty_check: "<why this is not just re-running an already rejected sibling idea>"
 # implementation_precedent: "<paper/code evidence this change is plausible, or null>"
 # citation_risk: "<peer_reviewed | technical_report | arxiv_preprint | prototype | withdrawn | unknown>"
+# Optional Level 3+ frontier-allocation fields (§8):
+# next_branch_choice: "<selected frontier node/proposal id, or null>"
+# budget_reason: "<why this branch is worth the next unit of budget now>"
+# reserve_budget_for_promotion: <true | false>
+# These are shorthand mirrors of the `frontier_decision` block below; if both
+# are present, they must match the detailed block.
 ---
 
 # Experiment Proposal: <short name>
@@ -42,6 +48,41 @@ If `web_search_used: false`, this section pulls only from `canon.bib` and the ho
 - **Invalidated sibling ideas avoided:** <ideas this proposal deliberately does not retry>
 - **Draft or contested insights:** <context only; do not use as pruning or promotion authority>
 - **Retirement signals checked:** <conditions that would make an old insight no longer apply>
+
+## Frontier allocation decision (Level 3+, §8)
+
+Use this section when choosing among multiple active frontier nodes or when
+validation exposure / campaign budget affects the next run. Keep it short, but
+make the choice auditable.
+
+```yaml
+frontier_decision:
+  next_branch_choice: "<proposal/node id selected, or none>"
+  action: "<select | defer | prune | quarantine | request_holdout_refresh | stop_campaign | emit_promotion_request>"
+  budget_reason: "<why this is worth the next unit of budget now>"
+  reserve_budget_for_promotion: <true | false>
+  frontier_rank_snapshot:
+    - node_id: "<ledger/proposal id>"
+      branch: "<architecture | loss_objective | data_sampling | features | optimization | calibration | systems_efficiency>"
+      evidence: "<label + uncertainty>"
+      next_step: "<cheap_proxy | full_validation | ablation | rerun | verifier | none>"
+      expected_cost:
+        val_queries: <int>
+        gpu_hours: <float>
+        wall_clock_hours: <float>
+        llm_tokens: <int>
+        tool_calls: <int>
+      remaining_headroom:
+        val_queries: <int>
+        gpu_hours: <float>
+        wall_clock_hours: <float>
+        llm_tokens: <int>
+        tool_calls: <int>
+      decision: "<selected | deferred | blocked | pruned | quarantined | stopped>"
+      reason: "<short reason>"
+  defer_reason: "<required when action=defer or any snapshot decision=deferred | blocked>"
+  stop_reason: "<required when action=prune | quarantine | stop_campaign or any snapshot decision=pruned | quarantined | stopped>"
+```
 
 ## Proposed change
 
@@ -106,6 +147,7 @@ executor_handoff:
 - **Full validation (Stage C):** <budget, seeds from cost_tier>
 - **Seeds:** <count from cost_tier>
 - **Ablation type:** <one of §16.1 categories: single_component_swap | stack | additive_component | algorithmic>
+- **Promotion reserve after this run:** <val queries / GPU hours / tokens left for reruns + ablation + verifier, or "not promotion-track">
 
 ## Early stopping rule
 

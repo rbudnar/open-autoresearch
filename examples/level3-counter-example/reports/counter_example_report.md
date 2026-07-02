@@ -53,6 +53,20 @@ The protocol does NOT let us deploy a candidate measured against a val set that 
 
 **This is the protocol working as intended.** The agent does not get to override the verifier on its own evidence; an external check exists specifically to prevent "we know it's good, let's ship" reasoning.
 
+## Frontier allocation after rejection
+
+The section 8 frontier decision is captured in
+`reports/iter10-frontier-allocation.md`. With validation exposure at 52/50, the
+Director does **not** spend another full-validation run on a sibling idea. The
+decision is:
+
+- defer `attention_pool` promotion until holdout refresh;
+- stop further `ordinal_hybrid` follow-up because it is secondary to the blocked
+  dominant branch and would require more validation exposure;
+- prune `cosine_restarts` because the reviewed guardrail regression already
+  makes it a poor use of scarce budget;
+- request holdout refresh, or end the campaign with this counter-example report.
+
 ## Lessons (for the playbook)
 
 - **Coefficient sensitivity:** ordinal_hybrid with `coef ≥ 0.9` is unstable on this task. Add to `known_failures.md`. Future sweeps grid-search 0.1–0.7 only.

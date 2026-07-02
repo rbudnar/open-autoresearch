@@ -16,6 +16,7 @@ This campaign exercises every failure mode the v0.5 protocol is designed to surf
 | Iter 6 | **Stack masquerading as candidate** — Skeptic catches a proposal that flips two switches; routed for factorial planning. | §11.1.1 |
 | Iter 7 | **Factorial ablation** — 2×2 grid attributes gain to attention pool; ordinal loss contributes within noise. | §16.1.2 |
 | Iter 8 | **Promotion request REJECTED by verifier** — val-exposure budget exhausted by the iter-5 re-grade + iter-7 factorial. Verifier-signed packet carries `status: rejected`. | §10.5, §17.6 |
+| Post-verifier | **Frontier allocation under exhausted exposure** — attention_pool is deferred until holdout refresh, ordinal_hybrid follow-up is stopped, and cosine_restarts is pruned. | §8, §17.6 |
 
 Iters 6 and 7 also demonstrate propagated branch insights (§14.4): iter 6 records a reviewed negative constraint that the attention-pool + ordinal-hybrid combination cannot be promoted as a single candidate, and iter 7 records a reviewed positive constraint that the next follow-up should prioritize attention_pool alone before spending more budget on ordinal_hybrid combinations.
 
@@ -56,6 +57,7 @@ reports/
   iter04-invalidation.md
   iter07-factorial-ablation.md
   iter09-skeptic-review.md
+  iter10-frontier-allocation.md
   iter08-promotion-packet.md
   iter08-promotion-packet.json
   counter_example_report.md  # the campaign's actual deliverable
@@ -71,5 +73,6 @@ reports/
 
 1. `reports/counter_example_report.md` (the meta-narrative — 5 min read)
 2. `state/experiment_ledger.jsonl` (one line per iteration; tells the whole story compactly)
-3. `reports/iter04-invalidation.md` (the most subtle artifact — evaluator drift + retroactive invalidation)
-4. `proposals/iter08-promotion-request.json` and `reports/iter08-promotion-packet.json` (the rejected promotion)
+3. `reports/iter10-frontier-allocation.md` (the budget-aware frontier decision after rejection)
+4. `reports/iter04-invalidation.md` (the most subtle artifact — evaluator drift + retroactive invalidation)
+5. `proposals/iter08-promotion-request.json` and `reports/iter08-promotion-packet.json` (the rejected promotion)

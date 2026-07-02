@@ -41,6 +41,20 @@ evaluator_equivalence:
 # Real campaigns should size this to (sqrt(val_size) × project tolerance for repeated peeks).
 val_set_exposure_budget: 50
 
+frontier_allocation:
+  preserve_branch_diversity: true
+  max_exploration_budget_fraction_per_branch: 0.4
+  promotion_reserve:
+    reserve_for_baseline_rerun: true
+    reserve_for_candidate_rerun: true
+    reserve_for_ablation_or_factorial: true
+    val_query_buffer_fraction: 0.2
+    compute_buffer_fraction: 0.2
+  exposure_policy:
+    prefer_proxy_after_fraction: 0.5
+    low_evidence_after_fraction: 0.9
+    require_holdout_refresh_at_fraction: 1.0
+
 budgets:
   llm:
     max_tokens_total: 20000000

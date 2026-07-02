@@ -15,6 +15,7 @@ This protocol generalizes beyond any single domain. It can be applied to autoenc
 - **v0.5 additive (2026-06-29):** Optional operational tree fields separate lifecycle state from promotion/evidence posture: `lifecycle_status`, `promotion_status`, `frontier_eligible`, `blocked_by`, `pruned_reason`, `merged_into`, and `node_type` (§14.1 / §15). `research_tree.json` now derives frontier, blocked, pruned, merged, lineage-order, and promotion-candidate views from ledger records. Existing records remain valid; no migration or protocol-version bump.
 - **v0.5 additive (2026-06-30):** Optional branch insight propagation fields distinguish local run `lessons` from ledger-traceable constraints that update ancestor hypotheses: `branch_insights[]` with `raw_observation`, `distilled_insight`, `source_record_ids`, `updates_parent_ids`, `validated_constraint`, `invalidated_ideas`, `confidence`, `retirement_signal`, `review_status`, and `review_record_ids` (§14.1 / §14.4 / §15). `research_tree.json.views.branch_insights` now derives compact indexes by source record, affected parent, validated constraint, and invalidated idea. Existing records remain valid; no migration or protocol-version bump.
 - **v0.5 additive (2026-07-01):** Coordinator/executor boundary (§5.8 / §21.2). A Research Director hands one approved hypothesis, one switch/stack label, path contract, budget cap, evaluator commands, and expected artifacts to a short-lived Implementation Worker; the worker returns patch/evidence/ledger-ready fields and exits. This is guidance for host agents and equivalent non-Python implementations, not a scheduler, orchestrator, or required runtime.
+- **v0.5 additive (2026-07-01):** Cost-aware frontier allocation policy (§8 / §17.6 / §17.7). Level 3+ campaigns record why the next frontier node is selected, deferred, or stopped, and reserve validation/compute budget for ablations, reruns, and verifier promotion attempts before spending the remaining budget on exploration. Existing artifacts remain valid; the new proposal/report fields are optional but recommended for Level 3+ campaigns.
 - **v0.4 (2026-05-18):** Polish pass after second dual-voice review of v0.3. Promotion packet split into agent-emitted `promotion_request` and verifier-signed `promotion_packet` (§10.5); §18 criterion 2 made direction-aware; stale "13 criteria" and `§18.13` references fixed; tightened val-exposure query unit definition to cover Stage-B-on-val + seed reruns + ablation reruns + early-stop peeks (§17.6); behavioral-equivalence tolerances bumped to be safe for 10k-example NLL (`rtol: 1e-4`/`atol: 1e-6` fp32 default), added bf16/fp16 row, required per-metric `aggregation: mean|sum` (§17.1.1); per-iteration token caps moved to per-level defaults L1–L4 (§17.7); `branch_winner` namespaced to `level1_branch_winner`/`level2_branch_winner`/`branch_winner` with `maturity_level` + `not_deployable` frontmatter requirement (§13.3, §24); promotion packet schema rewritten as references-to-ledger (no duplicate fields) (§10.5); §1.5 Step 4 handoff fixed (new §6.3.1 split freeze); Level-1 → Level-3 graduation path corrected; §11.1.1 inline stack example replaces v0.1 cross-reference; minor numerical consistency cleanups; all artifact `protocol_version` stamps bumped to `0.4`.
 - **v0.3 (2026-05-18):** Direction-aware statistical decision rule (§13.2.1); tolerance-based behavioral equivalence (§17.1.1); explicit Level-1 promotion semantics — Level 1 can label `promising`/`branch_winner` but not `promoted` (§23, §24); new §1.5 "Start Here" implementation path; new §10.5 promotion packet schema; new §17.6 validation-set exhaustion policy; new §17.7 LLM/tool-call/compute budget accounting; minor cleanups throughout.
 - **v0.2 (2026-05-18):** Major revision after dual-voice review. Added: §0 versioning policy; §2 citation status table; §3.1.1 out-of-band enforcement requirement; §5.0 role-separation modes; §6.1 cost-tiered seed counts; §9.0 offline literature mode; §11.1.1 candidate/component/stack definitions; §13.2.1 default statistical decision rule; §16.1 ablation decision tree; §17.1 split (in-band vs out-of-band controls); §17.1.1 behavioral-equivalence test; §17.5 operational realities; §22a counter-example campaign; reconciled §23 minimal checklist with §24 maturity levels.
@@ -697,6 +698,155 @@ branch_priority ≈ (expected_gain × confidence × novelty × lit_support) / co
 
 Prioritize: clear failure mode, plausible mechanism, literature support, low complexity, low eval cost, underexplored opportunity, reviewed propagated branch constraint, cross-branch lesson. Avoid: repeated failures without new info, unclear success criteria, expensive-before-cheap-validation, evaluator-touching changes (forbidden), no plausible mechanism.
 
+### 8.1 Cost-aware frontier allocation (Level 3+)
+
+At Level 3 and above, branch selection is not just "pick the best idea." The
+Research Director must allocate the remaining campaign budget across the active
+frontier deliberately:
+
+- exploit branches with strong, reviewed evidence;
+- preserve diversity when evidence is weak or correlated;
+- run cheap falsifiers before expensive full validation;
+- reserve budget for ablations, baseline/candidate reruns, Skeptic review, and
+  verifier promotion attempts;
+- stop or defer branches whose evidence has collapsed, whose guardrail risk is
+  too high, or whose next useful step cannot fit inside the remaining budget or
+  validation-exposure headroom.
+
+This is a policy contract, not a scheduler. The protocol does not require a
+learned search policy, a queue service, or universal branch weights. A human or
+agent Director may implement it with a table in the proposal, a script, a
+spreadsheet, or a host-specific dashboard, as long as the decision is recorded.
+
+### 8.2 Required inputs
+
+Before launching a Level 3+ run that reads the validation set or spends
+material compute/LLM budget, the Director SHOULD make a compact
+`frontier_rank_snapshot` over the currently eligible frontier. Include enough
+information for a later reviewer to understand the decision:
+
+- node or proposal id;
+- branch/category (`architecture`, `loss_objective`, `data_sampling`,
+  `features`, `optimization`, `calibration`, `systems_efficiency`, or
+  host-defined equivalent);
+- maturity level, evidence label, promotion posture, and uncertainty;
+- expected cost of the next useful step in GPU hours, wall-clock, LLM tokens,
+  tool calls, and validation queries;
+- remaining campaign budget and remaining validation-exposure headroom
+  (§17.6/§17.7);
+- ablation/rerun/verifier debt required before promotion;
+- relevant reviewed `branch_insights[]` constraints (§14.4);
+- recent scientific failures, `infra_failed` streaks, or `budget_truncated`
+  runs;
+- guardrail, leakage, or protected-path risk.
+
+### 8.3 Promotion reserve
+
+Before spending budget on exploratory frontier nodes, estimate the reserve
+needed to attempt promotion of the best current or plausible near-term
+candidate:
+
+```text
+promotion_reserve =
+  baseline_rerun_seeds
+  + candidate_rerun_seeds
+  + required_ablation_or_factorial_cells × seeds
+  + likely_regrade_or_verifier_retries
+  + explicit buffer for infra failures or nondeterministic reruns
+```
+
+Apply the same idea to compute, wall-clock, LLM/tool-call, and validation-query
+budgets. If the remaining validation exposure or total budget cannot cover the
+promotion reserve, the Director MUST NOT spend the scarce resource on another
+full-validation exploration run. Acceptable decisions are:
+
+- run a non-val smoke/proxy falsifier;
+- defer the branch until budget or holdout is refreshed;
+- request a holdout refresh (§17.6.3) or budget change;
+- end the campaign with the current evidence and a negative/inconclusive
+  report (§19/§22a).
+
+`reserve_budget_for_promotion: true` means the current proposal deliberately
+protects enough remaining budget for promotion evidence. `false` is allowed
+only with a `budget_reason` explaining why promotion is not the campaign's next
+objective or why the campaign is intentionally ending.
+
+### 8.4 Diversity and anti-monopoly rules
+
+When evidence is weak or mostly single-seed, preserve branch diversity:
+
+- avoid letting one branch consume most of the remaining budget before it has a
+  reviewed `branch_winner` or a similarly strong posture;
+- prefer cheap falsifiers on underexplored categories before another expensive
+  run on a heavily sampled branch;
+- do not permanently prune a branch from draft, contested, or rejected
+  insights; pruning needs reviewed evidence, a clear `stop_reason`, or a human
+  override;
+- treat negative and inconclusive outcomes as first-class evidence. A failed
+  branch can update constraints, reduce its rank, or retire a sibling idea even
+  when no model improves.
+
+Host projects MAY configure numeric diversity caps (for example, "no branch may
+spend more than 40% of remaining exploration budget before a reviewed
+`branch_winner`"). The protocol intentionally does not set universal weights.
+
+### 8.5 Required decision fields
+
+Level 3+ proposals and reports SHOULD carry:
+
+```yaml
+frontier_decision:
+  next_branch_choice: "<proposal/node id selected, or none>"
+  action: "<select | defer | prune | quarantine | request_holdout_refresh | stop_campaign | emit_promotion_request>"
+  budget_reason: "<why this is worth the next unit of budget now>"
+  frontier_rank_snapshot:
+    - node_id: "<ledger/proposal id>"
+      branch: "<category>"
+      evidence: "<label + uncertainty>"
+      next_step: "<cheap_proxy | full_validation | ablation | rerun | verifier | none>"
+      expected_cost:
+        val_queries: <int>
+        gpu_hours: <float>
+        wall_clock_hours: <float>
+        llm_tokens: <int>
+        tool_calls: <int>
+      remaining_headroom:
+        val_queries: <int>
+        gpu_hours: <float>
+        wall_clock_hours: <float>
+        llm_tokens: <int>
+        tool_calls: <int>
+      decision: "<selected | deferred | blocked | pruned | quarantined | stopped>"
+      reason: "<short reason>"
+  reserve_budget_for_promotion: <true | false>
+  defer_reason: "<required when action=defer or any snapshot decision=deferred | blocked>"
+  stop_reason: "<required when action=prune | quarantine | stop_campaign or any snapshot decision=pruned | quarantined | stopped>"
+```
+
+The exact shape may be adapted to the host's tooling, but the same facts must be
+recoverable from the proposal/report. For Level 1-2 campaigns this section is
+optional; the simple §8 branch-priority note is sufficient.
+
+Report-level frontier decisions are planning records. They do not mutate the
+derived `research_tree` by themselves. When a decision should change operational
+state, mirror it into immutable ledger fields such as `lifecycle_status`,
+`blocked_by`, `pruned_reason`, or `frontier_eligible` before expecting §15
+derived views to treat the node as blocked, pruned, or frontier-ineligible.
+
+### 8.6 Validation exposure interaction
+
+Validation exposure is a budgeted resource, not just a promotion gate. Apply
+§17.6 thresholds during frontier allocation:
+
+- below 50% of budget: normal frontier exploration is allowed;
+- 50-90%: prefer proxy-stage decisions and reserve full-val for high-confidence
+  candidates;
+- 90-100%: do not spend full-val on low-confidence exploration; document why
+  any remaining read is worth automatic `evidence_level: low`;
+- at or above 100%: no further promotion or full-val branch selection until
+  holdout refresh. Produce a `request_holdout_refresh`, `defer`, or
+  `stop_campaign` decision.
+
 ---
 
 ## 9. Literature Scout procedure (live mode)
@@ -765,6 +915,12 @@ web_search_used: true | false
 # novelty_check: <why this is not a rejected sibling or stale retry>
 # implementation_precedent: <paper/code evidence the idea is plausible, or none found>
 # citation_risk: peer_reviewed | technical_report | arxiv_preprint | prototype | withdrawn | unknown
+# Optional Level 3+ frontier-allocation fields (§8):
+# next_branch_choice: <selected frontier node/proposal id, or null>
+# budget_reason: <why this branch is worth the next unit of budget now>
+# reserve_budget_for_promotion: true | false
+# These are shorthand mirrors of the `frontier_decision` block below; if both
+# are present, they must match the detailed block.
 
 ## Hypothesis
 Because <observed failure>, changing <mechanism> should improve <metric/subgroup> by ≥ <expected_delta> without worsening <guardrails> beyond <regression_tolerance>.
@@ -779,6 +935,37 @@ If `web_search_used: false`, this section pulls only from `canon.bib` and the ho
 - Novelty check: <why this is not re-running stale or rejected work>
 - Implementation precedent: <code/paper evidence, or "none found">
 - Citation risk: <peer_reviewed | technical_report | arxiv_preprint | prototype | withdrawn | unknown>
+
+## Frontier allocation decision (Level 3+, §8)
+
+```yaml
+frontier_decision:
+  next_branch_choice: "<proposal/node id selected, or none>"
+  action: "<select | defer | prune | quarantine | request_holdout_refresh | stop_campaign | emit_promotion_request>"
+  budget_reason: "<why this is worth the next unit of budget now>"
+  reserve_budget_for_promotion: <true | false>
+  frontier_rank_snapshot:
+    - node_id: "<ledger/proposal id>"
+      branch: "<category>"
+      evidence: "<label + uncertainty>"
+      next_step: "<cheap_proxy | full_validation | ablation | rerun | verifier | none>"
+      expected_cost:
+        val_queries: <int>
+        gpu_hours: <float>
+        wall_clock_hours: <float>
+        llm_tokens: <int>
+        tool_calls: <int>
+      remaining_headroom:
+        val_queries: <int>
+        gpu_hours: <float>
+        wall_clock_hours: <float>
+        llm_tokens: <int>
+        tool_calls: <int>
+      decision: "<selected | deferred | blocked | pruned | quarantined | stopped>"
+      reason: "<short reason>"
+  defer_reason: "<required when action=defer or any snapshot decision=deferred | blocked>"
+  stop_reason: "<required when action=prune | quarantine | stop_campaign or any snapshot decision=pruned | quarantined | stopped>"
+```
 
 ## Proposed change
 Describe the minimal implementation. Per §11.1.1, ONE non-baseline config switch.
@@ -805,6 +992,7 @@ all other switches pinned to baseline.
 - Full validation:  <budget>
 - Seeds:            <from cost_tier>
 - Ablation:         <type from §16.1>
+- Promotion reserve after this run: <val queries / GPU hours / tokens left for reruns + ablation + verifier, or "not promotion-track">
 
 ## Early stopping rule
 Stop if <condition>.
@@ -1697,7 +1885,7 @@ NOT to maximize superficial metrics.
 
 The protocol is at @autoresearch/protocol.md. Required reading:
 - §0 (versioning), §3.1.1 (enforcement is out-of-band), §5.0 (role separation),
-  §5.8 (coordinator/executor boundary), §11.1.1 (candidate vs stack), §13.2.1 (decision rule),
+  §5.8 (coordinator/executor boundary), §8 (frontier allocation), §11.1.1 (candidate vs stack), §13.2.1 (decision rule),
   §16.1 (ablation tree), §17 (reliability), §18 (promotion gate).
 
 Rules:
@@ -1714,7 +1902,8 @@ Rules:
    The Implementation Worker returns evidence; it does not re-plan the branch.
 6. Use staged evaluation: smoke, cheap proxy, full validation.
 7. Use seed counts from the host's cost tier (§6.1).
-8. Maintain a research tree (§15).
+8. Maintain a research tree (§15) and choose the next frontier node with the
+   cost-aware §8 allocation policy at Level 3+.
 9. Update the immutable ledger and compact playbook after every run; respect
    the sharded-ledger source-of-truth model (§17.5.4) and playbook token budget.
 10. Treat surprising wins as suspicious until ablated and reproduced.
@@ -1726,7 +1915,7 @@ Rules:
 At iteration start:
 - read the latest playbook
 - inspect open branches
-- choose next branch (§8)
+- choose next branch (§8) and record `frontier_decision` / promotion reserve
 - request literature brief (live or offline)
 - write proposal (§10 template, flagging single non-baseline switch)
 - prepare executor handoff (§5.8), then implement (§11)

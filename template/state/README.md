@@ -7,7 +7,7 @@ This directory is empty in the template. The agent populates it during the campa
 There are exactly two hand-written, committed surfaces:
 
 - **`ledger/<id>.json`** — the immutable per-experiment records. **This is the source of truth.** One file per experiment, never mutated; a correction is a NEW record referencing the prior `id` in `parent_ids` (`PROTOCOL.md` §14.1).
-- **`campaign.json`** — committed, single-writer campaign metadata (`campaign_id`, `host_branch`, `scratch_branch`, `maturity_level`, `branch_policy`, root-node title/status; `PROTOCOL.md` §15). Single-writer ⇒ negligible merge-conflict risk.
+- **`campaign.json`** — committed, single-writer campaign metadata (`campaign_id`, `host_branch`, `scratch_branch`, `maturity_level`, `branch_policy`, root-node title/status; `PROTOCOL.md` §15). Single-writer ⇒ negligible merge-conflict risk. Campaign-level `branch_policy` may name the host's §8 frontier-allocation defaults (for example diversity caps or promotion-reserve policy). Per-run choices still belong in proposals/reports, not in derived `research_tree.json`.
 
 The following four files are **DERIVED and git-ignored** — pure functions of the records (+ `campaign.json`), rebuilt by `scripts/regenerate_state.py` (run `make ledger`): `experiment_ledger.jsonl`, `research_tree.json`, `val_exposure.json`, `INDEX.md`. **Never hand-edit them, and never commit them.** A fresh clone has none of them until you regenerate. **Readers MUST regenerate before reading any aggregate** — regeneration is a cheap pure function of a small directory, so do not rely on file mtime for staleness (mtime is unreliable across `git checkout`).
 

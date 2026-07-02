@@ -67,6 +67,42 @@ lockfile_hash: "..."
 - Wall clock: <float>
 - Provider cost estimate: <$float>
 
+## Frontier allocation outcome (§8)
+
+Record how this result changes the active frontier and budget posture. This is
+recommended (SHOULD, §8.5) for Level 3+ campaigns when a branch is selected,
+deferred, pruned, quarantined, or blocked by validation exposure / budget
+headroom.
+
+```yaml
+frontier_decision:
+  next_branch_choice: "<proposal/node id selected next, or none>"
+  action: "<select | defer | prune | quarantine | request_holdout_refresh | stop_campaign | emit_promotion_request>"
+  budget_reason: "<why the next action is worth, or not worth, more budget>"
+  reserve_budget_for_promotion: <true | false>
+  frontier_rank_snapshot:
+    - node_id: "<ledger/proposal id>"
+      branch: "<category>"
+      evidence: "<label + uncertainty after this report>"
+      next_step: "<cheap_proxy | full_validation | ablation | rerun | verifier | none>"
+      expected_cost:
+        val_queries: <int>
+        gpu_hours: <float>
+        wall_clock_hours: <float>
+        llm_tokens: <int>
+        tool_calls: <int>
+      remaining_headroom:
+        val_queries: <int>
+        gpu_hours: <float>
+        wall_clock_hours: <float>
+        llm_tokens: <int>
+        tool_calls: <int>
+      decision: "<selected | deferred | blocked | pruned | quarantined | stopped>"
+      reason: "<short reason>"
+  defer_reason: "<required when action=defer or any snapshot decision=deferred | blocked>"
+  stop_reason: "<required when action=prune | quarantine | stop_campaign or any snapshot decision=pruned | quarantined | stopped>"
+```
+
 ## Executor return (§5.8, if applicable)
 
 ```yaml
