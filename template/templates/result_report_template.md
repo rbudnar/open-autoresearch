@@ -99,8 +99,8 @@ frontier_decision:
         tool_calls: <int>
       decision: "<selected | deferred | blocked | pruned | quarantined | stopped>"
       reason: "<short reason>"
-  defer_reason: "<required when action=defer>"
-  stop_reason: "<required when action=prune | quarantine | stop_campaign>"
+  defer_reason: "<required when action=defer or any snapshot decision=deferred | blocked>"
+  stop_reason: "<required when action=prune | quarantine | stop_campaign or any snapshot decision=pruned | quarantined | stopped>"
 ```
 
 ## Executor return (§5.8, if applicable)

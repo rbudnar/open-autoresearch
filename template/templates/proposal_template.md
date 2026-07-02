@@ -17,6 +17,8 @@ maturity_level: <1 | 2 | 3 | 4 | 5>
 # next_branch_choice: "<selected frontier node/proposal id, or null>"
 # budget_reason: "<why this branch is worth the next unit of budget now>"
 # reserve_budget_for_promotion: <true | false>
+# These are shorthand mirrors of the `frontier_decision` block below; if both
+# are present, they must match the detailed block.
 ---
 
 # Experiment Proposal: <short name>
@@ -78,8 +80,8 @@ frontier_decision:
         tool_calls: <int>
       decision: "<selected | deferred | blocked | pruned | quarantined | stopped>"
       reason: "<short reason>"
-  defer_reason: "<required when action=defer>"
-  stop_reason: "<required when action=prune | quarantine | stop_campaign>"
+  defer_reason: "<required when action=defer or any snapshot decision=deferred | blocked>"
+  stop_reason: "<required when action=prune | quarantine | stop_campaign or any snapshot decision=pruned | quarantined | stopped>"
 ```
 
 ## Proposed change

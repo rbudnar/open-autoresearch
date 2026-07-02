@@ -819,8 +819,8 @@ frontier_decision:
       decision: "<selected | deferred | blocked | pruned | quarantined | stopped>"
       reason: "<short reason>"
   reserve_budget_for_promotion: <true | false>
-  defer_reason: "<required when action=defer>"
-  stop_reason: "<required when action=prune | quarantine | stop_campaign>"
+  defer_reason: "<required when action=defer or any snapshot decision=deferred | blocked>"
+  stop_reason: "<required when action=prune | quarantine | stop_campaign or any snapshot decision=pruned | quarantined | stopped>"
 ```
 
 The exact shape may be adapted to the host's tooling, but the same facts must be
@@ -919,6 +919,8 @@ web_search_used: true | false
 # next_branch_choice: <selected frontier node/proposal id, or null>
 # budget_reason: <why this branch is worth the next unit of budget now>
 # reserve_budget_for_promotion: true | false
+# These are shorthand mirrors of the `frontier_decision` block below; if both
+# are present, they must match the detailed block.
 
 ## Hypothesis
 Because <observed failure>, changing <mechanism> should improve <metric/subgroup> by ≥ <expected_delta> without worsening <guardrails> beyond <regression_tolerance>.
@@ -961,8 +963,8 @@ frontier_decision:
         tool_calls: <int>
       decision: "<selected | deferred | blocked | pruned | quarantined | stopped>"
       reason: "<short reason>"
-  defer_reason: "<required when action=defer>"
-  stop_reason: "<required when action=prune | quarantine | stop_campaign>"
+  defer_reason: "<required when action=defer or any snapshot decision=deferred | blocked>"
+  stop_reason: "<required when action=prune | quarantine | stop_campaign or any snapshot decision=pruned | quarantined | stopped>"
 ```
 
 ## Proposed change
