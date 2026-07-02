@@ -385,6 +385,7 @@ def check_pr_agent_inbox_wiring() -> None:
     for path, snippets in {
         ".github/workflows/pr-agent-inbox.yml": [
             "pull-requests: write",
+            "actions: read",
             "status:",
             "check_run:",
             "--assert-no-agent-attention",
