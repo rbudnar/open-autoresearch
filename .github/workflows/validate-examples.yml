@@ -105,7 +105,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Every ledger record stamps protocol_version 0.5
+      - name: Every ledger record stamps protocol_version 0.6
         run: |
           python - <<'EOF'
           import json, glob, sys
@@ -119,11 +119,11 @@ jobs:
           for path in paths:
               with open(path) as f:
                   entry = json.load(f)
-              if entry.get("protocol_version") != "0.5":
+              if entry.get("protocol_version") != "0.6":
                   bad.append(f"{path}: protocol_version={entry.get('protocol_version')!r}")
           if bad:
               print("FAIL: ledger records with wrong/missing protocol_version:")
               for b in bad: print(f"  {b}")
               sys.exit(1)
-          print(f"OK: every example ledger record ({len(paths)}) stamps protocol_version=0.5")
+          print(f"OK: every example ledger record ({len(paths)}) stamps protocol_version=0.6")
           EOF

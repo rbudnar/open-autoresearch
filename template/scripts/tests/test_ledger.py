@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_ledger.py — stdlib unittest suite for the Protocol 0.5 ledger tools.
+"""test_ledger.py — stdlib unittest suite for the Protocol 0.6 ledger tools.
 
 Run:
     python3 -m unittest discover -s template/scripts/tests -v
@@ -34,7 +34,7 @@ SCHEMA_PATH = SCRIPTS_DIR.parent / "schema" / "experiment_record.schema.json"
 
 def make_record(rid, parents=None, branch="b", status="ok", val=0, metrics=None):
     return {
-        "protocol_version": "0.5",
+        "protocol_version": "0.6",
         "id": rid,
         "timestamp": "2026-05-18T10:00:00Z",
         "branch": branch,
@@ -206,10 +206,10 @@ class TestLogExperiment(TempStateMixin):
         return ns
 
     def test_autofill_fields(self):
-        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        (self.tmp / "PV").write_text("0.6\n", encoding="utf-8")
         now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
         rec = log_experiment.build_record(self._args(), now)
-        self.assertEqual(rec["protocol_version"], "0.5")
+        self.assertEqual(rec["protocol_version"], "0.6")
         self.assertEqual(rec["timestamp"], "2026-05-18T10:00:00Z")
         self.assertTrue(rec["id"].startswith("20260518-100000-"))
         self.assertTrue(rec["id"].endswith("-my-slug"))
@@ -228,7 +228,7 @@ class TestLogExperiment(TempStateMixin):
         # Back-compat: host scripts still passing --git-sha-after must keep
         # working — the value flows into source_commit, never re-emitted as
         # git_sha_*. New record stays schema-valid.
-        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        (self.tmp / "PV").write_text("0.6\n", encoding="utf-8")
         now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
         rec = log_experiment.build_record(
             self._args(git_sha_after="deadbeef"), now
@@ -239,7 +239,7 @@ class TestLogExperiment(TempStateMixin):
         self.assertEqual(_ledger_common.validate_against_schema(rec, schema), [])
 
     def test_tree_fields_are_omitted_by_default(self):
-        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        (self.tmp / "PV").write_text("0.6\n", encoding="utf-8")
         now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
         rec = log_experiment.build_record(self._args(), now)
         self.assertNotIn("lifecycle_status", rec)
@@ -249,7 +249,7 @@ class TestLogExperiment(TempStateMixin):
         self.assertNotIn("branch_insights", rec)
 
     def test_tree_fields_stamp_when_flags_given(self):
-        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        (self.tmp / "PV").write_text("0.6\n", encoding="utf-8")
         now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
         rec = log_experiment.build_record(
             self._args(
@@ -270,7 +270,7 @@ class TestLogExperiment(TempStateMixin):
         self.assertEqual(_ledger_common.validate_against_schema(rec, schema), [])
 
     def test_branch_insight_stamps_and_resolves_self_reference(self):
-        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        (self.tmp / "PV").write_text("0.6\n", encoding="utf-8")
         now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
         insight = {
             "raw_observation": "Stage C improved NLL but latency increased.",
@@ -297,7 +297,7 @@ class TestLogExperiment(TempStateMixin):
         )
 
     def test_branch_insight_does_not_resolve_self_updated_parent(self):
-        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        (self.tmp / "PV").write_text("0.6\n", encoding="utf-8")
         now = dt.datetime(2026, 5, 18, 10, 0, 0, 0, tzinfo=dt.timezone.utc)
         insight = {
             "raw_observation": "A leaf tried to update itself.",
@@ -318,7 +318,7 @@ class TestLogExperiment(TempStateMixin):
         self.assertTrue(any("updates_parent_ids" in error for error in errors), errors)
 
     def test_writer_rejects_tree_cross_field_errors(self):
-        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        (self.tmp / "PV").write_text("0.6\n", encoding="utf-8")
         with contextlib.redirect_stderr(io.StringIO()):
             rc = log_experiment.main(
                 [
@@ -344,7 +344,7 @@ class TestLogExperiment(TempStateMixin):
     def test_data_fingerprint_omitted_by_default(self):
         # With no split-identity flags, build_record emits no data_fingerprint
         # key — back-compat: existing call sites are unchanged.
-        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        (self.tmp / "PV").write_text("0.6\n", encoding="utf-8")
         now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
         rec = log_experiment.build_record(self._args(), now)
         self.assertNotIn("data_fingerprint", rec)
@@ -352,7 +352,7 @@ class TestLogExperiment(TempStateMixin):
     def test_data_fingerprint_stamped_when_flags_given(self):
         # Optional split-identity flags stamp data_fingerprint; the record stays
         # schema-valid (the field is optional, not via anyOf).
-        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        (self.tmp / "PV").write_text("0.6\n", encoding="utf-8")
         now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
         rec = log_experiment.build_record(
             self._args(
@@ -416,7 +416,7 @@ class TestLogExperiment(TempStateMixin):
         )
 
     def test_refuses_overwrite(self):
-        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        (self.tmp / "PV").write_text("0.6\n", encoding="utf-8")
         now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
         rec = log_experiment.build_record(self._args(), now)
         p = log_experiment.write_record(self.state, rec)
@@ -455,7 +455,7 @@ class TestLogExperiment(TempStateMixin):
         self.assertTrue(any("coordinator_executor_separation" in e for e in errors))
 
     def test_writer_rejects_failure_status_without_failure_reason(self):
-        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        (self.tmp / "PV").write_text("0.6\n", encoding="utf-8")
         with contextlib.redirect_stderr(io.StringIO()):
             rc = log_experiment.main(
                 [
@@ -477,7 +477,7 @@ class TestLogExperiment(TempStateMixin):
         self.assertEqual(list(self.ledger.glob("*.json")), [])
 
     def test_writer_stamps_failure_reason_and_executor_separation(self):
-        (self.tmp / "PV").write_text("0.5\n", encoding="utf-8")
+        (self.tmp / "PV").write_text("0.6\n", encoding="utf-8")
         now = dt.datetime(2026, 5, 18, 10, 0, 0, tzinfo=dt.timezone.utc)
         rec = log_experiment.build_record(
             self._args(
@@ -1091,7 +1091,7 @@ class TestMigration(TempStateMixin):
             "maturity_level": 3,
             "not_deployable": False,
             "artifacts": {"mlflow": {"run_id": "abc", "experiment_id": "1"}},
-            "lessons": ["§17.6 budget note"],
+            "lessons": ["section 17.6 budget note"],
         }
         r2 = {
             "protocol_version": "0.4",

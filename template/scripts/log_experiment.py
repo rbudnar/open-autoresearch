@@ -106,7 +106,7 @@ def read_protocol_version(path: Path) -> str:
                 f"CONFIG ERROR: --protocol-version-file {path} not "
                 f"readable/decodable: {exc}"
             )
-    return "0.5"
+    return "0.6"
 
 
 def _git(repo_dir: Path, *args: str) -> str | None:

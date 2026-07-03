@@ -62,13 +62,14 @@ If one of those surfaces does not need a change, say why in the PR summary.
 
 ## Version And Ledger Drift
 
-Protocol 0.5 uses sharded immutable ledger records under `state/ledger/`.
+Protocol 0.6 uses sharded immutable ledger records under `state/ledger/`.
 Derived files such as `experiment_ledger.jsonl`, `research_tree.json`,
 `val_exposure.json`, and `INDEX.md` are regenerated, not committed.
 
 Do not reintroduce Protocol 0.4 active guidance such as `ledger_rotation` config
 or instructions to rotate the ledger. Historical migration notes may mention
-v0.4, but active quickstarts, templates, and examples should describe v0.5.
+v0.4 or v0.5, but active quickstarts, templates, and examples should describe
+v0.6.
 
 ## Roadmap Hygiene
 

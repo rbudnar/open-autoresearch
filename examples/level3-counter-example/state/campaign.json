@@ -3,7 +3,7 @@
   "campaign_id": "level3-counter-example-2026-05-18",
   "host_branch": "main",
   "maturity_level": 3,
-  "protocol_version": "0.5",
+  "protocol_version": "0.6",
   "root": {
     "status": "no_trustworthy_improvement_found",
     "title": "Level-3 counter-example arc (no promotion)"

@@ -72,7 +72,7 @@ def _ctx(request: dict, ledger: dict | None = None) -> "vr.VerifierContext":
 # A minimal, well-formed-enough request used as the base for targeted mutations.
 def _base_request() -> dict:
     return {
-        "protocol_version": "0.5",
+        "protocol_version": "0.6",
         "request_id": "20260101-000000-test",
         "maturity_level_used": 3,
         "requested_status": "promoted",
@@ -97,6 +97,22 @@ def _base_request() -> dict:
     }
 
 
+class TestProtocolVersionRule(unittest.TestCase):
+    def test_supported_versions_accept_current_and_v05_backcompat(self):
+        for version in ("0.6", "0.5"):
+            req = _base_request()
+            req["protocol_version"] = version
+            ok, reason = vr.rule_1_protocol_version_match(_ctx(req))
+            self.assertTrue(ok, reason)
+
+    def test_unknown_protocol_version_rejected(self):
+        req = _base_request()
+        req["protocol_version"] = "0.7"
+        ok, reason = vr.rule_1_protocol_version_match(_ctx(req))
+        self.assertFalse(ok)
+        self.assertIn("not in verifier supported versions", reason)
+
+
 def _valid_record(rid: str, metrics: "dict | None" = None) -> dict:
     """A minimal schema-valid experiment_record. rule 9 now schema-validates every
     referenced shard, so test ledger entries must be valid; `id` must match the
@@ -104,7 +120,7 @@ def _valid_record(rid: str, metrics: "dict | None" = None) -> dict:
     metrics={} for ablation-style evidence that need not carry the primary
     metric."""
     return {
-        "protocol_version": "0.5",
+        "protocol_version": "0.6",
         "id": rid,
         "timestamp": "2026-01-01T00:00:00Z",
         "branch": "test",
@@ -344,7 +360,7 @@ def _write_min_config(d: Path) -> tuple[Path, Path]:
     """Write the minimal metrics.yaml + enforcement.yaml the CLI requires."""
     metrics = d / "metrics.yaml"
     enforcement = d / "enforcement.yaml"
-    metrics.write_text("protocol_version: '0.5'\n", encoding="utf-8")
+    metrics.write_text("protocol_version: '0.6'\n", encoding="utf-8")
     enforcement.write_text("mechanism: none\n", encoding="utf-8")
     return metrics, enforcement
 
@@ -382,7 +398,7 @@ class TestEndToEndMalformedRequestRejected(unittest.TestCase):
 
     def test_garbage_claims_and_references(self):
         request = {
-            "protocol_version": "0.5",
+            "protocol_version": "0.6",
             "request_id": "garbage-req",
             "maturity_level_used": 3,
             "requested_status": "promoted",
@@ -444,7 +460,7 @@ class TestEndToEndCorruptLedgerShard(unittest.TestCase):
 
     def test_corrupt_shard(self):
         request = {
-            "protocol_version": "0.5",
+            "protocol_version": "0.6",
             "request_id": "corrupt-ledger",
             "maturity_level_used": 3,
             "requested_status": "promoted",
@@ -477,7 +493,7 @@ class TestEndToEndCorruptLedgerShard(unittest.TestCase):
         # S2: a shard whose 'id' is an unhashable list must not crash the
         # `entry_id in out` dict-key build in load_ledger.
         request = {
-            "protocol_version": "0.5",
+            "protocol_version": "0.6",
             "request_id": "badid",
             "maturity_level_used": 3,
             "requested_status": "promoted",
@@ -765,7 +781,7 @@ class TestEndToEndNonUtf8ShardRejected(unittest.TestCase):
 
     def test_non_utf8_shard_cli(self):
         request = {
-            "protocol_version": "0.5",
+            "protocol_version": "0.6",
             "request_id": "non-utf8-ledger",
             "maturity_level_used": 3,
             "requested_status": "promoted",
@@ -1021,7 +1037,7 @@ class TestEndToEndEnforcementMechanismValidation(unittest.TestCase):
                 json.dumps({"id": "b0", "metrics": {}}), encoding="utf-8"
             )
             metrics = work / "metrics.yaml"
-            metrics.write_text("protocol_version: '0.5'\n", encoding="utf-8")
+            metrics.write_text("protocol_version: '0.6'\n", encoding="utf-8")
             enforcement = work / "enforcement.yaml"
             enforcement.write_text(
                 f"mechanism: {mechanism_yaml}\n", encoding="utf-8"

@@ -265,7 +265,7 @@ def _detect_pv(records: list[dict[str, Any]]) -> str:
         pv = rec.get("protocol_version")
         if isinstance(pv, str):
             return pv
-    return "0.5"
+    return "0.6"
 
 
 def _record_lifecycle(rec: dict[str, Any]) -> str:

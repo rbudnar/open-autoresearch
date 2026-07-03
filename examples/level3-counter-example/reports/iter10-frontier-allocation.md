@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.5"
+protocol_version: "0.6"
 report_id: "20260518-233000-frontier-allocation"
 campaign_id: "level3-counter-example-2026-05-18"
 maturity_level: 3

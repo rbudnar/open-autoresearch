@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.5"
+protocol_version: "0.6"
 packet_id: "<YYYYMMDD-HHMMSS-6hex>"
 request_id: "<request that produced this packet>"
 status: "<promoted | low_evidence_promoted | rejected>"

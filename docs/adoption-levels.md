@@ -44,7 +44,7 @@ strongest tier you can afford (a per-split membership hash gives byte-level proo
 
 **Starter files** (copy from `template/` and fill in):
 
-- `autoresearch/PROTOCOL_VERSION` = `0.5`
+- `autoresearch/PROTOCOL_VERSION` = `0.6`
 - `autoresearch/config/metrics.yaml` — cost tier, primary metric (with direction/aggregation/eval_dtype), guardrails, val_set_exposure_budget, budgets
 - `autoresearch/config/enforcement.yaml` — pick a §3.1.1 mechanism (or `none` and accept the in-band-only label)
 - `autoresearch/config/editable_paths.yaml` + `protected_paths.yaml`
@@ -115,7 +115,7 @@ Adds the remaining roles (Domain Scout, Experiment Runner, Reflection Analyst), 
 
 The agent may propose improvements to its own search strategy. Evaluator boundary still §3.1.1-enforced; protocol changes still require human review.
 
-**Additional starter files:** TBD by the protocol's future direction. v0.5 does not prescribe Level-5 file structure — adoption at Level 5 should be coordinated with the protocol maintainers (see `CONTRIBUTING.md`).
+**Additional starter files:** TBD by the protocol's future direction. v0.6 does not prescribe Level-5 file structure — adoption at Level 5 should be coordinated with the protocol maintainers (see `CONTRIBUTING.md`).
 
 Do not jump to Level 5 before Levels 1-3 are reliable on your project.
 

@@ -4,7 +4,7 @@
 # Driven by PROTOCOL.md §6.1, §13.2.1, §17.1.1, §17.6, §17.7.
 # Replace every <FILL_ME> with a real value before the first iteration.
 
-protocol_version: "0.5"
+protocol_version: "0.6"
 
 # --- Cost tier (§6.1) ----------------------------------------------------------
 # Time one full baseline run. Pick the tier whose row matches.
@@ -112,7 +112,7 @@ budgets:
     L5: {max_llm_tokens:  8000000, max_tool_calls: 1500, max_gpu_hours: 30}
 
 # --- Memory bounds (§3.7, §17.5.4) --------------------------------------------
-# Protocol 0.5 uses immutable sharded records in state/ledger/. Campaign memory
+# Protocol 0.6 uses immutable sharded records in state/ledger/. Campaign memory
 # is bounded by the playbook token cap below; ledger records are not rotated.
 memory:
   max_playbook_tokens: 8000

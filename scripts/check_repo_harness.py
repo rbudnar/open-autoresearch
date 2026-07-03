@@ -164,7 +164,7 @@ def check_dogfooding_anchors() -> None:
         ("Retirement or revisit:", "admission gate retirement field"),
         ("Cross-Surface Sync", "protocol/template/example sync model"),
         ("Roadmap Hygiene", "roadmap decomposition model"),
-        ("Version And Ledger Drift", "Protocol 0.5 drift guard"),
+        ("Version And Ledger Drift", "Protocol 0.6 drift guard"),
     ]
     for snippet, reason in anchors:
         require_contains("docs/dogfooding.md", snippet, reason)
@@ -310,12 +310,16 @@ def check_version_consistency() -> None:
     active_doc_drift = [
         ("docs/host-bootstrap-agents.md", "v0.4 closes it structurally"),
         ("docs/host-bootstrap-agents.md", "below the v0.4 default"),
+        ("PROTOCOL.md", 'Records carry `protocol_version: "0.5"`'),
+        ("PROTOCOL.md", "**`research_tree.json` is DERIVED (v0.5).**"),
+        ("PROTOCOL.md", "which in v0.5 is **DERIVED (git-ignored)**"),
+        ("AGENTS.md", "equivalent v0.5 command shape"),
     ]
     for path, snippet in active_doc_drift:
         if exists(path) and snippet in read(path):
             fail(
-                f"{path} still describes active bootstrap behavior with "
-                f"stale Protocol 0.4 wording: {snippet!r}"
+                f"{path} still describes active behavior with stale protocol "
+                f"wording: {snippet!r}"
             )
 
 

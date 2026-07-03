@@ -31,7 +31,7 @@ ledger contract.
 
 ## State Model
 
-Protocol 0.5 uses immutable source records in `state/ledger/<id>.json`.
+Protocol 0.6 uses immutable source records in `state/ledger/<id>.json`.
 `experiment_ledger.jsonl`, `research_tree.json`, `val_exposure.json`, and
 `INDEX.md` are derived views. Regenerate them for validation, but do not commit
 them.

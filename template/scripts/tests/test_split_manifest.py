@@ -66,7 +66,7 @@ _COMPLETE_DATASET_FP = {
 
 def _frozen_manifest() -> dict:
     return {
-        "protocol_version": "0.5",
+        "protocol_version": "0.6",
         "mode": "frozen",
         "snapshot_id": "snap-2026-06-16",
         "val_set_version": 1,
@@ -92,7 +92,7 @@ def _frozen_manifest() -> dict:
 
 def _declarative_manifest() -> dict:
     return {
-        "protocol_version": "0.5",
+        "protocol_version": "0.6",
         "mode": "declarative",
         "val_set_version": 1,
         "split_rule": {
@@ -153,7 +153,7 @@ class TestCheckManifestModes(unittest.TestCase):
         # Declares frozen but is missing the split blocks AND carries declarative
         # keys — must not pass one half of a mode.
         mixed = {
-            "protocol_version": "0.5",
+            "protocol_version": "0.6",
             "mode": "frozen",
             "snapshot_id": "snap",
             "val_set_version": 1,
@@ -411,7 +411,7 @@ class TestSplitManifestSchema(unittest.TestCase):
 
     def test_mixed_fails_both_branches(self):
         mixed = {
-            "protocol_version": "0.5",
+            "protocol_version": "0.6",
             "mode": "frozen",
             "val_set_version": 1,
             "split_rule": {"split_key": "m"},
@@ -470,7 +470,7 @@ class TestSplitManifestSchema(unittest.TestCase):
 
 def _ledger_record(rid: str, data_fingerprint: "dict | None") -> dict:
     rec = {
-        "protocol_version": "0.5",
+        "protocol_version": "0.6",
         "id": rid,
         "timestamp": "2026-06-16T10:00:00Z",
         "branch": "loss_objective",
@@ -507,7 +507,7 @@ class TestComparisonSetIdentity(unittest.TestCase):
                 json.dumps(_ledger_record(candidate_id, candidate_fp)), encoding="utf-8"
             )
             request = {
-                "protocol_version": "0.5",
+                "protocol_version": "0.6",
                 "request_id": "req-rule11",
                 "references": {
                     "baseline_run": {"ledger_id": baseline_id, "content_sha256": "x"},
@@ -520,10 +520,10 @@ class TestComparisonSetIdentity(unittest.TestCase):
             req_path.write_text(json.dumps(request), encoding="utf-8")
             # Minimal config files the verifier loads.
             (root / "metrics.yaml").write_text(
-                "protocol_version: '0.5'\n", encoding="utf-8"
+                "protocol_version: '0.6'\n", encoding="utf-8"
             )
             (root / "enforcement.yaml").write_text(
-                "protocol_version: '0.5'\nmechanism: none\n", encoding="utf-8"
+                "protocol_version: '0.6'\nmechanism: none\n", encoding="utf-8"
             )
             out_dir = root / "out"
             out_dir.mkdir()

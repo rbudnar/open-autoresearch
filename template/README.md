@@ -36,7 +36,7 @@ Exit 0 = bootstrap complete and self-consistent.
 
 ```text
 template/
-├── PROTOCOL_VERSION              # contains "0.5"
+├── PROTOCOL_VERSION              # contains "0.6"
 ├── README.md                     # this file
 ├── .gitignore                    # ignores the four DERIVED state aggregates (§4.1)
 ├── .gitattributes                # state/budget_ledger.jsonl merge=union
@@ -85,7 +85,7 @@ The protocol expects your host project to have, at minimum:
 
 These live **outside** `autoresearch/` because they describe your project's data and metrics, not the autoresearch loop's machinery.
 
-## The experiment ledger (Protocol 0.5)
+## The experiment ledger (Protocol 0.6)
 
 The ledger is a **directory of immutable per-experiment records**, `state/ledger/<id>.json` — the source of truth (`PROTOCOL.md` §14.1). Use `scripts/log_experiment.py` to write one. A correction is a NEW record referencing the prior `id` in `parent_ids`; records are never mutated. Distinct record files never merge-conflict, so divergent branches combine cleanly.
 

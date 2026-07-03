@@ -2,6 +2,45 @@
 
 Each major / minor protocol bump may require host-project changes. This file walks through each transition.
 
+## v0.5 → v0.6
+
+**Scope:** Arbor/HTR integration release. The operational research tree,
+branch-insight propagation, coordinator/executor handoff, and cost-aware
+frontier allocation work that landed as v0.5-additive surfaces is now the
+official shipped scaffold. This is a version-stamp and scaffold refresh, not a
+ledger data migration.
+
+Existing v0.5 sharded-ledger artifacts remain structurally valid. The v0.6
+schemas accept both `0.5` and `0.6` record and split-manifest stamps so hosts
+can read old evidence while writing new artifacts at the current version.
+
+### Required changes
+
+1. **Bump the active version stamp.** Update `autoresearch/PROTOCOL_VERSION`
+   and any materialized active config, proposal, report, packet, and campaign
+   artifacts from `0.5` to `0.6` when the host opts into this release.
+
+2. **Vendor the refreshed scaffold.** Copy the current `template/schema/`,
+   `template/scripts/`, `template/templates/`, and config examples into the
+   host's `autoresearch/` scaffold. Preserve host-local campaign data and
+   materialized answers.
+
+3. **Regenerate derived state.** After the stamp/scaffold refresh, run:
+
+   ```bash
+   python3 autoresearch/scripts/regenerate_state.py --state-dir autoresearch/state/
+   python3 autoresearch/scripts/validate_ledger.py --ledger-dir autoresearch/state/ledger/
+   ```
+
+4. **Re-run bootstrap or CI checks.** For a freshly integrated host, run
+   `python3 autoresearch/scripts/bootstrap_verify.py <host-root>`. For an
+   existing campaign, run the host's normal ledger/verifier CI after vendoring
+   the refreshed scripts.
+
+5. **Leave the historical migrator alone.** `migrate_ledger_v04_to_v05.py`
+   remains the v0.4 → v0.5 sharded-ledger migrator and continues to stamp `0.5`.
+   Do not repurpose it for v0.6; no v0.5 → v0.6 data migrator is required.
+
 ## Within v0.5 — cost-aware frontier allocation (no migration)
 
 The §8 frontier allocation policy is a **backward-compatible guidance**

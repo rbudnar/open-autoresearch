@@ -2,7 +2,7 @@
 
 This directory is empty in the template. The agent populates it during the campaign. The files below are the canonical state surface.
 
-## Source of truth vs. derived (v0.5)
+## Source of truth vs. derived (v0.6)
 
 There are exactly two hand-written, committed surfaces:
 
@@ -14,7 +14,7 @@ The following four files are **DERIVED and git-ignored** — pure functions of t
 ## Files the agent creates
 
 ### `ledger/<id>.json` (source of truth)
-One immutable JSON record per experiment matching `PROTOCOL.md` §14.1. Written by `scripts/log_experiment.py` (or by writing a schema-valid file directly). `id = YYYYMMDD-HHMMSS-<6hex>-<slug>`. Validated by `scripts/validate_ledger.py` against `schema/experiment_record.schema.json`. There is **no rotation and no `experiment_ledger.archive/`** in v0.5 — a directory of small files is naturally bounded.
+One immutable JSON record per experiment matching `PROTOCOL.md` §14.1. Written by `scripts/log_experiment.py` (or by writing a schema-valid file directly). `id = YYYYMMDD-HHMMSS-<6hex>-<slug>`. Validated by `scripts/validate_ledger.py` against `schema/experiment_record.schema.json`. There is **no rotation and no `experiment_ledger.archive/`** in v0.6 — a directory of small files is naturally bounded.
 
 ### `campaign.json` (committed, single-writer)
 Campaign-level metadata, the only source for the derived tree's root/branch-policy content. See above.
@@ -51,7 +51,7 @@ Cumulative validation-set query counter (`PROTOCOL.md` §17.6), regenerated as t
 
 ```json
 {
-  "protocol_version": "0.5",
+  "protocol_version": "0.6",
   "val_set_version": 1,
   "queries": 47,
   "exposure_budget": 100,

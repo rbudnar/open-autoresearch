@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://open-autoresearch/schema/split_manifest.schema.json",
-  "title": "Split Manifest (PROTOCOL.md §6.3.1, Protocol 0.5 two-mode splits)",
+  "title": "Split Manifest (PROTOCOL.md §6.3.1, Protocol 0.6 two-mode splits)",
   "description": "data/splits/MANIFEST.json. Two modes via anyOf: `frozen` (current, recommended default — per-split content hashes of materialized files; immutable; strongest anti-cheating) and `declarative` (a split RULE + seed + dataset_fingerprint; no persisted files; for growing/forward-moving datasets). Exactly ONE mode shape is accepted. Each branch sets `additionalProperties: false`, so a partial/mixed manifest (frozen keys mixed with declarative keys, or a frozen manifest missing a required split) fails closed against BOTH branches: foreign-mode keys are rejected as additional properties on the branch they don't belong to, and the missing required keys reject the branch they do. Every string field requires at least one non-whitespace character (pattern \\S) so present-but-empty/blank values fail closed too. `mode` is the discriminator. The split shapes are inlined (not `$ref`) so the stdlib structural validator in _ledger_common.py — which does NOT implement `$ref` — enforces them; mirrors the experiment_record.schema.json anyOf style.",
   "type": "object",
   "anyOf": [
@@ -22,7 +22,7 @@
         "frozen_by"
       ],
       "properties": {
-        "protocol_version": {"const": "0.5"},
+        "protocol_version": {"enum": ["0.5", "0.6"]},
         "mode": {"const": "frozen"},
         "snapshot_id": {
           "type": "string",
@@ -70,7 +70,7 @@
         "dataset_fingerprint"
       ],
       "properties": {
-        "protocol_version": {"const": "0.5"},
+        "protocol_version": {"enum": ["0.5", "0.6"]},
         "mode": {"const": "declarative"},
         "val_set_version": {
           "type": ["integer", "string"],
