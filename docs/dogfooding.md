@@ -71,6 +71,12 @@ or instructions to rotate the ledger. Historical migration notes may mention
 v0.4 or v0.5, but active quickstarts, templates, and examples should describe
 v0.6.
 
+For future minor-version releases, use
+`python scripts/bump_protocol_version.py <new-version> --dry-run` to preview the
+mechanical current-version edits before hand-writing changelog or migration
+prose. The script updates repo release fixtures, not downstream host-campaign
+history.
+
 ## Roadmap Hygiene
 
 Broad roadmap work should use:

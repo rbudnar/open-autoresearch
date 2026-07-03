@@ -30,11 +30,13 @@ on:
       - 'template/templates/**'
       - 'examples/**'
       - 'scripts/check_repo_harness.py'
+      - 'scripts/bump_protocol_version.py'
       - 'scripts/harness_metrics.py'
       - 'scripts/quality_gate.py'
       - 'scripts/weekly_quality_report.py'
       - 'scripts/pr-agent-inbox.mjs'
       - 'scripts/pr-agent-inbox.test.mjs'
+      - 'scripts/tests/test_bump_protocol_version.py'
       - 'scripts/tests/**'
       - 'docs/README.md'
       - 'docs/architecture.md'
@@ -89,11 +91,13 @@ jobs:
             'template/templates/' \
             'examples/' \
             'scripts/check_repo_harness.py' \
+            'scripts/bump_protocol_version.py' \
             'scripts/harness_metrics.py' \
             'scripts/quality_gate.py' \
             'scripts/weekly_quality_report.py' \
             'scripts/pr-agent-inbox.mjs' \
             'scripts/pr-agent-inbox.test.mjs' \
+            'scripts/tests/test_bump_protocol_version.py' \
             'scripts/tests/' \
             'docs/README.md' \
             'docs/architecture.md' \
