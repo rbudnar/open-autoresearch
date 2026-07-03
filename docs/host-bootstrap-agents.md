@@ -108,7 +108,7 @@ For each `<host>/autoresearch/config/*.yaml.example`:
   - In the new `.yaml` file, substitute every `<FILL_ME>` placeholder using
     the questionnaire answers. Each question's `maps_to` field names the
     config key.
-  - Keep `protocol_version: "0.5"` exactly as written. Don't bump it.
+  - Keep `protocol_version: "0.6"` exactly as written. Don't bump it.
 Commit: `chore(autoresearch): materialize config from bootstrap answers`.
 
 **6. Pin the data splits (`MANIFEST.json`, two modes).**
@@ -117,11 +117,11 @@ Per `PROTOCOL.md` §6.3.1, the host declares its train/val/test split in
 of `schema/split_manifest.schema.json`). Pick ONE mode:
   - **`mode: frozen`** (recommended default) — content-addressed: ask the human
     for the path to each split file, compute SHA-256, and write `protocol_version`
-    `"0.5"` + `snapshot_id` + `val_set_version` + a `train`/`val`/`test` block
+    `"0.6"` + `snapshot_id` + `val_set_version` + a `train`/`val`/`test` block
     each with `path`/`sha256`/`size_bytes`, plus `frozen_at`/`frozen_by`.
   - **`mode: declarative`** (for growing / forward-moving datasets) — a
     deterministic split RULE instead of persisted files: `protocol_version`
-    `"0.5"` + `mode` + `val_set_version` + `split_rule` (with `split_key`) +
+    `"0.6"` + `mode` + `val_set_version` + `split_rule` (with `split_key`) +
     `seed` + a Guard-B `dataset_fingerprint` whose identity is
     `source`/`version`/`date_window` (required — a growing dataset is identified
     by its date range alone); `row_count` + `schema_hash` are optional
@@ -225,10 +225,10 @@ the protocol's guarantees fail.
   upstream URL.
 - **Don't self-attest promotion packets.** The process that generates a
   `promotion_request` and the process that emits a `promotion_packet` must
-  be distinct (see `PROTOCOL.md` §10.5). Protocol 0.5 preserves that
+  be distinct (see `PROTOCOL.md` §10.5). Protocol 0.6 preserves that
   structural separation. If your runtime can only run a single process, set
   `enforcement.mechanism: none` honestly. Don't paper over it.
-- **Don't downgrade `evaluator_equivalence.rtol`** below the Protocol 0.5
+- **Don't downgrade `evaluator_equivalence.rtol`** below the Protocol 0.6
   default (1e-4 for fp32) without recording the reason in
   `bootstrap-answers.yaml` AND in a project ADR. The default is calibrated to
   catch ~1e-3 behavioral drift while passing reduction-order changes;

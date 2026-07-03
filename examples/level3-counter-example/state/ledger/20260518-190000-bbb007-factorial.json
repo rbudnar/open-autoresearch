@@ -1,5 +1,5 @@
 {
-  "protocol_version": "0.5",
+  "protocol_version": "0.6",
   "id": "20260518-190000-bbb007-factorial",
   "timestamp": "2026-05-18T19:00:00Z",
   "branch": "architecture+loss_objective_factorial",

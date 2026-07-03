@@ -13,7 +13,7 @@
 # the human is technical and wants to fill them in batch. Across groups, prefer
 # one group at a time so the human can think about the topic before moving on.
 
-protocol_version: "0.5"
+protocol_version: "0.6"
 
 # Drift between this questionnaire's `maps_to` fields and the actual key paths
 # in `template/config/*.yaml.example` is caught by
@@ -28,7 +28,7 @@ protocol_version: "0.5"
 # ---------------------------------------------------------------------------
 answer_template: |
   # autoresearch/bootstrap-answers.yaml
-  protocol_version: "0.5"
+  protocol_version: "0.6"
   bootstrapped_at: "<ISO-8601 timestamp>"
   bootstrapped_by: "<integrating-agent name and version, e.g. claude-code-4.7>"
   answers:
@@ -576,7 +576,7 @@ groups:
 #       dataset WHEN pinning a fixed snapshot; omit for a growing dataset
 #     - membership_sha256 (optional, strongest tier) → agent materializes the
 #       split once and hashes the sorted ids per split
-# Always write `protocol_version: "0.5"` and the chosen `mode`. Don't add
+# Always write `protocol_version: "0.6"` and the chosen `mode`. Don't add
 # questions for the agent-derived fields; fill them in when writing MANIFEST.json.
 
   - group: "9. Behavioral-equivalence fixtures (§17.1.1)"

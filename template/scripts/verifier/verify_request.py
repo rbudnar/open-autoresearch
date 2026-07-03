@@ -83,7 +83,8 @@ except ImportError:  # pragma: no cover - path shim for direct invocation
 
 # --- Constants ----------------------------------------------------------------
 
-PROTOCOL_VERSION = "0.5"
+PROTOCOL_VERSION = "0.6"
+SUPPORTED_PROTOCOL_VERSIONS = {"0.5", PROTOCOL_VERSION}
 
 VALID_SKEPTIC_VERDICTS = {
     "no_objection",
@@ -293,7 +294,7 @@ def _skeptic_verdict(text: str) -> "str | None":
 def load_ledger(ledger_dir: Path) -> dict[str, dict[str, Any]]:
     """Read state/ledger/*.json shards and return {id: {entry, canonical_bytes}}.
 
-    Protocol 0.5: the source of truth is one immutable file per experiment at
+    Protocol 0.6: the source of truth is one immutable file per experiment at
     state/ledger/<id>.json. The hash basis is the SHARED canonical serialization
     (_ledger_common._canonical_record_bytes) — byte-identical to the line that
     regenerate_state.py writes into experiment_ledger.jsonl. We compute it here
@@ -305,7 +306,7 @@ def load_ledger(ledger_dir: Path) -> dict[str, dict[str, Any]]:
     if not ledger_dir.is_dir():
         raise SystemExit(
             f"CONFIG ERROR: ledger dir {ledger_dir} does not exist or is not a "
-            f"directory (Protocol 0.5 expects the state/ledger/ shard directory)"
+            f"directory (Protocol 0.6 expects the state/ledger/ shard directory)"
         )
     out: dict[str, dict[str, Any]] = {}
     for shard in sorted(ledger_dir.glob("*.json")):
@@ -391,10 +392,10 @@ class VerifierContext:
 
 def rule_1_protocol_version_match(ctx: VerifierContext) -> tuple[bool, str | None]:
     req_pv = str(ctx.request.get("protocol_version", ""))
-    if req_pv != PROTOCOL_VERSION:
+    if req_pv not in SUPPORTED_PROTOCOL_VERSIONS:
         return False, (
-            f"request protocol_version={req_pv!r} != verifier protocol "
-            f"version={PROTOCOL_VERSION!r}"
+            f"request protocol_version={req_pv!r} not in verifier supported "
+            f"versions={sorted(SUPPORTED_PROTOCOL_VERSIONS)!r}"
         )
     return True, None
 
@@ -1330,7 +1331,7 @@ def main(argv: list[str]) -> int:
         "--ledger",
         required=True,
         type=Path,
-        help="Protocol 0.5 state/ledger/ shard DIRECTORY (one *.json per record)",
+        help="Protocol 0.6 state/ledger/ shard DIRECTORY (one *.json per record)",
     )
     parser.add_argument("--metrics", required=True, type=Path)
     parser.add_argument("--enforcement", required=True, type=Path)

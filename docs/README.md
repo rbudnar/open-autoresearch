@@ -17,6 +17,8 @@ Do not read the entire docs tree by default.
 ## Protocol And Template Work
 
 - Protocol semantics: `PROTOCOL.md`, then `MIGRATION.md` for version changes.
+- Mechanical minor-version stamps: `scripts/bump_protocol_version.py`, then
+  hand-edit `CHANGELOG.md` / `MIGRATION.md` for release meaning.
 - Foundational literature and citation status: `docs/references.md`, then
   `docs/related-work.md` for narrative positioning.
 - Template scaffold: `template/README.md`, `template/config/`,

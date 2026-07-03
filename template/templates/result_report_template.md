@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.5"
+protocol_version: "0.6"
 report_id: "<YYYYMMDD-HHMMSS-6hex-slug>"
 candidate_proposal_id: "<id>"
 ledger_entry_id: "<id>"

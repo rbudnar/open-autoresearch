@@ -4,9 +4,9 @@ A disciplined protocol for autonomous ML model improvement, plus the scaffolding
 
 > **AI agent reading this?** Start with [`AGENTS.md`](./AGENTS.md). It speaks to you directly and tells you exactly what to do, in what order, with which questions to ask the human.
 
-**Centerpiece:** [`PROTOCOL.md`](./PROTOCOL.md) — AutoResearch++ v0.5, a 1700-line specification for autonomous research loops with honest separation between in-band-advisory and out-of-band-enforced controls.
+**Centerpiece:** [`PROTOCOL.md`](./PROTOCOL.md) — AutoResearch++ v0.6, a 1700-line specification for autonomous research loops with honest separation between in-band-advisory and out-of-band-enforced controls.
 
-**Protocol version shipped:** `0.5` (final pre-1.0 candidate).
+**Protocol version shipped:** `0.6` (Arbor/HTR integration release).
 
 ---
 
@@ -59,7 +59,7 @@ The single largest distinction from prior art: this protocol **does not promise*
 
 ## Status
 
-`v0.5` is the final pre-1.0 protocol candidate. v1.0 will be tagged after at least three independent host projects have completed end-to-end campaigns and reported results.
+`v0.6` is the Arbor/HTR integration release and current pre-1.0 protocol candidate. v1.0 will be tagged after at least three independent host projects have completed end-to-end campaigns and reported results.
 
 The repo is dogfooded — `PROTOCOL.md`, the example artifacts, and the reference scripts are protected by `CODEOWNERS` and CI per `§3.1.1` of the protocol. See [`docs/threat-model.md`](./docs/threat-model.md).
 

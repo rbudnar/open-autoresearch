@@ -975,7 +975,7 @@ class TestLogExperimentProtocolVersionIO(unittest.TestCase):
             self.skipTest("chmod-based permission test is a no-op as root")
         with tempfile.TemporaryDirectory(prefix="le-pv2-") as tmp:
             p = Path(tmp) / "PROTOCOL_VERSION"
-            p.write_text("0.5", encoding="utf-8")
+            p.write_text("0.6", encoding="utf-8")
             p.chmod(0o000)
             try:
                 with self.assertRaises(SystemExit) as cm:
@@ -985,10 +985,10 @@ class TestLogExperimentProtocolVersionIO(unittest.TestCase):
                 p.chmod(0o644)
 
     def test_missing_protocol_version_file_defaults(self):
-        # Regression: an absent file still returns the 0.5 default (no raise).
+        # Regression: an absent file still returns the current default (no raise).
         with tempfile.TemporaryDirectory(prefix="le-pv3-") as tmp:
             self.assertEqual(
-                le.read_protocol_version(Path(tmp) / "nope"), "0.5"
+                le.read_protocol_version(Path(tmp) / "nope"), "0.6"
             )
 
 

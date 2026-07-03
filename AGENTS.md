@@ -80,4 +80,4 @@ For reference-script changes, also run the relevant Python tests under
 `.github/workflows/validate-examples.yml`.
 
 For verifier or example changes, run `python scripts/quality_gate.py --only-verifier`;
-`examples/README.md` shows the equivalent v0.5 command shape.
+`examples/README.md` shows the equivalent current-version command shape.

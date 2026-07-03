@@ -1,4 +1,4 @@
-protocol_version: "0.5"
+protocol_version: "0.6"
 cost_tier: small
 max_gpu_hours_per_candidate: 3
 

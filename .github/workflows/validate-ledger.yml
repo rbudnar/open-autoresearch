@@ -1,4 +1,4 @@
-# validate-ledger.yml — the sharded experiment ledger (Protocol 0.5) is a
+# validate-ledger.yml — the sharded experiment ledger (Protocol 0.6) is a
 # first-class, mechanically-validated surface. Every example's state/ledger/
 # must be schema-valid with unique ids and resolvable parent_ids, and the
 # reference ledger tooling must keep its unit + integration tests green.

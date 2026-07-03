@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""_ledger_common.py — shared helpers for the Protocol 0.5 sharded-ledger tools.
+"""_ledger_common.py — shared helpers for the Protocol 0.6 sharded-ledger tools.
 
 Stdlib only. Imported by ``log_experiment.py``, ``regenerate_state.py``,
 ``validate_ledger.py``, ``migrate_ledger_v04_to_v05.py`` and the §10.5 verifier

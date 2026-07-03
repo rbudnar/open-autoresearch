@@ -1,5 +1,5 @@
 ---
-protocol_version: "0.5"
+protocol_version: "0.6"
 proposal_id: "20260518-110000-bbb002"
 branch: "optimization"
 parent_proposal_id: "baseline"

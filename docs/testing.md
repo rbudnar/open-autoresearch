@@ -23,6 +23,7 @@ rejection path.
 ## Focused Checks
 
 - Repo harness only: `python scripts/check_repo_harness.py`
+- Protocol bump dry run: `python scripts/bump_protocol_version.py <new-version> --dry-run`
 - Minimal harness metrics: `python scripts/harness_metrics.py --baseline docs/harness-metrics-baseline.json`
 - Reference script parse check: `python scripts/quality_gate.py --skip-verifier`
 - PR Agent Inbox tests: `node --test scripts/pr-agent-inbox.test.mjs`

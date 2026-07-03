@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://open-autoresearch/schema/experiment_record.schema.json",
-  "title": "Experiment Record (PROTOCOL.md §14.1, Protocol 0.5 sharded ledger)",
+  "title": "Experiment Record (PROTOCOL.md §14.1, Protocol 0.6 sharded ledger)",
   "description": "One immutable JSON file per experiment at state/ledger/<id>.json. A correction is a NEW record referencing the prior id in parent_ids; records are never mutated. additionalProperties is intentionally true: consumers (e.g. ActivityEncoder) carry additive fields like maturity_level, not_deployable, artifacts.mlflow, factorial_cells, and schema-validity is necessary but not sufficient for verifier-completeness.",
   "type": "object",
   "additionalProperties": true,
@@ -28,8 +28,8 @@
   "properties": {
     "protocol_version": {
       "type": "string",
-      "const": "0.5",
-      "description": "Protocol version stamp; MUST be the literal \"0.5\" for Protocol 0.5 records."
+      "enum": ["0.5", "0.6"],
+      "description": "Protocol version stamp. Current writers MUST emit \"0.6\"; \"0.5\" remains accepted for existing sharded-ledger records."
     },
     "id": {
       "type": "string",

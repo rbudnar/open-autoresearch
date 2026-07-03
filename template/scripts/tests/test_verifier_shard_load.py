@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""test_verifier_shard_load.py — Protocol 0.5 verifier shard-load + golden hash.
+"""test_verifier_shard_load.py — Protocol 0.6 verifier shard-load + golden hash.
 
 Two guarantees, both required by the plan (MUST-FIX 6 + Scenario 2 tripwire):
 
@@ -94,11 +94,11 @@ class TestReferencedHashesMatchGolden(unittest.TestCase):
         self.assertNotIn("ledger_id", skeptic)
         self.assertEqual(
             skeptic["content_sha256"],
-            "1cf55f6754cc171c139ef50f3dd5a03026a9ab4c65d60524766632651596d0e9",
+            "f4142039bed4b694d23160203d07c7090cc81f0ad172b86472681b04c1551bab",
         )
 
-    def test_protocol_version_stamped_0_5(self):
-        self.assertEqual(self.request["protocol_version"], "0.5")
+    def test_protocol_version_stamped_0_6(self):
+        self.assertEqual(self.request["protocol_version"], "0.6")
 
 
 @unittest.skipUnless(L3.exists(), _L3_REASON)

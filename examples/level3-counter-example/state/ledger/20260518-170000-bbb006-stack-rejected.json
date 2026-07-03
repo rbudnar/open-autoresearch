@@ -1,5 +1,5 @@
 {
-  "protocol_version": "0.5",
+  "protocol_version": "0.6",
   "id": "20260518-170000-bbb006-stack-rejected",
   "timestamp": "2026-05-18T17:00:00Z",
   "branch": "architecture+loss_objective",

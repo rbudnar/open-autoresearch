@@ -3,7 +3,7 @@
   "campaign_id": "level1-success-2026-05-18",
   "host_branch": "main",
   "maturity_level": 1,
-  "protocol_version": "0.5",
+  "protocol_version": "0.6",
   "root": {
     "status": "baseline",
     "title": "Level-1 success arc (toy MLP, synthetic regression)"

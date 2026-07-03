@@ -34,7 +34,7 @@ Checks performed (each is independent and reports its own pass/fail):
      install is allowed only if the agent explicitly recorded the gap).
   7. Each fixture JSON has the required schema fields (``fixture_id``,
      ``input``, ``golden_outputs``).
-  8. ``protocol_version`` is ``"0.5"`` everywhere it appears.
+  8. ``protocol_version`` is ``"0.6"`` everywhere it appears.
 
 What it does NOT check:
   - That the host evaluator round-trips the fixtures cleanly. That requires
@@ -141,7 +141,7 @@ DECLARATIVE_ONLY_KEYS = {
 
 REQUIRED_FIXTURE_KEYS = ["fixture_id", "input", "golden_outputs"]
 
-EXPECTED_PROTOCOL_VERSION = "0.5"
+EXPECTED_PROTOCOL_VERSION = "0.6"
 
 MIN_FIXTURES = 3
 
@@ -475,7 +475,8 @@ def check_manifest(host_root: Path) -> list[tuple[bool, str]]:
         return results
     results.append(report(True, "MANIFEST.json exists and parses"))
 
-    # Both schema branches require `protocol_version` const "0.5"; the stdlib
+    # Both schema branches accept current and back-compat protocol stamps; this
+    # host bootstrap check below enforces the current scaffold version.
     # validator can't be relied on here (and isn't run), so check it explicitly.
     # A missing/wrong version fails closed rather than passing on `mode` alone.
     version = data.get("protocol_version")
@@ -632,7 +633,7 @@ def check_fixtures(host_root: Path, allow_partial: bool) -> list[tuple[bool, str
 
 
 def check_protocol_version(host_root: Path) -> list[tuple[bool, str]]:
-    """Check #8: protocol_version is "0.5" everywhere it appears.
+    """Check #8: protocol_version is the current scaffold version everywhere it appears.
 
     Covers the four yaml configs, ``bootstrap-answers.yaml``, AND the bare
     ``PROTOCOL_VERSION`` text file that the template ships (the host's copy
@@ -662,7 +663,7 @@ def check_protocol_version(host_root: Path) -> list[tuple[bool, str]]:
         version = data.get("protocol_version")
         rel = p.relative_to(host_root)
         if version == EXPECTED_PROTOCOL_VERSION:
-            results.append(report(True, f"protocol_version=0.5 in {rel}"))
+            results.append(report(True, f"protocol_version={EXPECTED_PROTOCOL_VERSION} in {rel}"))
         elif version is None:
             results.append(
                 report(False, f"protocol_version present in {rel}", "missing")
@@ -671,7 +672,7 @@ def check_protocol_version(host_root: Path) -> list[tuple[bool, str]]:
             results.append(
                 report(
                     False,
-                    f"protocol_version=0.5 in {rel}",
+                    f"protocol_version={EXPECTED_PROTOCOL_VERSION} in {rel}",
                     f"found {version!r}",
                 )
             )
@@ -686,16 +687,24 @@ def check_protocol_version(host_root: Path) -> list[tuple[bool, str]]:
             content = pv_file.read_text().strip()
         except (OSError, UnicodeDecodeError) as e:
             results.append(
-                report(False, f"protocol_version=0.5 in {rel}", f"not readable: {e}")
+                report(
+                    False,
+                    f"protocol_version={EXPECTED_PROTOCOL_VERSION} in {rel}",
+                    f"not readable: {e}",
+                )
             )
             content = None
         if content is None:
             pass
         elif content == EXPECTED_PROTOCOL_VERSION:
-            results.append(report(True, f"protocol_version=0.5 in {rel}"))
+            results.append(report(True, f"protocol_version={EXPECTED_PROTOCOL_VERSION} in {rel}"))
         else:
             results.append(
-                report(False, f"protocol_version=0.5 in {rel}", f"found {content!r}")
+                report(
+                    False,
+                    f"protocol_version={EXPECTED_PROTOCOL_VERSION} in {rel}",
+                    f"found {content!r}",
+                )
             )
     # If pv_file is missing, that's already a structural problem caught by
     # check_autoresearch_dir / config-files checks higher up — no need to

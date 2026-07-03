@@ -43,12 +43,14 @@ REQUIRED_SURFACES = [
     "docs/host-bootstrap-agents.md",
     "docs/runtime-safety.md",
     "docs/testing.md",
+    "scripts/bump_protocol_version.py",
     "scripts/check_repo_harness.py",
     "scripts/harness_metrics.py",
     "scripts/quality_gate.py",
     "scripts/weekly_quality_report.py",
     "scripts/pr-agent-inbox.mjs",
     "scripts/pr-agent-inbox.test.mjs",
+    "scripts/tests/test_bump_protocol_version.py",
     "scripts/tests/test_harness_metrics.py",
     "scripts/tests/test_quality_gate.py",
     "scripts/tests/test_weekly_quality_report.py",
@@ -164,7 +166,7 @@ def check_dogfooding_anchors() -> None:
         ("Retirement or revisit:", "admission gate retirement field"),
         ("Cross-Surface Sync", "protocol/template/example sync model"),
         ("Roadmap Hygiene", "roadmap decomposition model"),
-        ("Version And Ledger Drift", "Protocol 0.5 drift guard"),
+        ("Version And Ledger Drift", "Protocol 0.6 drift guard"),
     ]
     for snippet, reason in anchors:
         require_contains("docs/dogfooding.md", snippet, reason)
@@ -180,6 +182,11 @@ def check_router_docs() -> None:
         ("docs/testing.md", "python scripts/quality_gate.py", "canonical local quality gate"),
         ("docs/runtime-safety.md", "harness-bootstrap init", "HEB bootstrap command note"),
         ("docs/testing.md", "weekly_quality_report.py", "weekly quality report route"),
+        (
+            "docs/testing.md",
+            "python scripts/bump_protocol_version.py <new-version> --dry-run",
+            "protocol bump tool route",
+        ),
         (
             "docs/testing.md",
             "python scripts/harness_metrics.py --baseline docs/harness-metrics-baseline.json",
@@ -285,6 +292,21 @@ def check_version_consistency() -> None:
     for path, snippet, reason in expected_snippets:
         require_contains(path, snippet, reason)
 
+    unquoted_current_stamp = re.compile(
+        rf"protocol_version:\s*{re.escape(protocol_version)}(?=$|[^0-9.])"
+    )
+    for path in sorted(tracked_paths_under(".")):
+        if not path.is_file() or not is_text_artifact(path):
+            continue
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        text = path.read_text(encoding="utf-8")
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if unquoted_current_stamp.search(line):
+                fail(
+                    f"{rel}:{line_number} has an unquoted current protocol_version "
+                    f"stamp; use protocol_version: \"{protocol_version}\" for YAML safety"
+                )
+
     require_contains(
         "docs/faq.md",
         f"The protocol is `v{protocol_version}`",
@@ -310,12 +332,16 @@ def check_version_consistency() -> None:
     active_doc_drift = [
         ("docs/host-bootstrap-agents.md", "v0.4 closes it structurally"),
         ("docs/host-bootstrap-agents.md", "below the v0.4 default"),
+        ("PROTOCOL.md", 'Records carry `protocol_version: "0.5"`'),
+        ("PROTOCOL.md", "**`research_tree.json` is DERIVED (v0.5).**"),
+        ("PROTOCOL.md", "which in v0.5 is **DERIVED (git-ignored)**"),
+        ("AGENTS.md", "equivalent v0.5 command shape"),
     ]
     for path, snippet in active_doc_drift:
         if exists(path) and snippet in read(path):
             fail(
-                f"{path} still describes active bootstrap behavior with "
-                f"stale Protocol 0.4 wording: {snippet!r}"
+                f"{path} still describes active behavior with stale protocol "
+                f"wording: {snippet!r}"
             )
 
 
@@ -359,11 +385,13 @@ def check_ci_wiring() -> None:
     for snippet in [
         "python scripts/quality_gate.py",
         "scripts/check_repo_harness.py",
+        "scripts/bump_protocol_version.py",
         "scripts/harness_metrics.py",
         "scripts/quality_gate.py",
         "scripts/weekly_quality_report.py",
         "scripts/pr-agent-inbox.mjs",
         "scripts/pr-agent-inbox.test.mjs",
+        "scripts/tests/test_bump_protocol_version.py",
         "docs/harness-metrics-baseline.json",
         "weekly-quality-report.yml",
         "pr-agent-inbox.yml",
