@@ -16,9 +16,12 @@ can read old evidence while writing new artifacts at the current version.
 
 ### Required changes
 
-1. **Bump the active version stamp.** Update `autoresearch/PROTOCOL_VERSION`
-   and any materialized active config, proposal, report, packet, and campaign
-   artifacts from `0.5` to `0.6` when the host opts into this release.
+1. **Bump the active version stamp.** Update `autoresearch/PROTOCOL_VERSION`,
+   active scaffold/config files, campaign metadata, and template defaults from
+   `0.5` to `0.6` when the host opts into this release. Keep historical
+   proposals, reports, packets, and ledger records stamped with the protocol
+   version that produced them unless they are newly generated or explicitly
+   regenerated with their dependent hashes/signatures refreshed.
 
 2. **Vendor the refreshed scaffold.** Copy the current `template/schema/`,
    `template/scripts/`, `template/templates/`, and config examples into the

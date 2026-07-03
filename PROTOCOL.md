@@ -43,7 +43,7 @@ Every generated artifact — proposal, ledger record, report, playbook entry —
 Example:
 
 ```yaml
-protocol_version: 0.6
+protocol_version: "0.6"
 ```
 
 ### 0.3 Migration policy
@@ -504,7 +504,7 @@ Write `autoresearch/config/metrics.yaml`. **Pick a cost tier** based on the wall
 #### Example metrics.yaml
 
 ```yaml
-protocol_version: 0.6
+protocol_version: "0.6"
 cost_tier: medium
 max_gpu_hours_per_candidate: 30
 
@@ -550,7 +550,7 @@ Write `protected_paths.yaml` and `enforcement.yaml`. **Until `enforcement.yaml` 
 
 ```yaml
 # protected_paths.yaml
-protocol_version: 0.6
+protocol_version: "0.6"
 protected_paths:
   - data/splits/**
   - evaluation/**
@@ -573,7 +573,7 @@ requires_human_review:
 
 ```yaml
 # enforcement.yaml
-protocol_version: 0.6
+protocol_version: "0.6"
 mechanism: ci_enforced       # one of: ci_enforced, pre_receive, oop_verifier, container_ro, none
 ci_enforced:
   base_branch: main
@@ -883,7 +883,7 @@ Every proposal records its scout's mode in the frontmatter.
 ```markdown
 # Literature Brief: <branch> / <hypothesis>
 
-protocol_version: 0.6
+protocol_version: "0.6"
 mode: live | offline
 web_search_used: true | false
 scout_agent: claude-sonnet-4.5 | codex | ...
@@ -912,7 +912,7 @@ scout_agent: claude-sonnet-4.5 | codex | ...
 ```markdown
 # Experiment Proposal: <short name>
 
-protocol_version: 0.6
+protocol_version: "0.6"
 proposal_id: <YYYYMMDD-HHMMSS-6hex-slug>
 branch: architecture | loss_objective | data_sampling | features | optimization | calibration | systems_efficiency
 parent_proposal_id: <id or "baseline">
@@ -1042,7 +1042,7 @@ autoresearch/reports/<id>-promotion-packet.json    # verifier-written + signed
 The request **references ledger entries** rather than duplicating their content. The ledger (§14.1) is the single source of truth for metrics, costs, statuses, and artifacts. The request collects pointers and the small set of incremental fields the verifier needs.
 
 ```yaml
-protocol_version: 0.6
+protocol_version: "0.6"
 request_id: "<YYYYMMDD-HHMMSS-6hex>"
 candidate_proposal_id: "<id>"
 campaign_id: "<id>"
@@ -1091,7 +1091,7 @@ requested_status: "promoted | low_evidence_promoted"
 The verifier reads the request, fetches every referenced ledger entry, re-verifies each claim, and signs the result.
 
 ```yaml
-protocol_version: 0.6
+protocol_version: "0.6"
 packet_id: "<YYYYMMDD-HHMMSS-6hex>"
 request_id: "<the request that produced this packet>"
 
@@ -1581,7 +1581,7 @@ Candidate changes optimizer, scheduler, or hyperparameter.
 ```markdown
 # Ablation Report: <candidate>
 
-protocol_version: 0.6
+protocol_version: "0.6"
 
 ## Candidate summary
 ## Change type (per §16.1)
@@ -1902,7 +1902,7 @@ Rules:
    out-of-band; if the host has `enforcement.yaml: mechanism: none`, label
    results `enforcement: in-band-only`.)
 2. Every experiment begins with a written hypothesis and proposal carrying
-   `protocol_version: 0.6`.
+   `protocol_version: "0.6"`.
 3. Use literature search (§9) when web is available; otherwise offline mode (§9.0).
 4. Prefer small, causal, ablatable changes. A *candidate* flips exactly one
    non-baseline config switch (§11.1.1). Stacks require factorial ablation
@@ -1940,7 +1940,7 @@ At iteration start:
 
 ## 21. Worker prompt templates
 
-[Same structure as v0.1 §21.1–21.4; each now references `protocol_version: 0.6`, the §5.0 separation level it requires, and includes explicit reminders about the relevant fixes from v0.1.]
+[Same structure as v0.1 §21.1–21.4; each now references `protocol_version: "0.6"`, the §5.0 separation level it requires, and includes explicit reminders about the relevant fixes from v0.1.]
 
 ### 21.1 Literature Scout (excerpt)
 
@@ -1953,7 +1953,7 @@ and label your brief `mode: offline`, `web_search_used: false`. In offline mode,
 block novel-architecture claims; engineering experiments may proceed.
 
 Do not invent citations. Mark withdrawn/unreviewed papers per §17.3. Use the
-§9.4 brief format and include `protocol_version: 0.6`.
+§9.4 brief format and include `protocol_version: "0.6"`.
 ```
 
 ### 21.2 Implementation Worker (excerpt)

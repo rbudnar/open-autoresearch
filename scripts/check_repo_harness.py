@@ -285,6 +285,21 @@ def check_version_consistency() -> None:
     for path, snippet, reason in expected_snippets:
         require_contains(path, snippet, reason)
 
+    unquoted_current_stamp = re.compile(
+        rf"protocol_version:\s*{re.escape(protocol_version)}(?=$|[^0-9.])"
+    )
+    for path in sorted(tracked_paths_under(".")):
+        if not path.is_file() or not is_text_artifact(path):
+            continue
+        rel = path.relative_to(REPO_ROOT).as_posix()
+        text = path.read_text(encoding="utf-8")
+        for line_number, line in enumerate(text.splitlines(), start=1):
+            if unquoted_current_stamp.search(line):
+                fail(
+                    f"{rel}:{line_number} has an unquoted current protocol_version "
+                    f"stamp; use protocol_version: \"{protocol_version}\" for YAML safety"
+                )
+
     require_contains(
         "docs/faq.md",
         f"The protocol is `v{protocol_version}`",
