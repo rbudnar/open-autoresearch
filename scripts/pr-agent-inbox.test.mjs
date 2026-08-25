@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import {
   analyzeInbox,
@@ -266,7 +267,7 @@ test('fallback required-check scan treats non-inbox failures as required', () =>
     },
     branchProtection: null,
   }), {
-    ignoreChecks: ['agent-inbox-clean', 'PR Agent Inbox', 'Agent inbox'],
+    ignoreChecks: ['agent-inbox-clean', 'PR Agent Inbox / Agent inbox'],
   });
 
   assert.equal(result.clean, false);
@@ -813,6 +814,187 @@ test('publishing side effects continue when write permissions are unavailable', 
   assert.ok(client.calls.some((call) => call.args.includes('repos/owner/repo/statuses/abc123')));
 });
 
+test('canonical inbox workflow and signal checks are ignored by exact identity when protection is unavailable', () => {
+  const ignoreChecks = [
+    'agent-inbox-clean',
+    'PR Agent Inbox / agent-inbox',
+    'PR Agent Inbox Signal / Agent inbox',
+  ];
+  for (const conclusion of ['ACTION_REQUIRED', 'TIMED_OUT', 'CANCELLED']) {
+    const result = analyzeInbox(data({
+      prView: {
+        statusCheckRollup: [
+          { workflowName: 'PR Agent Inbox Signal', name: 'Agent inbox', conclusion },
+        ],
+      },
+      branchProtection: null,
+    }), { ignoreChecks });
+
+    assert.equal(result.clean, true, `${conclusion} signal plumbing is not agent work`);
+    assert.deepEqual(result.checks.failed, []);
+  }
+});
+
+test('ignored status contexts and workflow/job tuples do not collide across identity fields', () => {
+  const ignoreChecks = [
+    'agent-inbox-clean',
+    'PR Agent Inbox / agent-inbox',
+    'PR Agent Inbox Signal / Agent inbox',
+  ];
+  const collisions = [
+    { workflowName: 'agent-inbox-clean', name: 'attacker-job', conclusion: 'FAILURE' },
+    { context: 'PR Agent Inbox Signal / Agent inbox', conclusion: 'FAILURE' },
+    { workflowName: 'PR Agent Inbox Signal', name: 'attacker-job', conclusion: 'FAILURE' },
+    { workflowName: 'attacker-workflow', name: 'Agent inbox', conclusion: 'FAILURE' },
+    { workflowName: 'PR Agent Inbox Signalling', name: 'Agent inbox', conclusion: 'FAILURE' },
+  ];
+
+  for (const check of collisions) {
+    const result = analyzeInbox(data({
+      prView: { statusCheckRollup: [check] },
+      branchProtection: null,
+    }), { ignoreChecks });
+    assert.equal(result.clean, false, JSON.stringify(check));
+    assert.equal(result.checks.failed.length, 1, JSON.stringify(check));
+  }
+});
+
+test('permissionless signal owns the exact review events and one bounded hosted no-op', () => {
+  const workflow = signalWorkflow();
+  const events = yamlTopLevelBlock(workflow, 'on');
+  const jobs = workflowJobs(workflow);
+
+  assert.match(workflow, /^name:\s*PR Agent Inbox Signal\s*$/m);
+  assert.deepEqual(workflowEventNames(events).sort(), [
+    'pull_request_review', 'pull_request_review_comment',
+  ]);
+  assert.deepEqual(workflowEventTypes(events, 'pull_request_review'), ['submitted', 'edited', 'dismissed']);
+  assert.deepEqual(workflowEventTypes(events, 'pull_request_review_comment'), ['created', 'edited', 'deleted']);
+  assert.match(workflow, /^permissions:\s*\{\}\s*$/m);
+  assert.equal(jobs.length, 1);
+  assert.match(jobs[0].body, /^    name:\s*Agent inbox\s*$/m);
+  assert.match(jobs[0].body, /^    runs-on:\s*ubuntu-latest\s*$/m);
+  assert.match(jobs[0].body, /^    timeout-minutes:\s*5\s*$/m);
+  assert.equal([...jobs[0].body.matchAll(/^      -\s+(?:name|run|uses):/gm)].length, 1);
+  assert.match(jobs[0].body, /^(?:      - run|        run):\s*[^|>\n]+$/m);
+  assert.doesNotMatch(workflow, /\$\{\{|\buses:|\benv:|\boutputs:|\bpermissions:\s*\n|\b(?:gh|curl|wget)\b|checkout|artifact|cache|secrets?/i);
+});
+
+test('privileged workflow owns only exact direct, manual, and five completed workflow-run events', () => {
+  const workflow = inboxWorkflow();
+  const events = yamlTopLevelBlock(workflow, 'on');
+
+  assert.deepEqual(workflowEventNames(events).sort(), [
+    'issue_comment', 'pull_request_target', 'workflow_dispatch', 'workflow_run',
+  ]);
+  assert.deepEqual(workflowEventTypes(events, 'pull_request_target'), [
+    'opened', 'edited', 'reopened', 'synchronize', 'ready_for_review', 'converted_to_draft', 'closed',
+  ]);
+  assert.deepEqual(workflowEventTypes(events, 'issue_comment'), ['created']);
+  assert.deepEqual(workflowEventTypes(events, 'workflow_run'), ['completed']);
+  assert.deepEqual(workflowRunProducers(events), [
+    'check-drift', 'protect-protocol', 'validate-examples', 'validate-ledger', 'PR Agent Inbox Signal',
+  ]);
+  assert.match(workflow, /^permissions:\s*\{\}\s*$/m);
+});
+
+test('workflow-run routing authenticates canonical current workflow identity and provenance without producer data', () => {
+  const workflow = inboxWorkflow();
+  const resolver = workflowJobs(workflow).find(({ body }) => body.includes('workflow_run')
+    && body.includes('pull_requests'));
+  const mappings = new Map([
+    ['check-drift', '.github/workflows/check-drift.yml'],
+    ['protect-protocol', '.github/workflows/protect-protocol.yml'],
+    ['validate-examples', '.github/workflows/validate-examples.yml'],
+    ['validate-ledger', '.github/workflows/validate-ledger.yml'],
+    ['PR Agent Inbox Signal', '.github/workflows/pr-agent-inbox-signal.yml'],
+  ]);
+
+  assert.ok(resolver, 'a read-only workflow_run resolver must own producer admission');
+  assert.match(resolver.body, /repos\/.+\/actions\/workflows|actions\/workflows\//);
+  for (const [name, path] of mappings) {
+    assert.match(resolver.body, new RegExp(escapeRegex(name)));
+    assert.match(resolver.body, new RegExp(escapeRegex(path)));
+  }
+  for (const field of ['workflow_id', 'path', 'repository.full_name', 'event', 'head_sha', 'pull_requests']) {
+    assert.match(resolver.body, new RegExp(escapeRegex(field)));
+  }
+  assert.match(resolver.body, /pull_request_review_comment/);
+  assert.match(resolver.body, /pull_request_review/);
+  assert.match(resolver.body, /pull_request/);
+  assert.match(resolver.body, /\[0-9a-fA-F\]\{40\}/);
+  assert.match(resolver.body, /--paginate/);
+  assert.doesNotMatch(resolver.body, /<\s*\(/, 'API failures must not be hidden by process substitution');
+  assert.doesNotMatch(workflow, /download-artifact|upload-artifact|actions\/cache|cache-dependency-path|\/artifacts|\/logs/i);
+});
+
+test('comment and dispatch routing admit only exact commands, numeric PRs, and a bounded draft-inclusive blank sweep', () => {
+  const workflow = inboxWorkflow();
+  const jobs = workflowJobs(workflow);
+  const comment = jobs.find(({ body }) => body.includes('/agent-inbox refresh')
+    && body.includes('/collaborators/') && body.includes('/permission'));
+  const dispatch = jobs.find(({ body }) => body.includes('workflow_dispatch')
+    && body.includes('github.ref_name') && body.includes('default_branch'));
+
+  assert.ok(comment, 'read-only comment authorization must precede publication');
+  assert.match(comment.body, /\.trim\(\)/);
+  assert.match(comment.body, /\/agent-inbox refresh/);
+  assert.doesNotMatch(comment.body, /startsWith\s*\(/);
+  assert.match(comment.body, /admin\|maintain\|write/);
+  assert.doesNotMatch(comment.body, /actions\/checkout|\b(?:issues|pull-requests|statuses):\s*write\b/);
+
+  assert.ok(dispatch, 'read-only dispatch routing must precede publication');
+  assert.match(dispatch.body, /github\.ref_name/);
+  assert.match(dispatch.body, /github\.event\.repository\.default_branch/);
+  assert.match(dispatch.body, /\^\[1-9\]\[0-9\]\*\$/);
+  assert.match(dispatch.body, /(?:^|\D)100(?:\D|$)/);
+  assert.match(dispatch.body, /isDraft|\.draft/);
+  assert.doesNotMatch(dispatch.body, /!\s*(?:pr\.)?(?:isDraft|draft)/);
+  assert.match(workflow, /--refresh\b/);
+});
+
+test('all routes converge on read-only admission and a non-cancelling immutable-base publisher', () => {
+  const workflow = inboxWorkflow();
+  const jobs = workflowJobs(workflow);
+  const publishers = jobs.filter(({ body }) => body.includes('scripts/pr-agent-inbox.mjs'));
+
+  assert.ok(publishers.length > 0, 'admitted PR identities must reach a publisher');
+  for (const { name, body } of jobs) {
+    assert.match(body, /^    runs-on:\s*ubuntu-latest\s*$/m, `${name} must be hosted`);
+    assert.match(body, /^    timeout-minutes:\s*5\s*$/m, `${name} must be bounded`);
+    if (!body.includes('scripts/pr-agent-inbox.mjs')) {
+      assert.doesNotMatch(body, /\b(?:issues|pull-requests|statuses):\s*write\b/, `${name} must stay read-only`);
+      assert.doesNotMatch(body, /actions\/checkout/, `${name} must not checkout`);
+      continue;
+    }
+
+    for (const permission of ['contents: read', 'pull-requests: write', 'issues: write', 'statuses: write']) {
+      assert.match(body, new RegExp(escapeRegex(permission)));
+    }
+    assert.match(body, /group:\s*pr-agent-inbox-pr-/);
+    assert.match(body, /cancel-in-progress:\s*false/);
+    assert.match(body, /state/);
+    assert.match(body, /isDraft/);
+    assert.match(body, /baseRefName/);
+    assert.match(body, /headRefOid/);
+    assert.match(body, /isCrossRepository/);
+    assert.match(body, /default_branch/);
+    assert.match(body, /\[0-9a-fA-F\]\{40\}/);
+    assert.match(body, /ref:\s*\$\{\{[^}]*default[^}]*oid[^}]*\}\}/i);
+    assert.match(body, /persist-credentials:\s*false/);
+    assert.deepEqual(ignoreCheckArguments(body), [
+      'agent-inbox-clean',
+      'PR Agent Inbox / agent-inbox',
+      'PR Agent Inbox Signal / Agent inbox',
+    ]);
+  }
+
+  assert.match(workflow, /fromJSON\(/);
+  assert.doesNotMatch(workflow, /schedule:|^  status:|^  check_run:|repository_dispatch:|pull_request_review_thread:/m);
+  assert.doesNotMatch(workflow, /self-hosted|rbudnar-linux|open-autoresearch-inbox/i);
+  assert.doesNotMatch(workflow, /download-artifact|upload-artifact|actions\/cache|cache-dependency-path|github\.sha|pull_request\.head|head\.sha/i);
+});
+
 function data(overrides = {}) {
   return {
     repo: 'owner/repo',
@@ -878,4 +1060,64 @@ function fakeClient({ responses = {} } = {}) {
       return '';
     },
   };
+}
+
+function inboxWorkflow() {
+  return readFileSync(new URL('../.github/workflows/pr-agent-inbox.yml', import.meta.url), 'utf8');
+}
+
+function signalWorkflow() {
+  return readFileSync(new URL('../.github/workflows/pr-agent-inbox-signal.yml', import.meta.url), 'utf8');
+}
+
+function yamlTopLevelBlock(source, key) {
+  const match = new RegExp(`^${escapeRegex(key)}:\\s*(?:\\n|$)`, 'm').exec(source);
+  assert.ok(match, `workflow must define ${key}`);
+  const rest = source.slice(match.index + match[0].length);
+  const next = /^[A-Za-z][A-Za-z0-9_-]*:\s*(?:\n|$)/m.exec(rest);
+  return rest.slice(0, next?.index ?? rest.length);
+}
+
+function workflowEventTypes(events, event) {
+  const eventBlock = yamlIndentedBlock(events, event, 2);
+  const match = /^    types:\s*\[([^\]]*)\]/m.exec(eventBlock);
+  if (match) return match[1].split(',').map((value) => value.trim()).filter(Boolean);
+  const block = /^    types:\s*\n((?:\s{6}-\s*[^\n]+\n)+)/m.exec(eventBlock);
+  assert.ok(block, `${event} must have an explicit type allowlist`);
+  return [...block[1].matchAll(/^\s{6}-\s*(.+)$/gm)].map((entry) => entry[1].trim());
+}
+
+function workflowEventNames(events) {
+  return [...events.matchAll(/^  ([A-Za-z][A-Za-z0-9_]*):/gm)].map((entry) => entry[1]);
+}
+
+function workflowRunProducers(events) {
+  const eventBlock = yamlIndentedBlock(events, 'workflow_run', 2);
+  const match = /^    workflows:\s*\n((?:\s{6}-\s*[^\n]+\n)+)/m.exec(eventBlock);
+  assert.ok(match, 'workflow_run must list its producer workflows');
+  return [...match[1].matchAll(/^\s{6}-\s*(.+)$/gm)].map((entry) => entry[1].trim());
+}
+
+function yamlIndentedBlock(source, key, indent) {
+  const spaces = ' '.repeat(indent);
+  const match = new RegExp(`^${spaces}${escapeRegex(key)}:\\s*\\n`, 'm').exec(source);
+  assert.ok(match, `${key} must be present`);
+  const rest = source.slice(match.index + match[0].length);
+  const next = new RegExp(`^${spaces}[A-Za-z][A-Za-z0-9_-]*:\\s*(?:\\n|$)`, 'm').exec(rest);
+  return rest.slice(0, next?.index ?? rest.length);
+}
+
+function workflowJobs(workflow) {
+  const jobs = yamlTopLevelBlock(workflow, 'jobs');
+  return [...jobs.matchAll(/^  ([A-Za-z][A-Za-z0-9_-]*):\n([\s\S]*?)(?=^  [A-Za-z][A-Za-z0-9_-]*:\n|$(?![\s\S]))/gm)]
+    .map((entry) => ({ name: entry[1], body: entry[2] }));
+}
+
+function ignoreCheckArguments(job) {
+  return [...job.matchAll(/--ignore-check\s+(?:"([^"]+)"|'([^']+)'|([^\s\\]+))/g)]
+    .map((entry) => entry[1] ?? entry[2] ?? entry[3]);
+}
+
+function escapeRegex(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
