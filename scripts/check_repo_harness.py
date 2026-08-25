@@ -429,7 +429,9 @@ def check_pr_agent_inbox_wiring() -> None:
             "PR Agent Inbox Signal",
             "runs-on: ubuntu-latest",
             "cancel-in-progress: false",
+            "actions: read",
             "pull-requests: write",
+            "--assert-no-agent-attention",
         ],
         "scripts/pr-agent-inbox.mjs": [
             "const inboxState = clean ? 'clean'",
@@ -453,9 +455,14 @@ def check_pr_agent_inbox_wiring() -> None:
         ".github/workflows/pr-agent-inbox.yml",
     ]:
         text = read(path)
-        for snippet in ["schedule:", "status:", "check_run:", "self-hosted"]:
-            if snippet in text:
-                fail(f"{path} must not reference {snippet!r}")
+        for pattern, label in [
+            (r"^  schedule:\s*", "schedule:"),
+            (r"^  status:\s*", "status:"),
+            (r"^  check_run:\s*", "check_run:"),
+            (r"^\s*runs-on:\s*.*\bself-hosted\b", "self-hosted runner"),
+        ]:
+            if re.search(pattern, text, re.MULTILINE):
+                fail(f"{path} must not define {label!r}")
 
 
 def main(argv: list[str] | None = None) -> int:

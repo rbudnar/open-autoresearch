@@ -888,7 +888,7 @@ test('privileged workflow owns only exact direct, manual, and five completed wor
     'issue_comment', 'pull_request_target', 'workflow_dispatch', 'workflow_run',
   ]);
   assert.deepEqual(workflowEventTypes(events, 'pull_request_target'), [
-    'opened', 'edited', 'reopened', 'synchronize', 'ready_for_review', 'converted_to_draft', 'closed',
+    'opened', 'edited', 'reopened', 'synchronize', 'ready_for_review', 'converted_to_draft',
   ]);
   assert.deepEqual(workflowEventTypes(events, 'issue_comment'), ['created']);
   assert.deepEqual(workflowEventTypes(events, 'workflow_run'), ['completed']);
@@ -896,6 +896,12 @@ test('privileged workflow owns only exact direct, manual, and five completed wor
     'check-drift', 'protect-protocol', 'validate-examples', 'validate-ledger', 'PR Agent Inbox Signal',
   ]);
   assert.match(workflow, /^permissions:\s*\{\}\s*$/m);
+
+  const resolver = workflowJobs(workflow).find(({ body }) => body.includes('case "$EVENT_NAME" in'));
+  assert.ok(resolver);
+  const directRoute = /pull_request_target\)([\s\S]*?)\n\s*;;/.exec(resolver.body)?.[1] ?? '';
+  assert.match(directRoute, /add_current_open_default_pr\s+"\$PR_NUMBER"/);
+  assert.doesNotMatch(directRoute, /prs\+=/);
 });
 
 test('workflow-run routing authenticates canonical current workflow identity and provenance without producer data', () => {
@@ -922,6 +928,10 @@ test('workflow-run routing authenticates canonical current workflow identity and
   assert.match(resolver.body, /pull_request_review_comment/);
   assert.match(resolver.body, /pull_request_review/);
   assert.match(resolver.body, /pull_request/);
+  assert.match(resolver.body, /github\.event\.workflow_run\.event\s*==\s*'pull_request'/,
+    'canonical validation workflows triggered by main pushes must skip before runner allocation');
+  assert.match(resolver.body, /github\.event\.workflow_run\.event\s*==\s*'pull_request_review'/);
+  assert.match(resolver.body, /github\.event\.workflow_run\.event\s*==\s*'pull_request_review_comment'/);
   assert.match(resolver.body, /\[0-9a-fA-F\]\{40\}/);
   assert.match(resolver.body, /--paginate/);
   assert.doesNotMatch(resolver.body, /<\s*\(/, 'API failures must not be hidden by process substitution');
@@ -941,6 +951,8 @@ test('comment and dispatch routing admit only exact commands, numeric PRs, and a
   assert.match(comment.body, /\/agent-inbox refresh/);
   assert.doesNotMatch(comment.body, /startsWith\s*\(/);
   assert.match(comment.body, /admin\|maintain\|write/);
+  assert.match(comment.body, /2>\/dev\/null\s*\|\|\s*echo\s+none/);
+  assert.match(comment.body, /Ignoring[^\n]*not authorized|Ignoring[^\n]*permission/i);
   assert.doesNotMatch(comment.body, /actions\/checkout|\b(?:issues|pull-requests|statuses):\s*write\b/);
 
   assert.ok(dispatch, 'read-only dispatch routing must precede publication');
@@ -984,7 +996,6 @@ test('all routes converge on read-only admission and a non-cancelling immutable-
     assert.match(body, /persist-credentials:\s*false/);
     assert.deepEqual(ignoreCheckArguments(body), [
       'agent-inbox-clean',
-      'PR Agent Inbox / agent-inbox',
       'PR Agent Inbox Signal / Agent inbox',
     ]);
   }

@@ -48,9 +48,11 @@ rejection path.
   lifecycle events, an authorized exact `/agent-inbox refresh` comment, a
   default-branch manual dispatch, or completed runs from the four validation
   workflows and the signal workflow. It has no schedule, status, or check-run
-  trigger. A blank manual dispatch performs a draft-inclusive, default-base
-  sweep and refuses more than 100 open PRs rather than publishing a partial
-  result.
+  trigger. Validation-workflow runs caused by a default-branch push are skipped
+  before runner allocation. Unauthorized refreshes and PRs that are no longer
+  open against the current default branch are clean no-ops. A blank manual
+  dispatch performs a draft-inclusive, default-base sweep and refuses more than
+  100 open PRs rather than publishing a partial result.
 - `.github/workflows/weekly-quality-report.yml` runs every Monday, uploads
   JSON/Markdown report artifacts, comments on a standing report issue, opens or
   updates a problem issue when checks fail, and then fails the workflow when

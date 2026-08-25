@@ -40,7 +40,7 @@ jobs:
 permissions: {}
 on:
   pull_request_target:
-    types: [opened, edited, reopened, synchronize, ready_for_review, converted_to_draft, closed]
+    types: [opened, edited, reopened, synchronize, ready_for_review, converted_to_draft]
   issue_comment:
     types: [created]
   workflow_dispatch:
@@ -52,6 +52,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      actions: read
       contents: read
       pull-requests: read
   publish:
@@ -62,6 +63,8 @@ jobs:
       pull-requests: write
       issues: write
       statuses: write
+    steps:
+      - run: node scripts/pr-agent-inbox.mjs --assert-no-agent-attention
     concurrency:
       group: pr-agent-inbox-pr-${{ matrix.pr }}
       cancel-in-progress: false
@@ -88,7 +91,12 @@ assert.equal(result.statusState, 'success')
                 for forbidden in ("schedule:", "status:", "check_run:", "self-hosted"):
                     inbox = root / ".github/workflows/pr-agent-inbox.yml"
                     baseline = files[".github/workflows/pr-agent-inbox.yml"]
-                    inbox.write_text(f"{baseline}\n{forbidden}\n", encoding="utf-8")
+                    injected = (
+                        "  runs-on: [self-hosted]"
+                        if forbidden == "self-hosted"
+                        else f"  {forbidden}"
+                    )
+                    inbox.write_text(f"{baseline}\n{injected}\n", encoding="utf-8")
                     check_repo_harness.failures.clear()
                     check_repo_harness.check_pr_agent_inbox_wiring()
                     self.assertTrue(check_repo_harness.failures, forbidden)
