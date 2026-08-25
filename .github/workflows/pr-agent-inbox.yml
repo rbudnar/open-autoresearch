@@ -2,213 +2,324 @@ name: PR Agent Inbox
 
 on:
   pull_request_target:
-    types: [opened, reopened, synchronize, ready_for_review, converted_to_draft, edited]
-  pull_request_review:
-    types: [submitted, edited, dismissed]
-  pull_request_review_comment:
-    types: [created, edited, deleted]
+    types: [opened, edited, reopened, synchronize, ready_for_review, converted_to_draft]
   issue_comment:
     types: [created]
-  status:
-  check_run:
-    types: [created, rerequested, completed]
+  workflow_run:
+    workflows:
+      - check-drift
+      - protect-protocol
+      - validate-examples
+      - validate-ledger
+      - PR Agent Inbox Signal
+    types: [completed]
   workflow_dispatch:
     inputs:
       pr:
-        description: Pull request number to refresh; omit to sweep open PRs.
+        description: Pull request number to refresh; omit for a bounded sweep.
         required: false
-  schedule:
-    - cron: '*/15 * * * *'
 
-permissions:
-  contents: read
-  issues: write
-  pull-requests: write
-  actions: read
-  checks: read
-  statuses: write
-
-concurrency:
-  group: pr-agent-inbox-${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr || 'sweep' }}
-  cancel-in-progress: false
+permissions: {}
 
 jobs:
-  agent-inbox:
+  resolve-targets:
+    name: resolve targets
     if: >-
-      github.event_name != 'issue_comment' ||
-      (github.event.issue.pull_request && startsWith(github.event.comment.body, '/agent-inbox refresh'))
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.event == 'pull_request' ||
+      github.event.workflow_run.event == 'pull_request_review' ||
+      github.event.workflow_run.event == 'pull_request_review_comment'
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    outputs:
+      default-name: ${{ steps.resolve.outputs.default-name }}
+      default-oid: ${{ steps.resolve.outputs.default-oid }}
+      has-prs: ${{ steps.resolve.outputs.has-prs }}
+      matrix: ${{ steps.resolve.outputs.matrix }}
     steps:
-      - name: Decide inbox refresh scope
-        id: decide
+      - name: Admit event and resolve current PR identities
+        id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
+          EVENT_REPOSITORY: ${{ github.event.repository.full_name }}
+          EVENT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
           REPO: ${{ github.repository }}
+          REF_NAME: ${{ github.ref_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || '' }}
           COMMENT_AUTHOR: ${{ github.event.comment.user.login || '' }}
           COMMENT_BODY: ${{ github.event.comment.body || '' }}
-          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || '' }}
+          IS_PR_COMMENT: ${{ github.event.issue.pull_request && 'true' || 'false' }}
+          WORKFLOW_ID: ${{ github.event.workflow_run.workflow_id || '' }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name || '' }}
+          WORKFLOW_PATH: ${{ github.event.workflow_run.path || '' }}
+          WORKFLOW_REPOSITORY: ${{ github.event.workflow_run.repository.full_name || '' }}
+          WORKFLOW_EVENT: ${{ github.event.workflow_run.event || '' }}
+          WORKFLOW_PRS: ${{ toJSON(github.event.workflow_run.pull_requests || fromJSON('[]')) }}
+          WORKFLOW_HEAD_SHA: ${{ github.event.workflow_run.head_sha || '' }}
           INPUT_PR: ${{ github.event.inputs.pr || '' }}
-          PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number || github.event.inputs.pr || '' }}
-          CHECKOUT_REF: ${{ github.event.pull_request.base.sha || github.event.repository.default_branch || github.sha }}
-          STATUS_CONTEXT: ${{ github.event.context || '' }}
-          STATUS_SHA: ${{ github.event.sha || '' }}
-          CHECK_RUN_NAME: ${{ github.event.check_run.name || '' }}
-          CHECK_RUN_SHA: ${{ github.event.check_run.head_sha || '' }}
+        shell: bash
         run: |
           set -euo pipefail
 
-          mode="skip"
-          pr="${PR_NUMBER}"
-          checkout_ref="${CHECKOUT_REF:-$GITHUB_SHA}"
+          if [[ "$EVENT_REPOSITORY" != "$REPO" ]]; then
+            echo "::error::Refusing an event whose repository does not match the workflow repository."
+            exit 1
+          fi
 
-          resolve_open_prs_for_sha() {
-            local sha="$1"
-            if [[ -z "$sha" ]]; then
-              return 0
+          route_default_name="$(gh api "repos/${REPO}" --jq '.default_branch')"
+          route_default_oid="$(gh api "repos/${REPO}/commits/${route_default_name}" --jq '.sha')"
+          if [[ -z "$route_default_name" || "$route_default_name" != "$EVENT_DEFAULT_BRANCH" ||
+                ! "$route_default_oid" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::The current default branch did not resolve to an exact commit."
+            exit 1
+          fi
+
+          prs=()
+          refresh_only=false
+
+          validate_pr_number() {
+            local candidate="$1"
+            if [[ ! "$candidate" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::Malformed pull request identity: ${candidate}."
+              exit 1
             fi
-            gh api -H "Accept: application/vnd.github+json" \
-              "repos/${REPO}/commits/${sha}/pulls" \
-              --jq 'map(select(.state == "open")) | .[].number' 2>/dev/null || true
           }
 
-          set_pr_scope_for_sha() {
-            local sha="$1"
-            mapfile -t resolved_prs < <(resolve_open_prs_for_sha "$sha")
-            if (( ${#resolved_prs[@]} == 1 )); then
-              mode="assert"
-              pr="${resolved_prs[0]}"
-            elif (( ${#resolved_prs[@]} > 1 )); then
-              echo "::notice::Multiple open PRs found for ${sha}; sweeping open PR inboxes."
-              mode="sweep"
-            else
-              echo "::notice::No open pull request found for ${sha}; skipping inbox refresh."
+          add_current_open_default_pr() {
+            local candidate="$1"
+            validate_pr_number "$candidate"
+            local pr_json
+            pr_json="$(gh pr view "$candidate" --repo "$REPO" --json number,state,baseRefName)"
+            if [[ "$(jq -r '.state' <<< "$pr_json")" == "OPEN" &&
+                  "$(jq -r '.baseRefName' <<< "$pr_json")" == "$route_default_name" ]]; then
+              prs+=("$(jq -r '.number' <<< "$pr_json")")
             fi
           }
 
           case "$EVENT_NAME" in
             pull_request_target)
-              mode="assert"
-              ;;
-            pull_request_review|pull_request_review_comment)
-              if [[ -n "$HEAD_REPO" && "$HEAD_REPO" != "$REPO" ]]; then
-                echo "::notice::Skipping write-backed review refresh for fork PR ${pr}; scheduled or manual refresh will reconcile the PR-head status."
-              else
-                mode="assert"
-              fi
+              add_current_open_default_pr "$PR_NUMBER"
               ;;
             issue_comment)
-              if [[ "$COMMENT_BODY" == "/agent-inbox refresh"* ]]; then
-                permission="$(gh api "repos/${REPO}/collaborators/${COMMENT_AUTHOR}/permission" --jq '.permission' 2>/dev/null || echo none)"
-                case "$permission" in
-                  admin|maintain|write) mode="assert" ;;
-                  *) echo "::notice::Ignoring /agent-inbox refresh from ${COMMENT_AUTHOR}; permission is ${permission}." ;;
-                esac
+              if [[ "$IS_PR_COMMENT" == "true" ]]; then
+                command="$(node -e 'process.stdout.write(process.env.COMMENT_BODY.trim())')"
+                if [[ "$command" == "/agent-inbox refresh" ]]; then
+                  permission="$(gh api "repos/${REPO}/collaborators/${COMMENT_AUTHOR}/permission" --jq '.permission' 2>/dev/null || echo none)"
+                  case "$permission" in
+                    admin|maintain|write) add_current_open_default_pr "$PR_NUMBER" ;;
+                    *)
+                      echo "::notice::Ignoring Agent Inbox refresh from ${COMMENT_AUTHOR}; permission is ${permission}."
+                      ;;
+                  esac
+                fi
               fi
               ;;
-            status)
-              if [[ "$STATUS_CONTEXT" == "agent-inbox-clean" ]]; then
-                echo "::notice::Skipping self-published agent-inbox-clean status event."
-              else
-                set_pr_scope_for_sha "$STATUS_SHA"
+            workflow_run)
+              case "$WORKFLOW_NAME" in
+                check-drift)
+                  expected_path=".github/workflows/check-drift.yml"
+                  expected_event="pull_request"
+                  ;;
+                protect-protocol)
+                  expected_path=".github/workflows/protect-protocol.yml"
+                  expected_event="pull_request"
+                  ;;
+                validate-examples)
+                  expected_path=".github/workflows/validate-examples.yml"
+                  expected_event="pull_request"
+                  ;;
+                validate-ledger)
+                  expected_path=".github/workflows/validate-ledger.yml"
+                  expected_event="pull_request"
+                  ;;
+                "PR Agent Inbox Signal")
+                  expected_path=".github/workflows/pr-agent-inbox-signal.yml"
+                  case "$WORKFLOW_EVENT" in
+                    pull_request_review|pull_request_review_comment) expected_event="$WORKFLOW_EVENT" ;;
+                    *)
+                      echo "::error::Signal workflow_run has an inadmissible source event."
+                      exit 1
+                      ;;
+                  esac
+                  ;;
+                *)
+                  echo "::error::Unrecognized workflow_run producer."
+                  exit 1
+                  ;;
+              esac
+
+              if [[ "$WORKFLOW_REPOSITORY" != "$REPO" || ! "$WORKFLOW_ID" =~ ^[0-9]+$ ||
+                    "$WORKFLOW_PATH" != "$expected_path" || "$WORKFLOW_EVENT" != "$expected_event" ]]; then
+                echo "::error::workflow_run provenance did not match the canonical producer contract."
+                exit 1
               fi
-              ;;
-            check_run)
-              if [[ "$CHECK_RUN_NAME" == "agent-inbox" || "$CHECK_RUN_NAME" == "PR Agent Inbox / agent-inbox" ]]; then
-                echo "::notice::Skipping self check_run event for PR Agent Inbox."
+
+              current_workflow="$(gh api "repos/${REPO}/actions/workflows/${WORKFLOW_ID}")"
+              if [[ "$(jq -r '.id' <<< "$current_workflow")" != "$WORKFLOW_ID" ||
+                    "$(jq -r '.name' <<< "$current_workflow")" != "$WORKFLOW_NAME" ||
+                    "$(jq -r '.path' <<< "$current_workflow")" != "$expected_path" ||
+                    "$(jq -r '.state' <<< "$current_workflow")" != "active" ]]; then
+                echo "::error::workflow_run producer is not the current canonical workflow identity."
+                exit 1
+              fi
+
+              if [[ "$(jq 'length' <<< "$WORKFLOW_PRS")" -gt 0 ]]; then
+                candidates="$(jq -er '.[] | if (.number | type) == "number" and (.number | floor) == .number and .number > 0 then .number else error("invalid PR") end' <<< "$WORKFLOW_PRS")"
+                while IFS= read -r candidate; do
+                  add_current_open_default_pr "$candidate"
+                done <<< "$candidates"
               else
-                set_pr_scope_for_sha "$CHECK_RUN_SHA"
+                if [[ ! "$WORKFLOW_HEAD_SHA" =~ ^[0-9a-fA-F]{40}$ ]]; then
+                  echo "::error::Invalid workflow_run head_sha; expected an exact 40-hex commit."
+                  exit 1
+                fi
+                associated="$(gh api -H "Accept: application/vnd.github+json" \
+                  "repos/${REPO}/commits/${WORKFLOW_HEAD_SHA}/pulls" --paginate --jq '.[].number')"
+                while IFS= read -r candidate; do
+                  [[ -z "$candidate" ]] || add_current_open_default_pr "$candidate"
+                done <<< "$associated"
               fi
               ;;
             workflow_dispatch)
+              if [[ "$REF_NAME" != "$route_default_name" ]]; then
+                echo "::error::Manual recovery must run from the current default branch."
+                exit 1
+              fi
               if [[ -n "$INPUT_PR" ]]; then
-                mode="assert"
-                pr="$INPUT_PR"
+                add_current_open_default_pr "$INPUT_PR"
               else
-                mode="sweep"
+                refresh_only=true
+                open_prs="$(gh pr list --repo "$REPO" --state open --base "$route_default_name" --limit 101 \
+                  --json number,isDraft --jq '.[].number')"
+                while IFS= read -r candidate; do
+                  [[ -z "$candidate" ]] || prs+=("$candidate")
+                done <<< "$open_prs"
+                if (( ${#prs[@]} > 100 )); then
+                  echo "::error::Manual recovery found more than 100 PRs; refusing a partial sweep."
+                  exit 1
+                fi
               fi
               ;;
-            schedule)
-              mode="sweep"
+            *)
+              echo "::error::Unsupported Agent Inbox event: ${EVENT_NAME}."
+              exit 1
               ;;
           esac
 
+          matrix="$(printf '%s\n' "${prs[@]}" | jq -Rsc \
+            --argjson refresh "$refresh_only" \
+            'split("\n") | map(select(length > 0) | tonumber) | unique | {include: map({pr: ., refresh: $refresh})}')"
+          count="$(jq '.include | length' <<< "$matrix")"
           {
-            echo "mode=$mode"
-            echo "pr=$pr"
-            echo "checkout_ref=$checkout_ref"
+            echo "default-name=$route_default_name"
+            echo "default-oid=$route_default_oid"
+            echo "has-prs=$([[ "$count" -gt 0 ]] && echo true || echo false)"
+            echo "matrix=$matrix"
+          } >> "$GITHUB_OUTPUT"
+
+  publish:
+    name: agent-inbox
+    needs: resolve-targets
+    if: needs.resolve-targets.outputs.has-prs == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve-targets.outputs.matrix) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+      statuses: write
+    concurrency:
+      group: pr-agent-inbox-pr-${{ matrix.pr }}
+      cancel-in-progress: false
+    steps:
+      - name: Re-read current PR and default-branch state after concurrency admission
+        id: scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          ROUTE_DEFAULT_NAME: ${{ needs.resolve-targets.outputs.default-name }}
+          ROUTE_DEFAULT_OID: ${{ needs.resolve-targets.outputs.default-oid }}
+          TARGET_PR: ${{ matrix.pr }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$TARGET_PR" =~ ^[1-9][0-9]*$ ]] ||
+             [[ ! "$ROUTE_DEFAULT_OID" =~ ^[0-9a-fA-F]{40}$ ]]; then
+            echo "::error::Invalid publisher identity or route-time default OID."
+            exit 1
+          fi
+
+          current_default_name="$(gh api "repos/${REPO}" --jq '.default_branch')"
+          current_default_oid="$(gh api "repos/${REPO}/commits/${current_default_name}" --jq '.sha')"
+          if [[ "$current_default_name" != "$ROUTE_DEFAULT_NAME" ||
+                "$current_default_oid" != "$ROUTE_DEFAULT_OID" ]]; then
+            echo "::error::Default branch name or OID changed after routing; retry from current state."
+            exit 1
+          fi
+
+          scope_tsv="$(gh pr view "$TARGET_PR" --repo "$REPO" \
+            --json state,baseRefName,headRefOid,isDraft,isCrossRepository \
+            --jq '[.state, .baseRefName, .headRefOid, .isDraft, .isCrossRepository] | @tsv')"
+          IFS=$'\t' read -r state baseRefName headRefOid isDraft isCrossRepository <<< "$scope_tsv"
+          if [[ "$state" != "OPEN" || "$baseRefName" != "$current_default_name" ]]; then
+            echo "::notice::Skipping a PR that is no longer open against the current default branch."
+            {
+              echo "default-oid=$current_default_oid"
+              echo "admitted=false"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          {
+            echo "default-oid=$current_default_oid"
+            echo "admitted=true"
+            echo "state=$state"
+            echo "head=$headRefOid"
+            echo "draft=$isDraft"
+            echo "cross-repository=$isCrossRepository"
           } >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
-        if: steps.decide.outputs.mode != 'skip'
+        if: steps.scope.outputs.admitted == 'true'
         with:
-          ref: ${{ steps.decide.outputs.checkout_ref }}
+          ref: ${{ steps.scope.outputs.default-oid }}
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
-        if: steps.decide.outputs.mode != 'skip'
+        if: steps.scope.outputs.admitted == 'true'
         with:
           node-version: '20'
 
-      - name: Refresh one PR inbox
-        if: steps.decide.outputs.mode == 'assert'
+      - name: Recompute and publish the Agent Inbox
+        if: steps.scope.outputs.admitted == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          TARGET_PR: ${{ steps.decide.outputs.pr }}
+          TARGET_PR: ${{ matrix.pr }}
+          REFRESH_ONLY: ${{ matrix.refresh }}
+        shell: bash
         run: |
           set -euo pipefail
-          if [[ ! -f scripts/pr-agent-inbox.mjs ]]; then
-            echo "::notice::PR Agent Inbox script is not installed on the checked-out base ref yet; skipping bootstrap refresh."
-            exit 0
+          args=(
+            --repo "$GITHUB_REPOSITORY"
+            --pr "$TARGET_PR"
+            --assert-no-agent-attention
+            --update-comment
+            --ensure-label
+            --sync-label
+            --publish-status
+            --ignore-check "agent-inbox-clean"
+            --ignore-check "PR Agent Inbox Signal / Agent inbox"
+          )
+          if [[ "$REFRESH_ONLY" == "true" ]]; then
+            args+=(--refresh)
           fi
-          if ! node scripts/pr-agent-inbox.mjs --help 2>&1 | grep -q -- '--assert-no-agent-attention'; then
-            echo "::notice::PR Agent Inbox script on the checked-out ref does not support actionable-only assertion yet; skipping bootstrap refresh."
-            exit 0
-          fi
-          node scripts/pr-agent-inbox.mjs \
-            --repo "$GITHUB_REPOSITORY" \
-            --pr "$TARGET_PR" \
-            --assert-no-agent-attention \
-            --update-comment \
-            --ensure-label \
-            --sync-label \
-            --publish-status \
-            --ignore-check "PR Agent Inbox" \
-            --ignore-check "PR Agent Inbox / agent-inbox"
-
-      - name: Refresh open PR inboxes
-        if: steps.decide.outputs.mode == 'sweep'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          if [[ ! -f scripts/pr-agent-inbox.mjs ]]; then
-            echo "::notice::PR Agent Inbox script is not installed on the checked-out base ref yet; skipping bootstrap sweep."
-            exit 0
-          fi
-          if ! node scripts/pr-agent-inbox.mjs --help 2>&1 | grep -q -- '--assert-no-agent-attention'; then
-            echo "::notice::PR Agent Inbox script on the checked-out ref does not support actionable-only assertion yet; skipping bootstrap sweep."
-            exit 0
-          fi
-          pr_list="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json number --jq '.[].number')"
-          if [[ -z "$pr_list" ]]; then
-            echo "No open pull requests to refresh."
-            exit 0
-          fi
-          mapfile -t prs <<< "$pr_list"
-
-          status=0
-          for pr in "${prs[@]}"; do
-            node scripts/pr-agent-inbox.mjs \
-              --repo "$GITHUB_REPOSITORY" \
-              --pr "$pr" \
-              --refresh \
-              --assert-no-agent-attention \
-              --update-comment \
-              --ensure-label \
-              --sync-label \
-              --publish-status \
-              --ignore-check "PR Agent Inbox" \
-              --ignore-check "PR Agent Inbox / agent-inbox" || status=1
-          done
-
-          exit "$status"
+          node scripts/pr-agent-inbox.mjs "${args[@]}"

@@ -730,15 +730,13 @@ function checkName(check) {
 }
 
 function shouldIgnoreCheck(check, ignoreChecks) {
-  const names = [
-    checkName(check),
-    check.workflowName,
-    check.context,
-    check.name,
-    check.checkSuite?.workflowRun?.workflow?.name,
-  ].filter(Boolean).map(normalizeCheckName);
+  const workflowName = check.workflowName ?? check.checkSuite?.workflowRun?.workflow?.name ?? null;
+  const jobName = check.name ?? null;
+  const statusContext = check.context ?? (!workflowName ? check.name : null);
+  const workflowJob = workflowName && jobName ? `${workflowName} / ${jobName}` : null;
 
-  return names.some((name) => ignoreChecks.has(name));
+  return (statusContext && ignoreChecks.statusContexts.has(normalizeCheckName(statusContext)))
+    || (workflowJob && ignoreChecks.workflowJobs.has(normalizeCheckName(workflowJob)));
 }
 
 function checkMatchesRequired(check, requiredNames) {
@@ -758,10 +756,14 @@ function checkNameCandidates(check) {
 }
 
 function normalizeIgnoreChecks(values) {
-  return new Set((values ?? []).flatMap((value) => [
-    normalizeCheckName(value),
-    normalizeCheckName(`${value} / Agent inbox`),
-  ]));
+  const statusContexts = new Set();
+  const workflowJobs = new Set();
+  for (const value of values ?? []) {
+    const normalized = normalizeCheckName(value);
+    if (normalized.includes(' / ')) workflowJobs.add(normalized);
+    else statusContexts.add(normalized);
+  }
+  return { statusContexts, workflowJobs };
 }
 
 function normalizeCheckName(value) {

@@ -40,6 +40,19 @@ rejection path.
   help output, and the Level-3 rejected verifier path.
 - `.github/workflows/validate-ledger.yml` checks example ledger records and the
   reference script unit suites.
+- `.github/workflows/pr-agent-inbox-signal.yml` is a permissionless hosted
+  no-op for review and review-comment events. Its completed run asks the
+  default-branch-owned publisher to re-read current GitHub state; no PR code or
+  producer artifacts cross that boundary.
+- `.github/workflows/pr-agent-inbox.yml` updates the inbox only from exact PR
+  lifecycle events, an authorized exact `/agent-inbox refresh` comment, a
+  default-branch manual dispatch, or completed runs from the four validation
+  workflows and the signal workflow. It has no schedule, status, or check-run
+  trigger. Validation-workflow runs caused by a default-branch push are skipped
+  before runner allocation. Unauthorized refreshes and PRs that are no longer
+  open against the current default branch are clean no-ops. A blank manual
+  dispatch performs a draft-inclusive, default-base sweep and refuses more than
+  100 open PRs rather than publishing a partial result.
 - `.github/workflows/weekly-quality-report.yml` runs every Monday, uploads
   JSON/Markdown report artifacts, comments on a standing report issue, opens or
   updates a problem issue when checks fail, and then fails the workflow when
@@ -52,3 +65,10 @@ discovery currently exposes portability failures around temporary git identity,
 POSIX path expectations, chmod/unreadable-file assumptions, and cp1252 console
 encoding. Treat those as separate portability work; do not use them to weaken
 the repo harness gate.
+
+GitHub can suppress or delay fork review workflows, and Actions has no
+review-thread trigger. Native GitHub review gates remain authoritative. The
+inbox converges through an admitted signal run, the exact authorized refresh
+comment, a PR-specific manual dispatch, the bounded blank dispatch, or the next
+admitted event; it does not claim instantaneous convergence for every fork
+review or thread change.

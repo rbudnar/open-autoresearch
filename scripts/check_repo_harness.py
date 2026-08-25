@@ -51,10 +51,12 @@ REQUIRED_SURFACES = [
     "scripts/pr-agent-inbox.mjs",
     "scripts/pr-agent-inbox.test.mjs",
     "scripts/tests/test_bump_protocol_version.py",
+    "scripts/tests/test_check_repo_harness.py",
     "scripts/tests/test_harness_metrics.py",
     "scripts/tests/test_quality_gate.py",
     "scripts/tests/test_weekly_quality_report.py",
     ".github/workflows/protect-protocol.yml",
+    ".github/workflows/pr-agent-inbox-signal.yml",
     ".github/workflows/pr-agent-inbox.yml",
     ".github/workflows/weekly-quality-report.yml",
 ]
@@ -411,11 +413,24 @@ def check_ci_wiring() -> None:
 
 def check_pr_agent_inbox_wiring() -> None:
     for path, snippets in {
+        ".github/workflows/pr-agent-inbox-signal.yml": [
+            "name: PR Agent Inbox Signal",
+            "pull_request_review:",
+            "pull_request_review_comment:",
+            "name: Agent inbox",
+            "runs-on: ubuntu-latest",
+            "permissions: {}",
+        ],
         ".github/workflows/pr-agent-inbox.yml": [
-            "pull-requests: write",
+            "pull_request_target:",
+            "issue_comment:",
+            "workflow_run:",
+            "workflow_dispatch:",
+            "PR Agent Inbox Signal",
+            "runs-on: ubuntu-latest",
+            "cancel-in-progress: false",
             "actions: read",
-            "status:",
-            "check_run:",
+            "pull-requests: write",
             "--assert-no-agent-attention",
         ],
         "scripts/pr-agent-inbox.mjs": [
@@ -434,6 +449,20 @@ def check_pr_agent_inbox_wiring() -> None:
         for snippet in snippets:
             if snippet not in text:
                 fail(f"{path} must reference {snippet!r}")
+
+    for path in [
+        ".github/workflows/pr-agent-inbox-signal.yml",
+        ".github/workflows/pr-agent-inbox.yml",
+    ]:
+        text = read(path)
+        for pattern, label in [
+            (r"^  schedule:\s*", "schedule:"),
+            (r"^  status:\s*", "status:"),
+            (r"^  check_run:\s*", "check_run:"),
+            (r"^\s*runs-on:\s*.*\bself-hosted\b", "self-hosted runner"),
+        ]:
+            if re.search(pattern, text, re.MULTILINE):
+                fail(f"{path} must not define {label!r}")
 
 
 def main(argv: list[str] | None = None) -> int:
